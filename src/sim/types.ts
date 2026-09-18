@@ -1,0 +1,1 @@
+export type ForceFamily="regular"|"asymmetric"|"paramilitary"|"contractor";export type PoliticalVector={stateControl:number;centralization:number;militaryInfluence:number;nationalism:number;socialConservatism:number;personalism:number};export type Formation={id:string,name:string,family:ForceFamily,personnel:number,readiness:number,supply:number};
