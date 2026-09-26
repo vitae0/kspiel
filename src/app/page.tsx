@@ -8,10 +8,20 @@ const SPEED_HOURS=[0,1,4,12];
 function clamp(v:number,min:number,max:number){return Math.max(min,Math.min(max,v))}
 function pct(v:number){return Math.round(clamp(v,0,100))}
 
+const DIRECT_COMBAT_KINDS=new Set(["infantry","mechanized","armor","recon","engineer"] as const);
+
+function segmentContact(ax:number,ay:number,bx:number,by:number,px:number,py:number){
+  const dx=bx-ax,dy=by-ay,len=dx*dx+dy*dy;
+  if(!len)return{distance:Math.hypot(px-ax,py-ay),t:0};
+  const t=clamp(((px-ax)*dx+(py-ay)*dy)/len,0,1);
+  return{distance:Math.hypot(px-(ax+t*dx),py-(ay+t*dy)),t};
+}
+
 function simulate(units:Formation[],hours:number){
   const next=units.map(u=>{
     const terrain=TERRAIN_RULES[terrainAt(u.x,u.y).terrain];
     const n={...u,order:u.order?{...u.order}:undefined};
+
     if(u.order?.type==="dig"){
       n.entrenchment=clamp(u.entrenchment+hours*1.15,0,100);
       n.organization=clamp(u.organization+hours*.22,0,100);
@@ -20,14 +30,31 @@ function simulate(units:Formation[],hours:number){
       n.supply=clamp(u.supply+hours*2.2,0,100);
       n.fuel=clamp(u.fuel+hours*1.5,0,100);
       n.organization=clamp(u.organization+hours*.7,0,100);
+    }else if(u.order?.type==="fire"){
+      n.entrenchment=clamp(u.entrenchment+hours*.025,0,100);
     }else if(u.order&&u.order.targetX!==undefined&&u.order.targetY!==undefined){
       const dx=u.order.targetX-u.x,dy=u.order.targetY-u.y,dist=Math.hypot(dx,dy);
-      if(dist<5){n.x=u.order.targetX;n.y=u.order.targetY;n.order={type:"defend"}}
-      else if(n.supply>3){
+      if(dist<5){
+        n.x=u.order.targetX;n.y=u.order.targetY;n.order={type:"defend"};
+      }else if(n.supply>3){
         const posture=u.order.type==="assault"?.58:u.order.type==="probe"?.74:1;
         const roadBonus=terrainAt(u.x,u.y).road?1.22:1;
         const travel=Math.min(dist,u.speed*terrain.move*roadBonus*posture*hours*2.15);
-        const nx=u.x+dx/dist*travel,ny=u.y+dy/dist*travel;
+        let nx=u.x+dx/dist*travel,ny=u.y+dy/dist*travel;
+
+        if(DIRECT_COMBAT_KINDS.has(u.kind as any)){
+          const contact=units
+            .filter(v=>v.side!==u.side)
+            .map(v=>({v,...segmentContact(u.x,u.y,nx,ny,v.x,v.y)}))
+            .filter(c=>c.distance<44)
+            .sort((a,b)=>a.t-b.t)[0];
+          if(contact){
+            const stopDistance=Math.max(0,travel*contact.t-36);
+            nx=u.x+dx/dist*stopDistance;
+            ny=u.y+dy/dist*stopDistance;
+          }
+        }
+
         if(terrainAt(nx,ny).terrain!=="water"){
           n.x=nx;n.y=ny;
           n.supply=clamp(n.supply-travel*(u.kind==="armor"||u.kind==="mechanized"?.012:.006),0,100);
@@ -40,29 +67,60 @@ function simulate(units:Formation[],hours:number){
       n.organization=clamp(n.organization+hours*.08,0,100);
       n.entrenchment=clamp(n.entrenchment+hours*.04,0,100);
     }
+
     if(n.supply<25)n.organization=clamp(n.organization-hours*.4,0,100);
     n.readiness=clamp(n.organization*.46+n.supply*.3+n.strength*.24,0,100);
     return n;
   });
 
-  const result=next.map(u=>({...u}));
+  const result=next.map(u=>({...u,order:u.order?{...u.order}:undefined}));
+
+  // Direct-combat formations engage automatically only when they physically make contact.
   for(let i=0;i<result.length;i++){
     for(let j=i+1;j<result.length;j++){
       const a=result[i],b=result[j];
       if(a.side===b.side)continue;
       const dist=Math.hypot(a.x-b.x,a.y-b.y);
-      const artilleryRange=a.kind==="artillery"||b.kind==="artillery"?150:48;
-      if(dist>artilleryRange)continue;
-      const def=TERRAIN_RULES[terrainAt(b.x,b.y).terrain].defense;
-      const rangeFactor=dist>55?.28:1;
-      const aPower=(a.softAttack*(1-b.hardness)+a.hardAttack*b.hardness)*(a.organization/100)*(a.supply/100)*rangeFactor;
-      const bPower=(b.softAttack*(1-a.hardness)+b.hardAttack*a.hardness)*(b.organization/100)*(b.supply/100)*rangeFactor;
-      const aLoss=(bPower/Math.max(20,a.defense*def+a.entrenchment*.6))*hours*.13;
-      const bLoss=(aPower/Math.max(20,b.defense*def+b.entrenchment*.6))*hours*.13;
+      if(dist>48)continue;
+
+      const aCan=DIRECT_COMBAT_KINDS.has(a.kind as any);
+      const bCan=DIRECT_COMBAT_KINDS.has(b.kind as any);
+      if(!aCan&&!bCan)continue;
+
+      const aDef=TERRAIN_RULES[terrainAt(a.x,a.y).terrain].defense;
+      const bDef=TERRAIN_RULES[terrainAt(b.x,b.y).terrain].defense;
+      const aPower=aCan?(a.softAttack*(1-b.hardness)+a.hardAttack*b.hardness)*(a.organization/100)*(a.supply/100):0;
+      const bPower=bCan?(b.softAttack*(1-a.hardness)+b.hardAttack*a.hardness)*(b.organization/100)*(b.supply/100):0;
+      const aLoss=(bPower/Math.max(20,a.defense*aDef+a.entrenchment*.6))*hours*.15;
+      const bLoss=(aPower/Math.max(20,b.defense*bDef+b.entrenchment*.6))*hours*.15;
       a.strength=clamp(a.strength-aLoss,0,100);b.strength=clamp(b.strength-bLoss,0,100);
       a.organization=clamp(a.organization-aLoss*1.9,0,100);b.organization=clamp(b.organization-bLoss*1.9,0,100);
     }
   }
+
+  // Artillery never auto-fires. It only attacks while under an explicit FIRE order.
+  for(const gun of result){
+    if(gun.kind!=="artillery"||gun.order?.type!=="fire"||gun.order.targetX===undefined||gun.order.targetY===undefined)continue;
+    const rangeToTarget=Math.hypot(gun.order.targetX-gun.x,gun.order.targetY-gun.y);
+    if(rangeToTarget>380||gun.supply<4||gun.organization<8)continue;
+
+    const target=result
+      .filter(v=>v.side!==gun.side)
+      .map(v=>({v,d:Math.hypot(v.x-gun.order!.targetX!,v.y-gun.order!.targetY!)}))
+      .filter(x=>x.d<78)
+      .sort((a,b)=>a.d-b.d)[0]?.v;
+    if(!target)continue;
+
+    const terrain=TERRAIN_RULES[terrainAt(target.x,target.y).terrain];
+    const rangeFactor=clamp(1-(rangeToTarget-80)/520,.38,1);
+    const power=(gun.softAttack*(1-target.hardness)+gun.hardAttack*target.hardness)*(gun.organization/100)*(gun.supply/100)*rangeFactor;
+    const loss=(power/Math.max(24,target.defense*terrain.defense+target.entrenchment*.7))*hours*.18;
+    target.strength=clamp(target.strength-loss,0,100);
+    target.organization=clamp(target.organization-loss*2.2,0,100);
+    gun.supply=clamp(gun.supply-hours*.42,0,100);
+    gun.organization=clamp(gun.organization-hours*.04,0,100);
+  }
+
   return result.filter(u=>u.strength>1);
 }
 
@@ -107,11 +165,37 @@ export default function Home(){
 
   function startOrder(type:OrderType){
     if(!selected.length)return;
+    const selectedNow=units.filter(u=>selected.includes(u.id));
+    const hasDirect=selectedNow.some(u=>DIRECT_COMBAT_KINDS.has(u.kind as any));
+    const hasArtillery=selectedNow.some(u=>u.kind==="artillery");
+
+    if(type==="move"){setPendingOrder(null);return}
+    if((type==="assault"||type==="probe")&&!hasDirect)return;
+    if(type==="fire"&&!hasArtillery)return;
+
     if(type==="dig"||type==="resupply"||type==="defend"){
       setUnits(prev=>prev.map(u=>selected.includes(u.id)?{...u,order:{type}}:u));
       setPendingOrder(null);
     }else setPendingOrder(type);
   }
+
+  useEffect(()=>{
+    const onKey=(e:KeyboardEvent)=>{
+      const el=e.target as HTMLElement|null;
+      if(el?.tagName==="INPUT"||el?.tagName==="TEXTAREA"||el?.isContentEditable)return;
+      const key=e.key.toLowerCase();
+      if(key==="escape"){setPendingOrder(null);return}
+      if(key==="m")startOrder("move");
+      else if(key==="a")startOrder("assault");
+      else if(key==="p")startOrder("probe");
+      else if(key==="f")startOrder("fire");
+      else if(key==="d")startOrder("defend");
+      else if(key==="g")startOrder("dig");
+      else if(key==="r")startOrder("resupply");
+    };
+    window.addEventListener("keydown",onKey);
+    return()=>window.removeEventListener("keydown",onKey);
+  },[selected,units]);
 
   function mapPoint(clientX:number,clientY:number){
     const rect=viewport.current?.getBoundingClientRect();
@@ -121,12 +205,32 @@ export default function Home(){
 
   function issueTarget(e:ReactMouseEvent){
     e.preventDefault();
-    if(!pendingOrder||!selected.length)return;
+    if(!selected.length)return;
     const point=mapPoint(e.clientX,e.clientY);
     if(!point)return;
     const tx=clamp(point.x,0,WORLD_W),ty=clamp(point.y,0,WORLD_H);
     if(terrainAt(tx,ty).terrain==="water")return;
-    setUnits(prev=>prev.map(u=>selected.includes(u.id)?{...u,order:{type:pendingOrder,targetX:tx,targetY:ty}}:u));
+
+    const requested=pendingOrder;
+    setUnits(prev=>prev.map(u=>{
+      if(!selected.includes(u.id))return u;
+
+      // RMB is always movement unless the player deliberately armed an attack order.
+      if(!requested)return{...u,order:{type:"move",targetX:tx,targetY:ty}};
+
+      if(requested==="fire"){
+        return u.kind==="artillery"?{...u,order:{type:"fire",targetX:tx,targetY:ty}}:u;
+      }
+
+      if(requested==="assault"||requested==="probe"){
+        // Artillery attached to an explicit attack order provides fire support instead of walking into the target.
+        if(u.kind==="artillery")return{...u,order:{type:"fire",targetX:tx,targetY:ty}};
+        if(DIRECT_COMBAT_KINDS.has(u.kind as any))return{...u,order:{type:requested,targetX:tx,targetY:ty}};
+        return u;
+      }
+
+      return{...u,order:{type:"move",targetX:tx,targetY:ty}};
+    }));
     setPendingOrder(null);
   }
 
@@ -201,7 +305,7 @@ export default function Home(){
       </div>
 
       <div className="map-hud"><div><span className="dot friendly"/>FRIENDLY {blue.length}</div><div><span className="dot hostile"/>CONTACTS {enemy.length}</div><div>{hovered?TERRAIN_RULES[hovered.terrain].label.toUpperCase()+" · ELEV "+Math.round(hovered.elevation*920)+"m"+(hovered.road?" · ROAD":""):"MOVE CURSOR OVER MAP"}</div><div>ZOOM {Math.round(zoom*100)}%</div></div>
-      {pendingOrder&&<div className="target-banner">{pendingOrder.toUpperCase()} ORDER: RIGHT CLICK DESTINATION <button onClick={()=>setPendingOrder(null)}>CANCEL</button></div>}
+      {pendingOrder&&<div className="target-banner">{pendingOrder.toUpperCase()} ARMED · RMB TARGET <button onClick={()=>setPendingOrder(null)}>ESC / CANCEL</button></div>}
     </div>
 
     <aside className="right-panel">
@@ -209,11 +313,19 @@ export default function Home(){
         <div className="stat-grid"><Stat label="Strength" value={primary.strength}/><Stat label="Organization" value={primary.organization}/><Stat label="Supply" value={primary.supply}/><Stat label="Fuel" value={primary.fuel}/><Stat label="Entrenchment" value={primary.entrenchment}/><Stat label="Readiness" value={primary.readiness}/></div>
         <div className="section-title">COMBAT MODEL</div><div className="numbers"><Row k="Manpower" v={primary.manpower.toLocaleString()}/><Row k="Soft attack" v={String(primary.softAttack)}/><Row k="Hard attack" v={String(primary.hardAttack)}/><Row k="Defense" v={String(primary.defense)}/><Row k="Breakthrough" v={String(primary.breakthrough)}/><Row k="Hardness" v={Math.round(primary.hardness*100)+"%"}/><Row k="Recon" v={String(primary.recon)}/><Row k="Speed" v={primary.speed+" km/h"}/></div>
         <div className="section-title">CURRENT TERRAIN</div>{(()=>{const t=terrainAt(primary.x,primary.y);const r=TERRAIN_RULES[t.terrain];return <div className="terrain-card"><b>{r.label}</b><span>Attack ×{r.attack.toFixed(2)}</span><span>Defense ×{r.defense.toFixed(2)}</span><span>Move ×{r.move.toFixed(2)}</span><span>Supply ×{r.supply.toFixed(2)}</span></div>})()}
-        <div className="section-title">ORDERS</div><div className="orders"><button onClick={()=>startOrder("move")}>MOVE</button><button onClick={()=>startOrder("probe")}>PROBE</button><button onClick={()=>startOrder("assault")}>ASSAULT</button><button onClick={()=>startOrder("defend")}>DEFEND</button><button onClick={()=>startOrder("dig")}>DIG IN</button><button onClick={()=>startOrder("resupply")}>RESUPPLY</button></div>
+        <div className="section-title">ORDERS</div><div className="orders">
+          <button className={!pendingOrder?"active":""} onClick={()=>startOrder("move")}>MOVE <kbd>M</kbd></button>
+          <button disabled={!selectedUnits.some(u=>DIRECT_COMBAT_KINDS.has(u.kind as any))} className={pendingOrder==="assault"?"active":""} onClick={()=>startOrder("assault")}>ASSAULT <kbd>A</kbd></button>
+          <button disabled={!selectedUnits.some(u=>DIRECT_COMBAT_KINDS.has(u.kind as any))} className={pendingOrder==="probe"?"active":""} onClick={()=>startOrder("probe")}>PROBE <kbd>P</kbd></button>
+          <button disabled={!selectedUnits.some(u=>u.kind==="artillery")} className={pendingOrder==="fire"?"active":""} onClick={()=>startOrder("fire")}>FIRE <kbd>F</kbd></button>
+          <button onClick={()=>startOrder("defend")}>DEFEND <kbd>D</kbd></button>
+          <button onClick={()=>startOrder("dig")}>DIG IN <kbd>G</kbd></button>
+          <button onClick={()=>startOrder("resupply")}>RESUPPLY <kbd>R</kbd></button>
+        </div>
       </div>:<div className="empty-inspector"><b>NO FORMATION SELECTED</b><span>Select a friendly counter on the map.</span></div>}
     </aside>
 
-    <footer className="statusbar"><span>SELECT: LMB / SHIFT+LMB</span><span>PAN: DRAG</span><span>ZOOM: WHEEL</span><span>ORDER TARGET: RMB</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
+    <footer className="statusbar"><span>SELECT: LMB / SHIFT+LMB</span><span>PAN: DRAG</span><span>ZOOM: WHEEL</span><span>RMB: MOVE</span><span>A/P/F: ATTACK ORDERS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
   </main>
 }
 
