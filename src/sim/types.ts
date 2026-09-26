@@ -2,9 +2,9 @@ export type ForceFamily="regular"|"asymmetric"|"paramilitary"|"contractor";
 export type PoliticalVector={stateControl:number;centralization:number;militaryInfluence:number;nationalism:number;socialConservatism:number;personalism:number};
 
 export type TerrainKind="water"|"plains"|"forest"|"hills"|"mountain"|"marsh"|"urban";
-export type UnitKind="infantry"|"mechanized"|"armor"|"artillery"|"recon"|"engineer"|"logistics"|"airDefense";
+export type UnitKind="infantry"|"mechanized"|"armor"|"artillery"|"recon"|"engineer"|"logistics"|"reserve";
 export type Side="blue"|"red";
-export type OrderType="move"|"defend"|"assault"|"probe"|"fire"|"resupply"|"dig";
+export type OrderType="move"|"defend"|"assault"|"probe"|"fire"|"resupply"|"dig"|"relieve"|"retreat";
 export type OverlayMode="terrain"|"supply"|"intel";
 
 export type CityState={
@@ -25,6 +25,18 @@ export type TerrainFeature={
   rotation:number;
   seed:number;
   path:string;
+};
+
+
+export type Scenario={
+  seed:number;
+  landPath:string;
+  terrainFeatures:TerrainFeature[];
+  roadRoutes:Array<Array<{x:number;y:number}>>;
+  riverRoutes:Array<Array<{x:number;y:number}>>;
+  cities:CityState[];
+  formations:Formation[];
+  coast:{base:number;amp1:number;amp2:number;amp3:number;f1:number;f2:number;f3:number;p1:number;p2:number};
 };
 
 export type TerrainSample={
