@@ -1,4 +1,4 @@
-import type {Formation,TerrainFeature,TerrainKind,TerrainSample,UnitKind} from "./types";
+import type {CityState,Formation,TerrainFeature,TerrainKind,TerrainSample,UnitKind} from "./types";
 
 export const WORLD_W=2080;
 export const WORLD_H=1360;
@@ -26,6 +26,12 @@ export const STRATEGIC_SITES=[
   {x:965,y:1080,name:"Serev"},
   {x:1665,y:1115,name:"Port Vesta"}
 ];
+
+export const INITIAL_CITIES:CityState[]=STRATEGIC_SITES.map(site=>({
+  ...site,
+  owner:site.x<1000?"blue":"red",
+  capture:0
+}));
 
 export const ROAD_ROUTES=[
   [{x:300,y:290},{x:520,y:390},{x:705,y:540},{x:1010,y:680},{x:1475,y:760},{x:1740,y:650}],
@@ -165,6 +171,16 @@ export const INITIAL_FORMATIONS:Formation[]=[
   unit("b10","6th Logistics Command","blue","logistics",320,610,{supply:100}),
   unit("b11","9th Air Defense","blue","airDefense",545,310),
   unit("b12","31st Infantry","blue","infantry",700,825),
+  unit("b13","42nd Infantry","blue","infantry",355,455),
+  unit("b14","8th Armored Brigade","blue","armor",610,645,{fuel:82}),
+  unit("b15","15th Mechanized","blue","mechanized",740,610),
+  unit("b16","33rd Field Artillery","blue","artillery",520,875),
+  unit("b17","10th Recon Group","blue","recon",760,455),
+  unit("b18","17th Engineers","blue","engineer",640,930),
+  unit("b19","24th Infantry","blue","infantry",350,860),
+  unit("b20","11th Logistics Command","blue","logistics",410,1020,{supply:100}),
+  unit("b21","14th Air Defense","blue","airDefense",610,1015),
+  unit("b22","2nd Reserve Infantry","blue","infantry",285,735,{organization:74}),
 
   unit("r1","41st Rifle Division","red","infantry",1240,430,{entrenchment:41}),
   unit("r2","8th Tank Brigade","red","armor",1360,555,{experience:55}),
@@ -176,5 +192,16 @@ export const INITIAL_FORMATIONS:Formation[]=[
   unit("r8","2nd Guards Armor","red","armor",1600,885,{experience:64}),
   unit("r9","19th Rifle Division","red","infantry",1325,925),
   unit("r10","7th Logistics Command","red","logistics",1710,720,{supply:100}),
-  unit("r11","11th Air Defense","red","airDefense",1490,590)
+  unit("r11","11th Air Defense","red","airDefense",1490,590),
+  unit("r12","27th Rifle Division","red","infantry",1560,520,{entrenchment:28}),
+  unit("r13","12th Mechanized","red","mechanized",1640,650),
+  unit("r14","6th Tank Brigade","red","armor",1760,790,{fuel:80}),
+  unit("r15","9th Artillery Group","red","artillery",1515,900),
+  unit("r16","18th Rifle Division","red","infantry",1810,565),
+  unit("r17","4th Recon Battalion","red","recon",1690,980),
+  unit("r18","20th Engineers","red","engineer",1530,1040),
+  unit("r19","13th Artillery Group","red","artillery",1825,1010),
+  unit("r20","25th Rifle Division","red","infantry",1370,1110,{entrenchment:30}),
+  unit("r21","9th Logistics Command","red","logistics",1880,820,{supply:100}),
+  unit("r22","15th Air Defense","red","airDefense",1750,1180)
 ];
