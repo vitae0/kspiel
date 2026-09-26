@@ -270,7 +270,19 @@ export default function Home(){
   const [zoom,setZoom]=useState(.78);
   const [hovered,setHovered]=useState<TerrainSample|null>(null);
   const [warResult,setWarResult]=useState<Side|null>(null);
-  const drag=useRef<{x:number;y:number;px:number;py:number}|null>(null);
+  const drag=useRef<{
+    mode:"pan"|"box"|"front";
+    startClientX:number;
+    startClientY:number;
+    lastClientX:number;
+    lastClientY:number;
+    px:number;
+    py:number;
+    moved:boolean;
+  }|null>(null);
+  const suppressContextMenu=useRef(false);
+  const [selectionBox,setSelectionBox]=useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
+  const [frontPreview,setFrontPreview]=useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
   const viewport=useRef<HTMLDivElement>(null);
   const citiesRef=useRef<CityState[]>(INITIAL_CITIES);
   const warResultRef=useRef<Side|null>(null);
@@ -400,6 +412,10 @@ export default function Home(){
 
   function issueTarget(e:ReactMouseEvent){
     e.preventDefault();
+    if(suppressContextMenu.current){
+      suppressContextMenu.current=false;
+      return;
+    }
     if(!selected.length)return;
     if(pendingOrder==="assault"||pendingOrder==="fire")return;
 
@@ -454,20 +470,146 @@ export default function Home(){
     setPan(boundedPan({x:mx-wx*next,y:my-wy*next},next));
   }
 
+  function viewportPoint(clientX:number,clientY:number){
+    const rect=viewport.current?.getBoundingClientRect();
+    if(!rect)return null;
+    return{x:clientX-rect.left,y:clientY-rect.top};
+  }
+
+  function nearestLandPoint(x:number,y:number){
+    const cx=clamp(x,2,WORLD_W-2),cy=clamp(y,2,WORLD_H-2);
+    if(terrainAt(cx,cy).terrain!=="water")return{x:cx,y:cy};
+    for(let radius=12;radius<=120;radius+=12){
+      for(let i=0;i<16;i++){
+        const a=i/16*Math.PI*2;
+        const nx=clamp(cx+Math.cos(a)*radius,2,WORLD_W-2);
+        const ny=clamp(cy+Math.sin(a)*radius,2,WORLD_H-2);
+        if(terrainAt(nx,ny).terrain!=="water")return{x:nx,y:ny};
+      }
+    }
+    return{x:cx,y:cy};
+  }
+
+  function deployFront(start:{x:number;y:number},end:{x:number;y:number}){
+    if(selected.length<2)return;
+    const dx=end.x-start.x,dy=end.y-start.y,len2=dx*dx+dy*dy;
+    if(len2<100)return;
+
+    const chosen=units.filter(u=>selected.includes(u.id));
+    const ordered=[...chosen].sort((a,b)=>{
+      const ta=((a.x-start.x)*dx+(a.y-start.y)*dy)/len2;
+      const tb=((b.x-start.x)*dx+(b.y-start.y)*dy)/len2;
+      return ta-tb;
+    });
+
+    const targets=new Map<string,{x:number;y:number}>();
+    ordered.forEach((u,i)=>{
+      const t=ordered.length===1?.5:i/(ordered.length-1);
+      const p=nearestLandPoint(start.x+dx*t,start.y+dy*t);
+      targets.set(u.id,p);
+    });
+
+    setUnits(prev=>prev.map(u=>{
+      const target=targets.get(u.id);
+      return target?{...u,order:{type:"move",targetX:target.x,targetY:target.y}}:u;
+    }));
+    setPendingOrder(null);
+  }
+
   function onPointerDown(e:ReactPointerEvent<HTMLDivElement>){
-    if(e.button>1)return;
-    drag.current={x:e.clientX,y:e.clientY,px:pan.x,py:pan.y};
+    if(e.button>2)return;
+    const screen=viewportPoint(e.clientX,e.clientY);
+    if(!screen)return;
+
+    let mode:"pan"|"box"|"front"="pan";
+    if(e.button===2)mode="box";
+    else if(e.button===0&&e.ctrlKey&&selected.length>1)mode="front";
+    else if(e.button!==0)return;
+
+    drag.current={
+      mode,
+      startClientX:e.clientX,
+      startClientY:e.clientY,
+      lastClientX:e.clientX,
+      lastClientY:e.clientY,
+      px:pan.x,
+      py:pan.y,
+      moved:false
+    };
+
+    if(mode==="box")setSelectionBox({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
+    if(mode==="front")setFrontPreview({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
+
     e.currentTarget.setPointerCapture(e.pointerId);
   }
 
   function onPointerMove(e:ReactPointerEvent<HTMLDivElement>){
     const p=mapPoint(e.clientX,e.clientY);
     if(p)setHovered(terrainAt(p.x,p.y));
-    if(!drag.current)return;
-    setPan(boundedPan({x:drag.current.px+e.clientX-drag.current.x,y:drag.current.py+e.clientY-drag.current.y}));
+    const d=drag.current;
+    if(!d)return;
+
+    d.lastClientX=e.clientX;
+    d.lastClientY=e.clientY;
+    if(Math.hypot(e.clientX-d.startClientX,e.clientY-d.startClientY)>6)d.moved=true;
+
+    if(d.mode==="pan"){
+      setPan(boundedPan({x:d.px+e.clientX-d.startClientX,y:d.py+e.clientY-d.startClientY}));
+      return;
+    }
+
+    const screen=viewportPoint(e.clientX,e.clientY);
+    const startScreen=viewportPoint(d.startClientX,d.startClientY);
+    if(!screen||!startScreen)return;
+
+    if(d.mode==="box"){
+      setSelectionBox({x1:startScreen.x,y1:startScreen.y,x2:screen.x,y2:screen.y});
+    }else{
+      setFrontPreview({x1:startScreen.x,y1:startScreen.y,x2:screen.x,y2:screen.y});
+    }
   }
 
-  function onPointerUp(){drag.current=null}
+  function onPointerUp(e:ReactPointerEvent<HTMLDivElement>){
+    const d=drag.current;
+    if(!d)return;
+    drag.current=null;
+
+    if(d.mode==="pan"){
+      if(!d.moved&&e.button===0&&!e.ctrlKey){
+        setSelected([]);
+        setPendingOrder(null);
+      }
+      return;
+    }
+
+    if(d.mode==="box"){
+      setSelectionBox(null);
+      if(!d.moved)return;
+
+      suppressContextMenu.current=true;
+      const a=mapPoint(d.startClientX,d.startClientY);
+      const b=mapPoint(e.clientX,e.clientY);
+      if(!a||!b)return;
+      const minX=Math.min(a.x,b.x),maxX=Math.max(a.x,b.x);
+      const minY=Math.min(a.y,b.y),maxY=Math.max(a.y,b.y);
+      const ids=units.filter(u=>u.side==="blue"&&u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY).map(u=>u.id);
+      setSelected(ids);
+      setPendingOrder(null);
+      return;
+    }
+
+    setFrontPreview(null);
+    if(!d.moved)return;
+    const a=mapPoint(d.startClientX,d.startClientY);
+    const b=mapPoint(e.clientX,e.clientY);
+    if(a&&b)deployFront(a,b);
+  }
+
+  function onPointerCancel(){
+    drag.current=null;
+    setSelectionBox(null);
+    setFrontPreview(null);
+  }
 
   function orderLabel(u:Formation){
     if(!u.order)return"NO ORDERS";
@@ -500,7 +642,7 @@ export default function Home(){
       <section><div className="section-title">ORDER OF BATTLE</div><div className="oob-list">{blue.map(u=><button key={u.id} onClick={()=>setSelected([u.id])} className={selected.includes(u.id)?"selected":""}><span className="oob-code">{UNIT_LABEL[u.kind]}</span><span><b>{u.name}</b><small>{pct(u.strength)} STR · {pct(u.organization)} ORG</small></span></button>)}</div></section>
     </aside>
 
-    <div ref={viewport} className={pendingOrder?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onContextMenu={issueTarget}>
+    <div ref={viewport} className={pendingOrder?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenu={issueTarget}>
       <div className="world" style={{width:WORLD_W,height:WORLD_H,transform:"translate("+pan.x+"px,"+pan.y+"px) scale("+zoom+")"}}>
         <svg className="terrain" width={WORLD_W} height={WORLD_H} viewBox={"0 0 "+WORLD_W+" "+WORLD_H}>
           <defs>
@@ -542,6 +684,16 @@ export default function Home(){
         </svg>}
       </div>
 
+      {selectionBox&&<div className="selection-box" style={{
+        left:Math.min(selectionBox.x1,selectionBox.x2),
+        top:Math.min(selectionBox.y1,selectionBox.y2),
+        width:Math.abs(selectionBox.x2-selectionBox.x1),
+        height:Math.abs(selectionBox.y2-selectionBox.y1)
+      }}/>}
+      {frontPreview&&<svg className="front-preview">
+        <line x1={frontPreview.x1} y1={frontPreview.y1} x2={frontPreview.x2} y2={frontPreview.y2}/>
+      </svg>}
+
       <div className="map-hud">
         <div><span className="dot friendly"/>FRIENDLY {blue.length}</div>
         <div><span className="dot hostile"/>CONTACTS {enemy.length}</div>
@@ -573,10 +725,10 @@ export default function Home(){
     </aside>
 
     <footer className="statusbar">
-      <span>SELECT: LMB / SHIFT+LMB</span>
-      <span>RMB GROUND: MOVE</span>
-      <span>RMB UNIT: FOLLOW</span>
-      <span>A/F + RMB ENEMY: TRACK TARGET</span>
+      <span>LMB EMPTY: DESELECT</span>
+      <span>RMB DRAG: BOX SELECT</span>
+      <span>RMB CLICK: MOVE / FOLLOW</span>
+      <span>CTRL+LMB DRAG: FORM FRONT</span>
       <strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong>
     </footer>
   </main>
