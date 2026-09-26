@@ -17,12 +17,12 @@ function timeLabel(hour:number){
   return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0");
 }
 
-function enemyAI(units:Formation[]){
+function enemyAI(units:Formation[]):Formation[]{
   const blue=units.filter(u=>u.side==="blue");
   const red=units.filter(u=>u.side==="red");
   if(!blue.length)return units;
 
-  return units.map(u=>{
+  return units.map((u):Formation=>{
     if(u.side!=="red")return u;
 
     const nearestBlue=blue
@@ -59,7 +59,7 @@ function enemyAI(units:Formation[]){
       if(Math.hypot(tx-u.x,ty-u.y)>55&&terrainAt(tx,ty).terrain!=="water"){
         return{...u,order:{type:"move" as const,targetX:tx,targetY:ty}};
       }
-      return{...u,order:{type:u.kind==="logistics"?"resupply":"defend"}};
+      return{...u,order:{type:u.kind==="logistics"?"resupply":"defend"}} as Formation;
     }
 
     if(DIRECT_COMBAT_KINDS.has(u.kind as any)){
@@ -94,7 +94,7 @@ function segmentContact(ax:number,ay:number,bx:number,by:number,px:number,py:num
 function simulate(units:Formation[],hours:number){
   const next=units.map(u=>{
     const terrain=TERRAIN_RULES[terrainAt(u.x,u.y).terrain];
-    const n={...u,order:u.order?{...u.order}:undefined};
+    const n:Formation={...u,order:u.order?{...u.order}:undefined};
 
     if(u.order?.type==="dig"){
       n.entrenchment=clamp(u.entrenchment+hours*1.15,0,100);
@@ -147,7 +147,7 @@ function simulate(units:Formation[],hours:number){
     return n;
   });
 
-  const result=next.map(u=>({...u,order:u.order?{...u.order}:undefined}));
+  const result:Formation[]=next.map(u=>({...u,order:u.order?{...u.order}:undefined}));
 
   // Direct-combat formations engage automatically only when they physically make contact.
   for(let i=0;i<result.length;i++){
