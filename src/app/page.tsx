@@ -4,9 +4,79 @@ import {useEffect,useRef,useState,type MouseEvent as ReactMouseEvent,type Pointe
 import {INITIAL_FORMATIONS,LAND_PATH,ROAD_ROUTES,RIVER_ROUTES,STRATEGIC_SITES,TERRAIN_FEATURES,TERRAIN_RULES,UNIT_LABEL,WORLD_H,WORLD_W,polylinePath,terrainAt} from "@/sim/game";
 import type {Formation,OrderType,OverlayMode,TerrainSample} from "@/sim/types";
 
-const SPEED_HOURS=[0,1,4,12];
+const SPEED_HOURS=[0,.12,.45,1.2];
 function clamp(v:number,min:number,max:number){return Math.max(min,Math.min(max,v))}
 function pct(v:number){return Math.round(clamp(v,0,100))}
+function timeLabel(hour:number){
+  const h=Math.floor(hour)%24;
+  const m=Math.floor((hour-Math.floor(hour))*60);
+  return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0");
+}
+
+function enemyAI(units:Formation[]){
+  const blue=units.filter(u=>u.side==="blue");
+  const red=units.filter(u=>u.side==="red");
+  if(!blue.length)return units;
+
+  return units.map(u=>{
+    if(u.side!=="red")return u;
+
+    const nearestBlue=blue
+      .map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y)}))
+      .sort((a,b)=>a.d-b.d)[0];
+    if(!nearestBlue)return u;
+
+    const nearestRedCombat=red
+      .filter(v=>v.id!==u.id&&DIRECT_COMBAT_KINDS.has(v.kind as any))
+      .map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y)}))
+      .sort((a,b)=>a.d-b.d)[0];
+
+    if(u.kind==="artillery"){
+      if(nearestBlue.d<=360&&u.supply>12&&u.organization>18){
+        return {...u,order:{type:"fire" as const,targetX:nearestBlue.v.x,targetY:nearestBlue.v.y}};
+      }
+      const anchor=nearestRedCombat?.v;
+      if(anchor){
+        const dx=anchor.x-nearestBlue.v.x,dy=anchor.y-nearestBlue.v.y,len=Math.hypot(dx,dy)||1;
+        const tx=clamp(anchor.x+dx/len*125,180,WORLD_W-50);
+        const ty=clamp(anchor.y+dy/len*125,40,WORLD_H-40);
+        if(terrainAt(tx,ty).terrain!=="water")return{...u,order:{type:"move" as const,targetX:tx,targetY:ty}};
+      }
+      return u;
+    }
+
+    if(u.kind==="logistics"||u.kind==="airDefense"){
+      const anchor=nearestRedCombat?.v;
+      if(!anchor)return u;
+      const dx=anchor.x-nearestBlue.v.x,dy=anchor.y-nearestBlue.v.y,len=Math.hypot(dx,dy)||1;
+      const spacing=u.kind==="logistics"?180:110;
+      const tx=clamp(anchor.x+dx/len*spacing,180,WORLD_W-50);
+      const ty=clamp(anchor.y+dy/len*spacing,40,WORLD_H-40);
+      if(Math.hypot(tx-u.x,ty-u.y)>55&&terrainAt(tx,ty).terrain!=="water"){
+        return{...u,order:{type:"move" as const,targetX:tx,targetY:ty}};
+      }
+      return{...u,order:{type:u.kind==="logistics"?"resupply":"defend"}};
+    }
+
+    if(DIRECT_COMBAT_KINDS.has(u.kind as any)){
+      if(u.organization<24||u.strength<38||u.supply<15){
+        const dx=u.x-nearestBlue.v.x,dy=u.y-nearestBlue.v.y,len=Math.hypot(dx,dy)||1;
+        const tx=clamp(u.x+dx/len*210,180,WORLD_W-45);
+        const ty=clamp(u.y+dy/len*210,40,WORLD_H-40);
+        if(terrainAt(tx,ty).terrain!=="water")return{...u,order:{type:"move" as const,targetX:tx,targetY:ty}};
+        return{...u,order:{type:"defend" as const}};
+      }
+
+      const flank=((u.id.charCodeAt(u.id.length-1)%5)-2)*22;
+      const dx=nearestBlue.v.x-u.x,dy=nearestBlue.v.y-u.y,len=Math.hypot(dx,dy)||1;
+      const tx=clamp(nearestBlue.v.x-dy/len*flank,180,WORLD_W-45);
+      const ty=clamp(nearestBlue.v.y+dx/len*flank,40,WORLD_H-40);
+      return{...u,order:{type:"assault" as const,targetX:tx,targetY:ty}};
+    }
+
+    return u;
+  });
+}
 
 const DIRECT_COMBAT_KINDS=new Set(["infantry","mechanized","armor","recon","engineer"] as const);
 
@@ -18,7 +88,8 @@ function segmentContact(ax:number,ay:number,bx:number,by:number,px:number,py:num
 }
 
 function simulate(units:Formation[],hours:number){
-  const next=units.map(u=>{
+  const commanded=enemyAI(units);
+  const next=commanded.map(u=>{
     const terrain=TERRAIN_RULES[terrainAt(u.x,u.y).terrain];
     const n={...u,order:u.order?{...u.order}:undefined};
 
@@ -91,8 +162,10 @@ function simulate(units:Formation[],hours:number){
       const bDef=TERRAIN_RULES[terrainAt(b.x,b.y).terrain].defense;
       const aPower=aCan?(a.softAttack*(1-b.hardness)+a.hardAttack*b.hardness)*(a.organization/100)*(a.supply/100):0;
       const bPower=bCan?(b.softAttack*(1-a.hardness)+b.hardAttack*a.hardness)*(b.organization/100)*(b.supply/100):0;
-      const aLoss=(bPower/Math.max(20,a.defense*aDef+a.entrenchment*.6))*hours*.15;
-      const bLoss=(aPower/Math.max(20,b.defense*bDef+b.entrenchment*.6))*hours*.15;
+      const aPosture=a.order?.type==="assault"?1.22:a.order?.type==="probe"?.76:1;
+      const bPosture=b.order?.type==="assault"?1.22:b.order?.type==="probe"?.76:1;
+      const aLoss=(bPower*bPosture/Math.max(20,a.defense*aDef+a.entrenchment*.6))*hours*.72;
+      const bLoss=(aPower*aPosture/Math.max(20,b.defense*bDef+b.entrenchment*.6))*hours*.72;
       a.strength=clamp(a.strength-aLoss,0,100);b.strength=clamp(b.strength-bLoss,0,100);
       a.organization=clamp(a.organization-aLoss*1.9,0,100);b.organization=clamp(b.organization-bLoss*1.9,0,100);
     }
@@ -114,7 +187,7 @@ function simulate(units:Formation[],hours:number){
     const terrain=TERRAIN_RULES[terrainAt(target.x,target.y).terrain];
     const rangeFactor=clamp(1-(rangeToTarget-80)/520,.38,1);
     const power=(gun.softAttack*(1-target.hardness)+gun.hardAttack*target.hardness)*(gun.organization/100)*(gun.supply/100)*rangeFactor;
-    const loss=(power/Math.max(24,target.defense*terrain.defense+target.entrenchment*.7))*hours*.18;
+    const loss=(power/Math.max(24,target.defense*terrain.defense+target.entrenchment*.7))*hours*.52;
     target.strength=clamp(target.strength-loss,0,100);
     target.organization=clamp(target.organization-loss*2.2,0,100);
     gun.supply=clamp(gun.supply-hours*.42,0,100);
@@ -152,7 +225,7 @@ export default function Home(){
       const hours=SPEED_HOURS[speed];
       setUnits(prev=>simulate(prev,hours));
       setHour(prev=>{const total=prev+hours;if(total>=24){setDay(d=>d+Math.floor(total/24));return total%24}return total});
-    },900);
+    },100);
     return()=>window.clearInterval(id);
   },[running,speed]);
 
@@ -268,7 +341,7 @@ export default function Home(){
   return <main className="game-shell">
     <header className="topbar">
       <div className="brand"><span className="brand-mark">K</span><div><b>KSPIEL</b><small>NORTHERN FRONT / OPERATION IRON VEIL</small></div></div>
-      <div className="theater-state"><span>DAY {day}</span><strong>{String(hour).padStart(2,"0")}:00</strong><span className={running?"live":"paused"}>{running?"RUNNING":"PAUSED"}</span></div>
+      <div className="theater-state"><span>DAY {day}</span><strong>{timeLabel(hour)}</strong><span className={running?"live":"paused"}>{running?"RUNNING":"PAUSED"}</span></div>
       <div className="global-metrics">
         <div><small>SUPPLY</small><b>{pct(averageSupply)}%</b></div><div><small>ORG</small><b>{pct(averageOrg)}%</b></div><div><small>CP</small><b>47</b></div><div><small>INTEL</small><b>62%</b></div>
       </div>
