@@ -7,6 +7,14 @@ export type Side="blue"|"red";
 export type OrderType="move"|"defend"|"assault"|"probe"|"fire"|"resupply"|"dig";
 export type OverlayMode="terrain"|"supply"|"intel";
 
+export type CityState={
+  name:string;
+  x:number;
+  y:number;
+  owner:Side;
+  capture:number;
+};
+
 export type TerrainFeature={
   id:string;
   terrain:Exclude<TerrainKind,"water"|"plains"|"urban">;
@@ -55,5 +63,6 @@ export type Formation={
     type:OrderType;
     targetX?:number;
     targetY?:number;
+    targetUnitId?:string;
   };
 };
