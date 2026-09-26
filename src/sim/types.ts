@@ -7,12 +7,23 @@ export type Side="blue"|"red";
 export type OrderType="move"|"defend"|"assault"|"probe"|"resupply"|"dig";
 export type OverlayMode="terrain"|"supply"|"intel";
 
-export type MapTile={
+export type TerrainFeature={
+  id:string;
+  terrain:Exclude<TerrainKind,"water"|"plains"|"urban">;
+  cx:number;
+  cy:number;
+  rx:number;
+  ry:number;
+  rotation:number;
+  seed:number;
+  path:string;
+};
+
+export type TerrainSample={
   x:number;
   y:number;
   terrain:TerrainKind;
   elevation:number;
-  moisture:number;
   road:boolean;
   objective?:string;
 };
