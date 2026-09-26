@@ -19,7 +19,7 @@ function terrainFill(tile:MapTile,overlay:OverlayMode){
     if(score>.55)return "#746c43";
     return "#75494a";
   }
-  const intel=(tile.x<24?1:tile.x<34?.62:.24)+(tile.road?.08:0);
+  const intel=(tile.x<24?1:tile.x<34?0.62:0.24)+(tile.road?0.08:0);
   if(tile.terrain==="water")return "#243944";
   return intel>.8?"#53605a":intel>.5?"#414b49":"#303737";
 }
