@@ -1,8 +1,7 @@
-import type {Formation,MapTile,TerrainKind,UnitKind} from "./types";
+import type {Formation,TerrainFeature,TerrainKind,TerrainSample,UnitKind} from "./types";
 
-export const MAP_W=52;
-export const MAP_H=34;
-export const TILE=40;
+export const WORLD_W=2080;
+export const WORLD_H=1360;
 
 export const TERRAIN_RULES:Record<TerrainKind,{label:string;move:number;attack:number;defense:number;supply:number}>={
   water:{label:"Water",move:0,attack:0,defense:0,supply:0},
@@ -15,74 +14,128 @@ export const TERRAIN_RULES:Record<TerrainKind,{label:string;move:number;attack:n
 };
 
 export const UNIT_LABEL:Record<UnitKind,string>={
-  infantry:"INF",
-  mechanized:"MECH",
-  armor:"ARM",
-  artillery:"ART",
-  recon:"REC",
-  engineer:"ENG",
-  logistics:"LOG",
-  airDefense:"ADA"
+  infantry:"INF",mechanized:"MECH",armor:"ARM",artillery:"ART",recon:"REC",engineer:"ENG",logistics:"LOG",airDefense:"ADA"
 };
 
-const sites=[
-  {x:8,y:8,name:"Varen"},
-  {x:17,y:14,name:"Orlov Crossing"},
-  {x:28,y:7,name:"Karsen"},
-  {x:37,y:19,name:"Drey Basin"},
-  {x:44,y:10,name:"Helmstadt"},
-  {x:24,y:27,name:"Serev"},
-  {x:42,y:28,name:"Port Vesta"}
+export const STRATEGIC_SITES=[
+  {x:390,y:300,name:"Varen"},
+  {x:705,y:540,name:"Orlov Crossing"},
+  {x:1110,y:300,name:"Karsen"},
+  {x:1475,y:760,name:"Drey Basin"},
+  {x:1730,y:405,name:"Helmstadt"},
+  {x:965,y:1080,name:"Serev"},
+  {x:1665,y:1115,name:"Port Vesta"}
 ];
 
-function hash(x:number,y:number,seed=7331){
-  let n=x*374761393+y*668265263+seed*1442695041;
-  n=(n^(n>>13))*1274126177;
-  return ((n^(n>>16))>>>0)/4294967295;
+export const ROAD_ROUTES=[
+  [{x:300,y:290},{x:520,y:390},{x:705,y:540},{x:1010,y:680},{x:1475,y:760},{x:1740,y:650}],
+  [{x:390,y:300},{x:730,y:250},{x:1110,y:300},{x:1420,y:365},{x:1730,y:405}],
+  [{x:705,y:540},{x:760,y:830},{x:965,y:1080},{x:1320,y:1100},{x:1665,y:1115}],
+  [{x:1475,y:760},{x:1570,y:930},{x:1665,y:1115}]
+];
+
+export const RIVER_ROUTES=[
+  [{x:820,y:60},{x:790,y:230},{x:840,y:390},{x:785,y:560},{x:850,y:740},{x:815,y:940},{x:900,y:1180},{x:875,y:1360}],
+  [{x:1370,y:200},{x:1330,y:360},{x:1380,y:525},{x:1320,y:700},{x:1405,y:910},{x:1430,y:1180}]
+];
+
+function mulberry32(seed:number){
+  return ()=>{let t=seed+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296};
 }
 
-function smooth(t:number){return t*t*(3-2*t)}
-function valueNoise(x:number,y:number){
-  const x0=Math.floor(x),y0=Math.floor(y),fx=smooth(x-x0),fy=smooth(y-y0);
-  const a=hash(x0,y0),b=hash(x0+1,y0),c=hash(x0,y0+1),d=hash(x0+1,y0+1);
-  const u=a+(b-a)*fx;
-  const v=c+(d-c)*fx;
-  return u+(v-u)*fy;
-}
-function fbm(x:number,y:number){
-  let value=0,amp=.56,freq=.085,total=0;
-  for(let i=0;i<5;i++){value+=valueNoise(x*freq,y*freq)*amp;total+=amp;amp*=.52;freq*=2.05}
-  return value/total;
-}
-function nearSite(x:number,y:number){
-  return sites.find(s=>Math.hypot(x-s.x,y-s.y)<1.55);
-}
-function roadScore(x:number,y:number){
-  const diagonal=Math.abs(y-(.46*x+4));
-  const northern=Math.abs(y-(13+Math.sin(x*.22)*2));
-  const eastern=Math.abs(x-(36+Math.sin(y*.28)*3));
-  return Math.min(diagonal,northern,eastern);
+export function polylinePath(points:{x:number;y:number}[]){
+  return points.map((p,i)=>(i?"L ":"M ")+p.x+" "+p.y).join(" ");
 }
 
-export function generateMap(width=MAP_W,height=MAP_H):MapTile[]{
-  const tiles:MapTile[]=[];
-  for(let y=0;y<height;y++){
-    for(let x=0;x<width;x++){
-      const coastBias=(x<4?(.18*(4-x)):0)+(y>29?(.06*(y-29)):0);
-      const elevation=Math.max(0,Math.min(1,fbm(x,y)-coastBias+.08*Math.sin(x*.17)-.05*Math.cos(y*.31)));
-      const moisture=Math.max(0,Math.min(1,fbm(x+91,y-37)+.09*Math.sin((x+y)*.21)));
-      let terrain:TerrainKind="plains";
-      if(elevation<.26)terrain="water";
-      else if(elevation>.74)terrain="mountain";
-      else if(elevation>.61)terrain="hills";
-      else if(moisture>.67&&elevation<.48)terrain="marsh";
-      else if(moisture>.56)terrain="forest";
-      const site=nearSite(x,y);
-      if(site&&terrain!=="water")terrain="urban";
-      tiles.push({x,y,terrain,elevation,moisture,road:terrain!=="water"&&roadScore(x,y)<.5,objective:site?.name});
+function coastX(y:number){
+  return 135+48*Math.sin(y*.0067)+26*Math.sin(y*.017+1.2)+18*Math.cos(y*.031);
+}
+
+export const LAND_PATH=(()=>{
+  const pts:Array<{x:number;y:number}>=[];
+  for(let y=0;y<=WORLD_H;y+=40)pts.push({x:coastX(y),y});
+  return "M "+WORLD_W+" 0 L "+coastX(0)+" 0 "+pts.slice(1).map(p=>"L "+p.x+" "+p.y).join(" ")+" L "+WORLD_W+" "+WORLD_H+" Z";
+})();
+
+function blobPath(cx:number,cy:number,rx:number,ry:number,rotation:number,seed:number){
+  const points:string[]=[];
+  const a=rotation*Math.PI/180;
+  for(let i=0;i<28;i++){
+    const t=i/28*Math.PI*2;
+    const wobble=1+.11*Math.sin(t*3+seed*.13)+.06*Math.sin(t*7+seed*.37)+.035*Math.cos(t*11+seed);
+    const ex=Math.cos(t)*rx*wobble,ey=Math.sin(t)*ry*wobble;
+    const x=cx+ex*Math.cos(a)-ey*Math.sin(a);
+    const y=cy+ex*Math.sin(a)+ey*Math.cos(a);
+    points.push((i?"L ":"M ")+x.toFixed(1)+" "+y.toFixed(1));
+  }
+  return points.join(" ")+" Z";
+}
+
+function makeFeatures():TerrainFeature[]{
+  const rnd=mulberry32(851932);
+  const spec:Array<[TerrainFeature["terrain"],number,[number,number],[number,number]]>=[
+    ["mountain",8,[105,220],[75,160]],
+    ["hills",12,[120,250],[85,190]],
+    ["forest",21,[100,240],[75,180]],
+    ["marsh",7,[120,260],[80,185]]
+  ];
+  const out:TerrainFeature[]=[];
+  let id=0;
+  for(const [terrain,count,rxRange,ryRange] of spec){
+    for(let i=0;i<count;i++){
+      let cx=260+rnd()*(WORLD_W-360),cy=80+rnd()*(WORLD_H-160);
+      if(terrain==="mountain"){cx=760+rnd()*1180;cy=80+rnd()*560}
+      if(terrain==="marsh"){cy=690+rnd()*570}
+      const rx=rxRange[0]+rnd()*(rxRange[1]-rxRange[0]);
+      const ry=ryRange[0]+rnd()*(ryRange[1]-ryRange[0]);
+      const rotation=-55+rnd()*110;
+      const seed=Math.floor(rnd()*10000);
+      out.push({id:"t"+id++,terrain,cx,cy,rx,ry,rotation,seed,path:blobPath(cx,cy,rx,ry,rotation,seed)});
     }
   }
-  return tiles;
+  return out;
+}
+
+export const TERRAIN_FEATURES=makeFeatures();
+
+function inFeature(x:number,y:number,f:TerrainFeature){
+  const a=-f.rotation*Math.PI/180;
+  const dx=x-f.cx,dy=y-f.cy;
+  const lx=dx*Math.cos(a)-dy*Math.sin(a),ly=dx*Math.sin(a)+dy*Math.cos(a);
+  const theta=Math.atan2(ly/f.ry,lx/f.rx);
+  const boundary=1+.11*Math.sin(theta*3+f.seed*.13)+.06*Math.sin(theta*7+f.seed*.37)+.035*Math.cos(theta*11+f.seed);
+  return Math.hypot(lx/f.rx,ly/f.ry)<boundary;
+}
+
+function pointSegmentDistance(x:number,y:number,a:{x:number;y:number},b:{x:number;y:number}){
+  const dx=b.x-a.x,dy=b.y-a.y;
+  const len=dx*dx+dy*dy;
+  if(!len)return Math.hypot(x-a.x,y-a.y);
+  const t=Math.max(0,Math.min(1,((x-a.x)*dx+(y-a.y)*dy)/len));
+  return Math.hypot(x-(a.x+t*dx),y-(a.y+t*dy));
+}
+
+function nearRoad(x:number,y:number){
+  return ROAD_ROUTES.some(route=>route.slice(0,-1).some((p,i)=>pointSegmentDistance(x,y,p,route[i+1])<18));
+}
+
+export function isLand(x:number,y:number){
+  return x>=coastX(y)&&x<=WORLD_W&&y>=0&&y<=WORLD_H;
+}
+
+export function terrainAt(x:number,y:number):TerrainSample{
+  if(!isLand(x,y))return{x,y,terrain:"water",elevation:0,road:false};
+  const city=STRATEGIC_SITES.find(s=>Math.hypot(x-s.x,y-s.y)<42);
+  if(city)return{x,y,terrain:"urban",elevation:.34,road:true,objective:city.name};
+  const priorities:TerrainFeature["terrain"][]=["mountain","marsh","forest","hills"];
+  for(const terrain of priorities){
+    const hit=TERRAIN_FEATURES.find(f=>f.terrain===terrain&&inFeature(x,y,f));
+    if(hit){
+      const elevation=terrain==="mountain"?.88:terrain==="hills"?.63:terrain==="forest"?.46:.3;
+      return{x,y,terrain,elevation,road:nearRoad(x,y)};
+    }
+  }
+  return{x,y,terrain:"plains",elevation:.36+.07*Math.sin(x*.008)+.04*Math.cos(y*.013),road:nearRoad(x,y)};
 }
 
 function unit(id:string,name:string,side:"blue"|"red",kind:UnitKind,x:number,y:number,mods:Partial<Formation>={}):Formation{
@@ -96,39 +149,32 @@ function unit(id:string,name:string,side:"blue"|"red",kind:UnitKind,x:number,y:n
     logistics:{manpower:2100,hardness:.1,softAttack:10,hardAttack:4,defense:18,breakthrough:8,speed:6,recon:12},
     airDefense:{manpower:2800,hardness:.16,softAttack:25,hardAttack:46,defense:42,breakthrough:15,speed:4,recon:20}
   };
-  return {
-    id,name,side,kind,x,y,
-    strength:100,organization:86,supply:92,fuel:kind==="infantry"||kind==="artillery"||kind==="engineer"||kind==="airDefense"?100:84,
-    entrenchment:12,experience:38,readiness:82,movementProgress:0,
-    ...base[kind],...mods
-  };
+  return{id,name,side,kind,x,y,strength:100,organization:86,supply:92,fuel:["infantry","artillery","engineer","airDefense"].includes(kind)?100:84,entrenchment:12,experience:38,readiness:82,movementProgress:0,...base[kind],...mods};
 }
 
 export const INITIAL_FORMATIONS:Formation[]=[
-  unit("b1","1st Guards Infantry","blue","infantry",11,10,{experience:62,entrenchment:24}),
-  unit("b2","3rd Mechanized","blue","mechanized",13,12,{experience:51}),
-  unit("b3","7th Armored Brigade","blue","armor",15,13,{fuel:77,experience:58}),
-  unit("b4","12th Field Artillery","blue","artillery",10,13),
-  unit("b5","4th Recon Group","blue","recon",16,10),
-  unit("b6","2nd Combat Engineers","blue","engineer",12,15),
-  unit("b7","18th Infantry","blue","infantry",9,17),
-  unit("b8","5th Mechanized","blue","mechanized",14,18),
-  unit("b9","21st Artillery","blue","artillery",11,19),
-  unit("b10","6th Logistics Command","blue","logistics",7,15,{supply:100}),
-  unit("b11","9th Air Defense","blue","airDefense",13,8),
-  unit("b12","31st Infantry","blue","infantry",18,20),
+  unit("b1","1st Guards Infantry","blue","infantry",470,390,{experience:62,entrenchment:24}),
+  unit("b2","3rd Mechanized","blue","mechanized",535,475,{experience:51}),
+  unit("b3","7th Armored Brigade","blue","armor",615,520,{fuel:77,experience:58}),
+  unit("b4","12th Field Artillery","blue","artillery",440,520),
+  unit("b5","4th Recon Group","blue","recon",650,385),
+  unit("b6","2nd Combat Engineers","blue","engineer",505,605),
+  unit("b7","18th Infantry","blue","infantry",400,690),
+  unit("b8","5th Mechanized","blue","mechanized",570,735),
+  unit("b9","21st Artillery","blue","artillery",455,790),
+  unit("b10","6th Logistics Command","blue","logistics",320,610,{supply:100}),
+  unit("b11","9th Air Defense","blue","airDefense",545,310),
+  unit("b12","31st Infantry","blue","infantry",700,825),
 
-  unit("r1","41st Rifle Division","red","infantry",31,11,{entrenchment:41}),
-  unit("r2","8th Tank Brigade","red","armor",34,14,{experience:55}),
-  unit("r3","16th Mechanized","red","mechanized",30,17),
-  unit("r4","5th Artillery Group","red","artillery",35,12),
-  unit("r5","22nd Rifle Division","red","infantry",38,18,{entrenchment:52}),
-  unit("r6","3rd Recon Battalion","red","recon",29,9),
-  unit("r7","14th Engineers","red","engineer",36,20),
-  unit("r8","2nd Guards Armor","red","armor",40,22,{experience:64}),
-  unit("r9","19th Rifle Division","red","infantry",33,23),
-  unit("r10","7th Logistics Command","red","logistics",42,18,{supply:100}),
-  unit("r11","11th Air Defense","red","airDefense",37,15)
+  unit("r1","41st Rifle Division","red","infantry",1240,430,{entrenchment:41}),
+  unit("r2","8th Tank Brigade","red","armor",1360,555,{experience:55}),
+  unit("r3","16th Mechanized","red","mechanized",1205,680),
+  unit("r4","5th Artillery Group","red","artillery",1415,470),
+  unit("r5","22nd Rifle Division","red","infantry",1510,735,{entrenchment:52}),
+  unit("r6","3rd Recon Battalion","red","recon",1180,355),
+  unit("r7","14th Engineers","red","engineer",1450,805),
+  unit("r8","2nd Guards Armor","red","armor",1600,885,{experience:64}),
+  unit("r9","19th Rifle Division","red","infantry",1325,925),
+  unit("r10","7th Logistics Command","red","logistics",1710,720,{supply:100}),
+  unit("r11","11th Air Defense","red","airDefense",1490,590)
 ];
-
-export const STRATEGIC_SITES=sites;
