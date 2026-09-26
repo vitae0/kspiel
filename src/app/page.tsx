@@ -91,19 +91,44 @@ function segmentContact(ax:number,ay:number,bx:number,by:number,px:number,py:num
   return{distance:Math.hypot(px-(ax+t*dx),py-(ay+t*dy)),t};
 }
 
+function supplyAccess(u:Formation,units:Formation[]){
+  const sample=terrainAt(u.x,u.y);
+  const nearLogistics=units.some(v=>v.side===u.side&&v.kind==="logistics"&&v.id!==u.id&&Math.hypot(v.x-u.x,v.y-u.y)<120);
+
+  if(sample.objective)return{level:3,label:"SUPPLY NODE",supplyPerHour:3.2,fuelPerHour:2.1};
+  if(sample.road)return{level:2,label:"SUPPLY LINE",supplyPerHour:1.55,fuelPerHour:1.0};
+  if(nearLogistics)return{level:1,label:"LOCAL LOGISTICS",supplyPerHour:.72,fuelPerHour:.45};
+  return{level:0,label:"OUT OF NETWORK",supplyPerHour:0,fuelPerHour:0};
+}
+
 function simulate(units:Formation[],hours:number){
   const next=units.map(u=>{
-    const terrain=TERRAIN_RULES[terrainAt(u.x,u.y).terrain];
+    const sample=terrainAt(u.x,u.y);
+    const terrain=TERRAIN_RULES[sample.terrain];
+    const access=supplyAccess(u,units);
     const n:Formation={...u,order:u.order?{...u.order}:undefined};
+
+    // Supply lines feed units automatically. Cities/nodes are strongest, roads are steady,
+    // nearby logistics provide limited local throughput.
+    if(access.level>0){
+      n.supply=clamp(n.supply+hours*access.supplyPerHour,0,100);
+      if(u.kind==="armor"||u.kind==="mechanized"||u.kind==="recon"||u.kind==="logistics"){
+        n.fuel=clamp(n.fuel+hours*access.fuelPerHour,0,100);
+      }
+    }
 
     if(u.order?.type==="dig"){
       n.entrenchment=clamp(u.entrenchment+hours*1.15,0,100);
       n.organization=clamp(u.organization+hours*.22,0,100);
       n.supply=clamp(u.supply-hours*.035,0,100);
     }else if(u.order?.type==="resupply"){
-      n.supply=clamp(u.supply+hours*2.2,0,100);
-      n.fuel=clamp(u.fuel+hours*1.5,0,100);
-      n.organization=clamp(u.organization+hours*.7,0,100);
+      // RESUPPLY does not conjure supplies out of empty terrain. Off-network it only
+      // redistributes what the formation already has; on a road/node it accelerates intake.
+      const orderSupply=access.level===0?.12:access.level===1?.45:access.level===2?1.35:2.4;
+      const orderFuel=access.level===0?.04:access.level===1?.28:access.level===2?.85:1.45;
+      n.supply=clamp(n.supply+hours*orderSupply,0,100);
+      n.fuel=clamp(n.fuel+hours*orderFuel,0,100);
+      n.organization=clamp(n.organization+hours*(access.level===0?.12:.5),0,100);
     }else if(u.order?.type==="fire"){
       n.entrenchment=clamp(u.entrenchment+hours*.025,0,100);
     }else if(u.order&&u.order.targetX!==undefined&&u.order.targetY!==undefined){
@@ -418,7 +443,7 @@ export default function Home(){
       {primary?<div className="inspector"><div className="unit-heading"><div className="big-counter">{UNIT_LABEL[primary.kind]}</div><div><small>{primary.kind.toUpperCase()} FORMATION</small><h2>{primary.name}</h2><span>{orderLabel(primary)}</span></div></div>
         <div className="stat-grid"><Stat label="Strength" value={primary.strength}/><Stat label="Organization" value={primary.organization}/><Stat label="Supply" value={primary.supply}/><Stat label="Fuel" value={primary.fuel}/><Stat label="Entrenchment" value={primary.entrenchment}/><Stat label="Readiness" value={primary.readiness}/></div>
         <div className="section-title">COMBAT MODEL</div><div className="numbers"><Row k="Manpower" v={primary.manpower.toLocaleString()}/><Row k="Soft attack" v={String(primary.softAttack)}/><Row k="Hard attack" v={String(primary.hardAttack)}/><Row k="Defense" v={String(primary.defense)}/><Row k="Breakthrough" v={String(primary.breakthrough)}/><Row k="Hardness" v={Math.round(primary.hardness*100)+"%"}/><Row k="Recon" v={String(primary.recon)}/><Row k="Speed" v={primary.speed+" km/h"}/></div>
-        <div className="section-title">CURRENT TERRAIN</div>{(()=>{const t=terrainAt(primary.x,primary.y);const r=TERRAIN_RULES[t.terrain];return <div className="terrain-card"><b>{r.label}</b><span>Attack ×{r.attack.toFixed(2)}</span><span>Defense ×{r.defense.toFixed(2)}</span><span>Move ×{r.move.toFixed(2)}</span><span>Supply ×{r.supply.toFixed(2)}</span></div>})()}
+        <div className="section-title">CURRENT TERRAIN</div>{(()=>{const t=terrainAt(primary.x,primary.y);const r=TERRAIN_RULES[t.terrain];const access=supplyAccess(primary,units);return <><div className="terrain-card"><b>{r.label}</b><span>Attack ×{r.attack.toFixed(2)}</span><span>Defense ×{r.defense.toFixed(2)}</span><span>Move ×{r.move.toFixed(2)}</span><span>Supply ×{r.supply.toFixed(2)}</span></div><div className={"supply-access level-"+access.level}><b>{access.label}</b><span>{access.level===0?"Resupply severely limited":access.level===3?"Automatic high-throughput resupply":"Automatic resupply active"}</span></div></>})()}
         <div className="section-title">ORDERS</div><div className="orders">
           <button className={!pendingOrder?"active":""} onClick={()=>startOrder("move")}>MOVE <kbd>M</kbd></button>
           <button disabled={!selectedUnits.some(u=>DIRECT_COMBAT_KINDS.has(u.kind as any))} className={pendingOrder==="assault"?"active":""} onClick={()=>startOrder("assault")}>ASSAULT <kbd>A</kbd></button>
