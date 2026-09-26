@@ -4,7 +4,7 @@ export type PoliticalVector={stateControl:number;centralization:number;militaryI
 export type TerrainKind="water"|"plains"|"forest"|"hills"|"mountain"|"marsh"|"urban";
 export type UnitKind="infantry"|"mechanized"|"armor"|"artillery"|"recon"|"engineer"|"logistics"|"airDefense";
 export type Side="blue"|"red";
-export type OrderType="move"|"defend"|"assault"|"probe"|"resupply"|"dig";
+export type OrderType="move"|"defend"|"assault"|"probe"|"fire"|"resupply"|"dig";
 export type OverlayMode="terrain"|"supply"|"intel";
 
 export type TerrainFeature={
