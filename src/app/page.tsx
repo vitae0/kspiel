@@ -337,7 +337,8 @@ export default function Home(){
     return()=>cancelAnimationFrame(frame);
   },[scenario,running,speed]);
 
-  const activeScenario=scenario;\n  if(!activeScenario)return <main className="game-shell loading-theater">GENERATING THEATER...</main>;
+  const activeScenario=scenario;
+  if(!activeScenario)return <main className="game-shell loading-theater">GENERATING THEATER...</main>;
 
   function selectUnit(e:ReactMouseEvent,u:Formation){
     e.stopPropagation();if(u.side!=="blue")return;
