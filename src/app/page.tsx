@@ -4,7 +4,11 @@ import {useEffect,useRef,useState,type MouseEvent as ReactMouseEvent,type Pointe
 import {INITIAL_FORMATIONS,LAND_PATH,ROAD_ROUTES,RIVER_ROUTES,STRATEGIC_SITES,TERRAIN_FEATURES,TERRAIN_RULES,UNIT_LABEL,WORLD_H,WORLD_W,polylinePath,terrainAt} from "@/sim/game";
 import type {Formation,OrderType,OverlayMode,TerrainSample} from "@/sim/types";
 
-const SPEED_HOURS=[0,.12,.45,1.2];
+const SPEED_MULTIPLIER=[0,1,3,8];
+const SIM_HOURS_PER_REAL_SECOND=1.2;
+const MAX_FRAME_SECONDS=.04;
+const AI_COMMAND_INTERVAL_SECONDS=.45;
+const MOVEMENT_SCALE=3.2;
 function clamp(v:number,min:number,max:number){return Math.max(min,Math.min(max,v))}
 function pct(v:number){return Math.round(clamp(v,0,100))}
 function timeLabel(hour:number){
@@ -88,8 +92,7 @@ function segmentContact(ax:number,ay:number,bx:number,by:number,px:number,py:num
 }
 
 function simulate(units:Formation[],hours:number){
-  const commanded=enemyAI(units);
-  const next=commanded.map(u=>{
+  const next=units.map(u=>{
     const terrain=TERRAIN_RULES[terrainAt(u.x,u.y).terrain];
     const n={...u,order:u.order?{...u.order}:undefined};
 
@@ -110,7 +113,7 @@ function simulate(units:Formation[],hours:number){
       }else if(n.supply>3){
         const posture=u.order.type==="assault"?.58:u.order.type==="probe"?.74:1;
         const roadBonus=terrainAt(u.x,u.y).road?1.22:1;
-        const travel=Math.min(dist,u.speed*terrain.move*roadBonus*posture*hours*2.15);
+        const travel=Math.min(dist,u.speed*terrain.move*roadBonus*posture*hours*MOVEMENT_SCALE);
         let nx=u.x+dx/dist*travel,ny=u.y+dy/dist*travel;
 
         if(DIRECT_COMBAT_KINDS.has(u.kind as any)){
@@ -164,8 +167,8 @@ function simulate(units:Formation[],hours:number){
       const bPower=bCan?(b.softAttack*(1-a.hardness)+b.hardAttack*a.hardness)*(b.organization/100)*(b.supply/100):0;
       const aPosture=a.order?.type==="assault"?1.22:a.order?.type==="probe"?.76:1;
       const bPosture=b.order?.type==="assault"?1.22:b.order?.type==="probe"?.76:1;
-      const aLoss=(bPower*bPosture/Math.max(20,a.defense*aDef+a.entrenchment*.6))*hours*.72;
-      const bLoss=(aPower*aPosture/Math.max(20,b.defense*bDef+b.entrenchment*.6))*hours*.72;
+      const aLoss=(bPower*bPosture/Math.max(20,a.defense*aDef+a.entrenchment*.6))*hours*2.15;
+      const bLoss=(aPower*aPosture/Math.max(20,b.defense*bDef+b.entrenchment*.6))*hours*2.15;
       a.strength=clamp(a.strength-aLoss,0,100);b.strength=clamp(b.strength-bLoss,0,100);
       a.organization=clamp(a.organization-aLoss*1.9,0,100);b.organization=clamp(b.organization-bLoss*1.9,0,100);
     }
@@ -187,7 +190,7 @@ function simulate(units:Formation[],hours:number){
     const terrain=TERRAIN_RULES[terrainAt(target.x,target.y).terrain];
     const rangeFactor=clamp(1-(rangeToTarget-80)/520,.38,1);
     const power=(gun.softAttack*(1-target.hardness)+gun.hardAttack*target.hardness)*(gun.organization/100)*(gun.supply/100)*rangeFactor;
-    const loss=(power/Math.max(24,target.defense*terrain.defense+target.entrenchment*.7))*hours*.52;
+    const loss=(power/Math.max(24,target.defense*terrain.defense+target.entrenchment*.7))*hours*1.45;
     target.strength=clamp(target.strength-loss,0,100);
     target.organization=clamp(target.organization-loss*2.2,0,100);
     gun.supply=clamp(gun.supply-hours*.42,0,100);
@@ -202,7 +205,7 @@ export default function Home(){
   const [selected,setSelected]=useState<string[]>(["b3"]);
   const [overlay,setOverlay]=useState<OverlayMode>("terrain");
   const [pendingOrder,setPendingOrder]=useState<OrderType|null>(null);
-  const [running,setRunning]=useState(false);
+  const [running,setRunning]=useState(true);
   const [speed,setSpeed]=useState(1);
   const [hour,setHour]=useState(6);
   const [day,setDay]=useState(17);
@@ -221,12 +224,42 @@ export default function Home(){
 
   useEffect(()=>{
     if(!running||speed===0)return;
-    const id=window.setInterval(()=>{
-      const hours=SPEED_HOURS[speed];
-      setUnits(prev=>simulate(prev,hours));
-      setHour(prev=>{const total=prev+hours;if(total>=24){setDay(d=>d+Math.floor(total/24));return total%24}return total});
-    },100);
-    return()=>window.clearInterval(id);
+
+    let frame=0;
+    let last=performance.now();
+    let aiElapsed=AI_COMMAND_INTERVAL_SECONDS;
+
+    const tick=(now:number)=>{
+      const realSeconds=Math.min(MAX_FRAME_SECONDS,Math.max(0,(now-last)/1000));
+      last=now;
+      aiElapsed+=realSeconds;
+
+      const simHours=realSeconds*SIM_HOURS_PER_REAL_SECOND*SPEED_MULTIPLIER[speed];
+
+      setUnits(prev=>{
+        let working=prev;
+        if(aiElapsed>=AI_COMMAND_INTERVAL_SECONDS){
+          working=enemyAI(prev);
+          aiElapsed=0;
+        }
+        return simulate(working,simHours);
+      });
+
+      setHour(prev=>{
+        const total=prev+simHours;
+        if(total>=24){
+          const days=Math.floor(total/24);
+          setDay(d=>d+days);
+          return total%24;
+        }
+        return total;
+      });
+
+      frame=requestAnimationFrame(tick);
+    };
+
+    frame=requestAnimationFrame(tick);
+    return()=>cancelAnimationFrame(frame);
   },[running,speed]);
 
   function selectUnit(e:ReactMouseEvent,u:Formation){
