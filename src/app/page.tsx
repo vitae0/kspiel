@@ -1,7 +1,7 @@
 "use client";
 
 import {useEffect,useRef,useState,type MouseEvent as ReactMouseEvent,type PointerEvent as ReactPointerEvent,type WheelEvent as ReactWheelEvent} from "react";
-import {generateScenario,polylinePath,terrainAt,TERRAIN_RULES,UNIT_LABEL,WORLD_H,WORLD_W} from "@/sim/game";
+import {generateScenario,polylinePath,SCENARIO_PRESETS,terrainAt,TERRAIN_RULES,UNIT_LABEL,WORLD_H,WORLD_W} from "@/sim/game";
 import {botControlledSides,createMatchConfig,defaultArmyGroups,localControlledSides} from "@/sim/session";
 import type {AttackPlan,CityState,Formation,FormationShape,OrderType,OverlayMode,Scenario,Side,TerrainSample} from "@/sim/types";
 
@@ -12,8 +12,10 @@ const SIM_TICK_MS=100;
 const AI_COMMAND_INTERVAL_SECONDS=.55;
 const MOVEMENT_SCALE=4.2;
 const RETREAT_SUPPLY_MIN=42;
-const DIRECT_COMBAT_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","armor","recon","engineer"]);
-const CAPTURE_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","engineer"]);
+const DIRECT_COMBAT_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","armor","tank","cavalry","mountaineer","recon","engineer"]);
+const CAPTURE_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","tank","cavalry","mountaineer","engineer"]);
+const ARTILLERY_KINDS=new Set<Formation["kind"]>(["artillery","heavy_artillery"]);
+const MOTORIZED_KINDS=new Set<Formation["kind"]>(["armor","tank","mechanized","recon","logistics"]);
 const MATCH_CONFIG=createMatchConfig("singleplayer","local");
 const LOCAL_SIDES=new Set(localControlledSides(MATCH_CONFIG,"local"));
 const BOT_SIDES=botControlledSides(MATCH_CONFIG);
@@ -45,20 +47,68 @@ function retreatDestination(u:Formation,units:Formation[],cities:CityState[]){
   return log?{x:log.x,y:log.y}:{x:u.x,y:u.y};
 }
 
-function supplyAccess(scenario:Scenario,u:Formation,units:Formation[],cities:CityState[]){
+type SupplyNetwork=Map<string,number>;
+
+function routeDistance(route:{x:number;y:number}[],x:number,y:number){
+  let best=Infinity;
+  for(let i=0;i<route.length-1;i++)best=Math.min(best,segmentContact(route[i].x,route[i].y,route[i+1].x,route[i+1].y,x,y).distance);
+  return best;
+}
+
+function routeCutForSide(route:{x:number;y:number}[],side:Side,units:Formation[]){
+  return units.some(u=>u.side!==side&&DIRECT_COMBAT_KINDS.has(u.kind)&&u.strength>8&&routeDistance(route,u.x,u.y)<88);
+}
+
+function nearestCityTo(point:{x:number;y:number},cities:CityState[]){
+  return cities.map(c=>({c,d:Math.hypot(c.x-point.x,c.y-point.y)})).sort((a,b)=>a.d-b.d)[0]?.c;
+}
+
+function computeSupplyNetwork(scenario:Scenario,units:Formation[],cities:CityState[]):SupplyNetwork{
+  const adjacency=new Map<string,Set<string>>();
+  for(const city of cities)adjacency.set(city.name,new Set());
+  for(const route of scenario.roadRoutes){
+    const start=nearestCityTo(route[0],cities),end=nearestCityTo(route[route.length-1],cities);
+    if(!start||!end||start.name===end.name||start.owner!==end.owner||routeCutForSide(route,start.owner,units))continue;
+    adjacency.get(start.name)?.add(end.name);adjacency.get(end.name)?.add(start.name);
+  }
+  const out:SupplyNetwork=new Map(),seen=new Set<string>();
+  for(const city of cities){
+    if(seen.has(city.name))continue;
+    const stack=[city.name],component:string[]=[];
+    while(stack.length){
+      const name=stack.pop()!;if(seen.has(name))continue;
+      const node=cities.find(c=>c.name===name);if(!node||node.owner!==city.owner)continue;
+      seen.add(name);component.push(name);
+      for(const next of adjacency.get(name)??[])if(!seen.has(next))stack.push(next);
+    }
+    const capacity=Math.min(3,Math.max(1,component.length));
+    for(const name of component)out.set(name,capacity);
+  }
+  return out;
+}
+
+function supplyAccess(scenario:Scenario,u:Formation,units:Formation[],cities:CityState[],network=computeSupplyNetwork(scenario,units,cities)){
   const sample=terrainAt(scenario,u.x,u.y);
   const city=sample.objective?cities.find(c=>c.name===sample.objective):undefined;
-  const connectedCity=cities.some(c=>c.owner===u.side&&Math.hypot(c.x-u.x,c.y-u.y)<1250);
+  const ownedCities=cities.filter(c=>c.owner===u.side);
+  const nearest=ownedCities.map(c=>({c,d:Math.hypot(c.x-u.x,c.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
+  const roadAlive=sample.road&&scenario.roadRoutes.some(route=>routeDistance(route,u.x,u.y)<36&&!routeCutForSide(route,u.side,units));
   const relay=units
     .filter(v=>v.side===u.side&&v.kind==="logistics"&&v.id!==u.id&&v.supply>30)
     .map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y),range:320+v.supply*1.3}))
     .filter(x=>x.d<x.range)
     .sort((a,b)=>a.d-b.d)[0];
 
-  if(city?.owner===u.side)return{level:3,label:"OWNED SUPPLY NODE",supplyPerHour:2.2,fuelPerHour:1.55,range:0};
-  if(sample.road&&(connectedCity||relay))return{level:2,label:relay&&!connectedCity?"LOGISTICS-EXTENDED LINE":"ACTIVE SUPPLY LINE",supplyPerHour:.9,fuelPerHour:.62,range:relay?.range??0};
-  if(relay)return{level:1,label:"MOBILE LOGISTICS RELAY",supplyPerHour:.38,fuelPerHour:.25,range:relay.range};
-  return{level:0,label:city?"HOSTILE SUPPLY NODE":"OUT OF NETWORK",supplyPerHour:0,fuelPerHour:0,range:0};
+  if(city?.owner===u.side){
+    const capacity=network.get(city.name)??1;
+    return{level:capacity,label:capacity===1?"ISOLATED CITY SUPPLY":"CITY NETWORK ×"+capacity,supplyPerHour:.62+capacity*.56,fuelPerHour:.38+capacity*.4,range:0};
+  }
+  if(roadAlive&&nearest&&nearest.d<1500){
+    const capacity=network.get(nearest.c.name)??1;
+    return{level:Math.max(1,capacity),label:capacity===1?"LOCAL ROAD SUPPLY":"CONNECTED ROAD NETWORK ×"+capacity,supplyPerHour:.3+capacity*.36,fuelPerHour:.2+capacity*.25,range:0};
+  }
+  if(relay)return{level:1,label:"MOBILE LOGISTICS RELAY",supplyPerHour:.34,fuelPerHour:.22,range:relay.range};
+  return{level:0,label:city?"HOSTILE SUPPLY NODE":"SUPPLY LINE CUT",supplyPerHour:0,fuelPerHour:0,range:0};
 }
 
 function updateCities(cities:CityState[],units:Formation[],hours:number):CityState[]{
