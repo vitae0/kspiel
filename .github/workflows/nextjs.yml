@@ -69,7 +69,7 @@ jobs:
           done
 
           test -n "$html"
-          printf '%s' "$html" | grep -q 'GENERATING THEATER'
+          printf '%s' "$html" | grep -q 'CREATE GAME'
 
           asset="$(printf '%s' "$html" | grep -oE '/kspiel/_next/static/[^"]+\.(js|css)' | head -n 1 || true)"
           test -n "$asset"
