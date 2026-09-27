@@ -147,7 +147,7 @@ function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],side:Sid
       .map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y)}))
       .sort((a,b)=>a.d-b.d)[0];
 
-    if(u.kind==="artillery"){
+    if(ARTILLERY_KINDS.has(u.kind)){
       if(nearestHostile.d<=520&&u.supply>20&&u.organization>20)return{...u,order:{type:"fire",targetUnitId:nearestHostile.v.id}};
       const anchor=nearestFriendlyCombat?.v;
       if(anchor){
@@ -204,10 +204,11 @@ function resolveReliefs(units:Formation[],cities:CityState[]):Formation[]{
 }
 
 function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CityState[]){
+  const supplyNetwork=computeSupplyNetwork(scenario,units,cities);
   const next=units.map(u=>{
     const sample=terrainAt(scenario,u.x,u.y);
     const terrain=TERRAIN_RULES[sample.terrain];
-    const access=supplyAccess(scenario,u,units,cities);
+    const access=supplyAccess(scenario,u,units,cities,supplyNetwork);
     const n:Formation={...u,order:u.order?{...u.order}:undefined};
 
     if(n.order?.targetUnitId){
@@ -217,13 +218,13 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     }
 
     const inCombat=isInCombat(u,units);
-    const supplyBurn=(u.kind==="armor"?1.05:u.kind==="mechanized"?.82:u.kind==="artillery"?.72:u.kind==="logistics"?.58:.48)*(inCombat?1.65:1);
+    const supplyBurn=(u.kind==="tank"||u.kind==="armor"?1.12:u.kind==="mechanized"?.86:u.kind==="heavy_artillery"?.96:u.kind==="artillery"?.72:u.kind==="logistics"?.58:u.kind==="cavalry"?.38:.5)*(inCombat?1.72:1);
     n.supply=clamp(n.supply-hours*supplyBurn/Math.max(.38,terrain.supply),0,100);
-    if(["armor","mechanized","recon","logistics"].includes(u.kind))n.fuel=clamp(n.fuel-hours*(inCombat?.38:.16),0,100);
+    if(MOTORIZED_KINDS.has(u.kind))n.fuel=clamp(n.fuel-hours*(inCombat?.42:.18),0,100);
 
     if(access.level>0){
       n.supply=clamp(n.supply+hours*access.supplyPerHour,0,100);
-      if(["armor","mechanized","recon","logistics"].includes(u.kind))n.fuel=clamp(n.fuel+hours*access.fuelPerHour,0,100);
+      if(MOTORIZED_KINDS.has(u.kind))n.fuel=clamp(n.fuel+hours*access.fuelPerHour,0,100);
     }
 
     const friendlyCity=sample.objective?cities.find(c=>c.name===sample.objective&&c.owner===u.side):undefined;
@@ -234,16 +235,16 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     }
 
     if(n.order?.type==="dig"){
-      n.entrenchment=clamp(n.entrenchment+hours*1.15,0,100);
-      n.organization=clamp(n.organization+hours*.22,0,100);
-      n.supply=clamp(n.supply-hours*.035,0,100);
+      n.entrenchment=clamp(n.entrenchment+hours*.42,0,100);
+      n.organization=clamp(n.organization+hours*.18,0,100);
+      n.supply=clamp(n.supply-hours*.05,0,100);
     }else if(n.order?.type==="resupply"){
       const orderSupply=access.level===0?.12:access.level===1?.6:access.level===2?1.45:2.4;
       n.supply=clamp(n.supply+hours*orderSupply,0,100);
       n.fuel=clamp(n.fuel+hours*(access.level===0?.04:.85),0,100);
       n.organization=clamp(n.organization+hours*(access.level===0?.12:.5),0,100);
     }else if(n.order?.type==="fire"){
-      n.entrenchment=clamp(n.entrenchment+hours*.025,0,100);
+      n.entrenchment=clamp(n.entrenchment+hours*.01,0,100);
     }else if(n.order&&n.order.targetX!==undefined&&n.order.targetY!==undefined){
       const dx=n.order.targetX-u.x,dy=n.order.targetY-u.y,dist=Math.hypot(dx,dy);
       if(dist<5&&!n.order.targetUnitId){
@@ -251,12 +252,17 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       }else if(dist>0&&n.supply>8){
         const posture=n.order.type==="retreat"?1.55:n.order.type==="relieve"?1.12:n.order.type==="assault"?.58:n.order.type==="probe"?.74:1;
         const roadBonus=sample.road
-          ?u.kind==="artillery"?2.7
+          ?ARTILLERY_KINDS.has(u.kind)?2.5
           :u.kind==="logistics"?2.05
-          :u.kind==="armor"||u.kind==="mechanized"||u.kind==="recon"?1.8
+          :u.kind==="armor"||u.kind==="tank"||u.kind==="mechanized"||u.kind==="recon"?1.8
+          :u.kind==="cavalry"?1.45
           :1.55
           :1;
-        const travel=Math.min(dist,u.speed*terrain.move*roadBonus*posture*hours*MOVEMENT_SCALE);
+        const terrainMove=(sample.terrain==="highmountain"&&u.kind==="mountaineer")?.78
+          :(u.kind==="mountaineer"&&(sample.terrain==="mountain"||sample.terrain==="hills"))?terrain.move*1.45
+          :(u.kind==="cavalry"&&(sample.terrain==="plains"||sample.terrain==="desert"))?terrain.move*1.28
+          :terrain.move;
+        const travel=Math.min(dist,u.speed*terrainMove*roadBonus*posture*hours*MOVEMENT_SCALE);
         let nx=clamp(u.x+dx/dist*travel,1,WORLD_W-1),ny=clamp(u.y+dy/dist*travel,1,WORLD_H-1);
 
         if(DIRECT_COMBAT_KINDS.has(u.kind)&&n.order.type!=="retreat"){
@@ -267,17 +273,19 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
           }
         }
 
-        if(terrainAt(scenario,nx,ny).terrain!=="water"){
+        const nextTerrain=terrainAt(scenario,nx,ny).terrain;
+        const passable=nextTerrain!=="water"&&(nextTerrain!=="highmountain"||u.kind==="mountaineer");
+        if(passable){
           n.x=nx;n.y=ny;
-          n.supply=clamp(n.supply-travel*(u.kind==="armor"||u.kind==="mechanized"?.022:.012),0,100);
-          n.fuel=clamp(n.fuel-travel*(u.kind==="armor"?.019:u.kind==="mechanized"||u.kind==="recon"?.012:.001),0,100);
+          n.supply=clamp(n.supply-travel*(u.kind==="armor"||u.kind==="tank"||u.kind==="mechanized"?.024:u.kind==="heavy_artillery"?.02:.012),0,100);
+          n.fuel=clamp(n.fuel-travel*(u.kind==="armor"||u.kind==="tank"?.021:u.kind==="mechanized"||u.kind==="recon"?.013:.001),0,100);
           n.entrenchment=Math.max(0,n.entrenchment-hours*.7);
           n.organization=clamp(n.organization-hours*.12,0,100);
         }
       }
     }else{
       n.organization=clamp(n.organization+hours*.08,0,100);
-      n.entrenchment=clamp(n.entrenchment+hours*.04,0,100);
+      n.entrenchment=clamp(n.entrenchment+hours*.012,0,100);
     }
 
     if(n.supply<25)n.organization=clamp(n.organization-hours*.85,0,100);
@@ -305,25 +313,26 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       const bPower=bCan&&!bRetreat?(b.softAttack*(1-a.hardness)+b.hardAttack*a.hardness)*(b.organization/100)*(b.supply/100):0;
       const aPosture=a.order?.type==="assault"?1.22:a.order?.type==="probe"?.76:1;
       const bPosture=b.order?.type==="assault"?1.22:b.order?.type==="probe"?.76:1;
-      const aLoss=(bPower*bPosture/Math.max(20,a.defense*aDef+a.entrenchment*.6))*hours*2.15*(aRetreat?1.2:1);
-      const bLoss=(aPower*aPosture/Math.max(20,b.defense*bDef+b.entrenchment*.6))*hours*2.15*(bRetreat?1.2:1);
+      const aLoss=(bPower*bPosture/Math.max(20,a.defense*aDef+a.entrenchment*1.35))*hours*2.15*(aRetreat?1.2:1);
+      const bLoss=(aPower*aPosture/Math.max(20,b.defense*bDef+b.entrenchment*1.35))*hours*2.15*(bRetreat?1.2:1);
       a.strength=clamp(a.strength-aLoss,0,100);b.strength=clamp(b.strength-bLoss,0,100);
       a.organization=clamp(a.organization-aLoss*1.9,0,100);b.organization=clamp(b.organization-bLoss*1.9,0,100);
     }
   }
 
   for(const gun of result){
-    if(gun.kind!=="artillery"||gun.order?.type!=="fire"||!gun.order.targetUnitId)continue;
+    if(!ARTILLERY_KINDS.has(gun.kind)||gun.order?.type!=="fire"||!gun.order.targetUnitId)continue;
     const target=result.find(v=>v.id===gun.order?.targetUnitId&&v.side!==gun.side);
     if(!target)continue;
     const range=Math.hypot(target.x-gun.x,target.y-gun.y);
-    if(range>540||gun.supply<10||gun.organization<10)continue;
+    const maxRange=gun.kind==="heavy_artillery"?820:540;
+    if(range>maxRange||gun.supply<10||gun.organization<10)continue;
     const terrain=TERRAIN_RULES[terrainAt(scenario,target.x,target.y).terrain];
-    const rangeFactor=clamp(1-(range-80)/530,.38,1);
+    const rangeFactor=clamp(1-(range-80)/(gun.kind==="heavy_artillery"?880:530),.34,1);
     const power=(gun.softAttack*(1-target.hardness)+gun.hardAttack*target.hardness)*(gun.organization/100)*(gun.supply/100)*rangeFactor;
-    const loss=(power/Math.max(24,target.defense*terrain.defense+target.entrenchment*.7))*hours*1.45;
+    const loss=(power/Math.max(24,target.defense*terrain.defense+target.entrenchment*1.15))*hours*(gun.kind==="heavy_artillery"?1.65:1.45);
     target.strength=clamp(target.strength-loss,0,100);target.organization=clamp(target.organization-loss*2.2,0,100);
-    gun.supply=clamp(gun.supply-hours*.95,0,100);gun.organization=clamp(gun.organization-hours*.04,0,100);
+    gun.supply=clamp(gun.supply-hours*(gun.kind==="heavy_artillery"?1.45:.95),0,100);gun.organization=clamp(gun.organization-hours*.04,0,100);
   }
 
   return result.filter(u=>u.strength>1);
