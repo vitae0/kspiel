@@ -357,24 +357,16 @@ export default function Home(){
   const [frontPreview,setFrontPreview]=useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
   const [attackPlans,setAttackPlans]=useState<AttackPlan[]>([]);
   const [pendingPlan,setPendingPlan]=useState(false);
+  const [selectedPresetId,setSelectedPresetId]=useState("frontier");
+  const [setupCategory,setSetupCategory]=useState<"all"|"fictional"|"historical">("all");
 
-  const drag=useRef<{mode:"pan"|"box"|"front";startClientX:number;startClientY:number;px:number;py:number;moved:boolean}|null>(null);
+  const drag=useRef<{mode:"pan"|"box"|"front"|"select";startClientX:number;startClientY:number;px:number;py:number;moved:boolean}|null>(null);
   const suppressContextMenu=useRef(false);
   const viewport=useRef<HTMLDivElement>(null);
   const unitsRef=useRef<Formation[]>([]);
   const citiesRef=useRef<CityState[]>([]);
   const warResultRef=useRef<Side|null>(null);
   const planCounter=useRef(1);
-
-  useEffect(()=>{
-    const seed=typeof crypto!=="undefined"&&"getRandomValues" in crypto?crypto.getRandomValues(new Uint32Array(1))[0]:Date.now()>>>0;
-    const generated=generateScenario(seed);
-    setScenario(generated);
-    setUnits(generated.formations);unitsRef.current=generated.formations;
-    setCities(generated.cities);citiesRef.current=generated.cities;
-    const first=generated.formations.find(u=>u.side==="blue");
-    setSelected(first?[first.id]:[]);
-  },[]);
 
   useEffect(()=>{
     const togglePause=(e:KeyboardEvent)=>{
@@ -436,7 +428,7 @@ export default function Home(){
     const selectedNow=units.filter(u=>selected.includes(u.id));
     if(type==="move"){setPendingOrder(null);return}
     if((type==="assault"||type==="probe")&&!selectedNow.some(u=>DIRECT_COMBAT_KINDS.has(u.kind)))return;
-    if(type==="fire"&&!selectedNow.some(u=>u.kind==="artillery"))return;
+    if(type==="fire"&&!selectedNow.some(u=>ARTILLERY_KINDS.has(u.kind)))return;
 
     if(type==="retreat"){
       commitUnits(prev=>prev.map(u=>{
@@ -471,7 +463,45 @@ export default function Home(){
     window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey);
   },[selected,units,cities]);
 
-  if(!scenario)return <main className="game-shell loading-theater">GENERATING THEATER...</main>;
+  function startGame(){
+    const seed=typeof crypto!=="undefined"&&"getRandomValues" in crypto?crypto.getRandomValues(new Uint32Array(1))[0]:Date.now()>>>0;
+    const generated=generateScenario(seed,selectedPresetId);
+    warResultRef.current=null;setWarResult(null);setAttackPlans([]);setPendingPlan(false);setPendingOrder(null);
+    setScenario(generated);setUnits(generated.formations);unitsRef.current=generated.formations;
+    setCities(generated.cities);citiesRef.current=generated.cities;
+    const first=generated.formations.find(u=>u.side==="blue");setSelected(first?[first.id]:[]);
+    setRunning(true);setSpeed(1);setHour(6);setDay(1);setPan({x:-260,y:-190});setZoom(.24);
+  }
+
+  function returnToSetup(){
+    setRunning(false);setScenario(null);setUnits([]);unitsRef.current=[];setCities([]);citiesRef.current=[];
+    setSelected([]);setAttackPlans([]);setWarResult(null);warResultRef.current=null;
+  }
+
+  if(!scenario){
+    const presets=SCENARIO_PRESETS.filter(p=>setupCategory==="all"||setupCategory==="historical"===p.historical);
+    const selectedPreset=SCENARIO_PRESETS.find(p=>p.id===selectedPresetId)??SCENARIO_PRESETS[0];
+    return <main className="setup-shell">
+      <div className="setup-panel">
+        <div className="setup-brand"><span className="brand-mark">K</span><div><b>KSPIEL</b><small>OPERATIONAL COMMAND SIMULATION</small></div></div>
+        <div className="setup-grid">
+          <section className="setup-main">
+            <div className="setup-heading"><small>CREATE GAME</small><h1>Choose a theater</h1><p>Terrain now changes the roster, mobility, visibility and logistics. Historical presets are stylized scenarios, not exact order-of-battle reconstructions.</p></div>
+            <div className="setup-tabs"><button className={setupCategory==="all"?"active":""} onClick={()=>setSetupCategory("all")}>ALL</button><button className={setupCategory==="fictional"?"active":""} onClick={()=>setSetupCategory("fictional")}>FICTIONAL</button><button className={setupCategory==="historical"?"active":""} onClick={()=>setSetupCategory("historical")}>HISTORICAL</button></div>
+            <div className="scenario-grid">{presets.map(preset=><button key={preset.id} className={"scenario-card theme-"+preset.theme+" "+(selectedPresetId===preset.id?"selected":"")} onClick={()=>setSelectedPresetId(preset.id)}>
+              <span className="scenario-theme">{preset.theme.toUpperCase()}</span><b>{preset.title}</b><small>{preset.location}{preset.year?" · "+preset.year:""}</small><p>{preset.subtitle}</p><em>{preset.sideNames.blue} ↔ {preset.sideNames.red}</em>
+            </button>)}</div>
+          </section>
+          <aside className="setup-side">
+            <div className="section-title">SELECTED THEATER</div><h2>{selectedPreset.title}</h2><p>{selectedPreset.location}{selectedPreset.year?" · "+selectedPreset.year:""}</p>
+            <div className="setup-facts"><span><small>THEME</small><b>{selectedPreset.theme.toUpperCase()}</b></span><span><small>TYPE</small><b>{selectedPreset.historical?"HISTORICAL":"FICTIONAL"}</b></span><span><small>MAP</small><b>6200 × 4200</b></span><span><small>FOG</small><b>ENABLED</b></span></div>
+            <div className="section-title">GAME MODE</div><div className="mode-list"><button className="active"><b>SINGLE PLAYER</b><small>You command {selectedPreset.sideNames.blue}</small></button><button disabled><b>CO-OP</b><small>architecture ready · networking later</small></button><button disabled><b>PVP / PVPVE</b><small>architecture ready · networking later</small></button></div>
+            <button className="launch-button" onClick={startGame}>DEPLOY TO THEATER</button>
+          </aside>
+        </div>
+      </div>
+    </main>;
+  }
   const activeScenario:Scenario=scenario;
 
   function mapPoint(clientX:number,clientY:number){
@@ -593,9 +623,9 @@ export default function Home(){
     if((requested==="assault"||requested==="fire"||requested==="probe")&&primary&&target.side===primary.side)return;
     commitUnits(prev=>prev.map(u=>{
       if(!selected.includes(u.id))return u;
-      if(requested==="fire")return u.kind==="artillery"?{...u,order:{type:"fire",targetUnitId:target.id}}:u;
+      if(requested==="fire")return ARTILLERY_KINDS.has(u.kind)?{...u,order:{type:"fire",targetUnitId:target.id}}:u;
       if(requested==="assault"||requested==="probe"){
-        if(u.kind==="artillery")return{...u,order:{type:"fire",targetUnitId:target.id}};
+        if(ARTILLERY_KINDS.has(u.kind))return{...u,order:{type:"fire",targetUnitId:target.id}};
         if(DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:requested,targetUnitId:target.id}};
         return u;
       }
@@ -611,8 +641,9 @@ export default function Home(){
 
   function onPointerDown(e:ReactPointerEvent<HTMLDivElement>){
     if(e.button>2)return;const screen=viewportPoint(e.clientX,e.clientY);if(!screen)return;
-    let mode:"pan"|"box"|"front"="pan";
-    if(e.button===2)mode="box";else if(e.button===0&&e.ctrlKey&&selected.length>1)mode="front";else if(e.button!==0)return;
+    let mode:"pan"|"box"|"front"|"select"="select";
+    if(e.button===1)mode="pan";else if(e.button===2)mode="box";else if(e.button===0&&e.ctrlKey&&selected.length>1)mode="front";else if(e.button!==0)return;
+    if(mode==="pan")e.preventDefault();
     drag.current={mode,startClientX:e.clientX,startClientY:e.clientY,px:pan.x,py:pan.y,moved:false};
     if(mode==="box")setSelectionBox({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
     if(mode==="front")setFrontPreview({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
@@ -630,7 +661,8 @@ export default function Home(){
 
   function onPointerUp(e:ReactPointerEvent<HTMLDivElement>){
     const d=drag.current;if(!d)return;drag.current=null;
-    if(d.mode==="pan"){if(!d.moved&&e.button===0&&!e.ctrlKey){setSelected([]);setPendingOrder(null)}return}
+    if(d.mode==="pan")return;
+    if(d.mode==="select"){if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false)}return}
     if(d.mode==="box"){
       setSelectionBox(null);if(!d.moved)return;suppressContextMenu.current=true;
       const a=mapPoint(d.startClientX,d.startClientY),b=mapPoint(e.clientX,e.clientY);if(!a||!b)return;
@@ -652,12 +684,12 @@ export default function Home(){
   const primaryAccess=primary?supplyAccess(activeScenario,primary,units,cities):null;
   const canRetreat=selectedUnits.some(u=>u.supply>=RETREAT_SUPPLY_MIN&&isInCombat(u,units));
 
-  return <main className="game-shell">
+  return <main className={"game-shell theme-"+activeScenario.theme}>
     <header className="topbar">
-      <div className="brand"><span className="brand-mark">K</span><div><b>KSPIEL</b><small>THEATER #{activeScenario.seed.toString(16).toUpperCase()}</small></div></div>
+      <div className="brand"><span className="brand-mark">K</span><div><b>KSPIEL</b><small>{activeScenario.title.toUpperCase()} · #{activeScenario.seed.toString(16).toUpperCase()}</small></div></div>
       <div className="theater-state"><span>DAY {day}</span><strong>{timeLabel(hour)}</strong><span className={running?"live":"paused"}>{running?"RUNNING":"PAUSED"}</span></div>
       <div className="global-metrics"><div><small>SUPPLY</small><b>{pct(averageSupply)}%</b></div><div><small>ORG</small><b>{pct(averageOrg)}%</b></div><div><small>CITIES</small><b>{blueCities}/{cities.length}</b></div><div><small>CONTACTS</small><b>{enemy.length}</b></div></div>
-      <div className="time-controls"><button onClick={()=>setRunning(v=>warResult?v:!v)} className="icon-btn">{running?"Ⅱ":"▶"}</button>{[1,2,3].map(s=><button key={s} onClick={()=>{if(!warResult){setSpeed(s);setRunning(true)}}} className={speed===s?"active":""}>×{s}</button>)}</div>
+      <div className="time-controls"><button className="setup-return" onClick={returnToSetup}>SETUP</button><button onClick={()=>setRunning(v=>warResult?v:!v)} className="icon-btn">{running?"Ⅱ":"▶"}</button>{[1,2,3].map(s=><button key={s} onClick={()=>{if(!warResult){setSpeed(s);setRunning(true)}}} className={speed===s?"active":""}>×{s}</button>)}</div>
     </header>
 
     <aside className="left-panel">
@@ -710,7 +742,7 @@ export default function Home(){
           <button className={!pendingOrder?"active":""} onClick={()=>startOrder("move")}>MOVE <kbd>M</kbd></button>
           <button disabled={!selectedUnits.some(u=>DIRECT_COMBAT_KINDS.has(u.kind))} className={pendingOrder==="assault"?"active":""} onClick={()=>startOrder("assault")}>ASSAULT <kbd>A</kbd></button>
           <button disabled={!selectedUnits.some(u=>DIRECT_COMBAT_KINDS.has(u.kind))} className={pendingOrder==="probe"?"active":""} onClick={()=>startOrder("probe")}>PROBE <kbd>P</kbd></button>
-          <button disabled={!selectedUnits.some(u=>u.kind==="artillery")} className={pendingOrder==="fire"?"active":""} onClick={()=>startOrder("fire")}>FIRE <kbd>F</kbd></button>
+          <button disabled={!selectedUnits.some(u=>ARTILLERY_KINDS.has(u.kind))} className={pendingOrder==="fire"?"active":""} onClick={()=>startOrder("fire")}>FIRE <kbd>F</kbd></button>
           <button disabled={!selectedUnits.some(u=>DIRECT_COMBAT_KINDS.has(u.kind))} className={pendingOrder==="relieve"?"active":""} onClick={()=>startOrder("relieve")}>RELIEVE <kbd>T</kbd></button>
           <button disabled={!canRetreat} onClick={()=>startOrder("retreat")}>RETREAT <kbd>X</kbd></button>
           <button onClick={()=>startOrder("defend")}>DEFEND <kbd>D</kbd></button><button onClick={()=>startOrder("dig")}>DIG IN <kbd>G</kbd></button><button onClick={()=>startOrder("resupply")}>RESUPPLY <kbd>R</kbd></button>
@@ -718,7 +750,7 @@ export default function Home(){
       </div>:<div className="empty-inspector"><b>NO FORMATION SELECTED</b><span>Select a friendly counter on the map.</span></div>}
     </aside>
 
-    <footer className="statusbar"><span>SPACE: PAUSE</span><span>RMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
+    <footer className="statusbar"><span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
   </main>
 }
 
