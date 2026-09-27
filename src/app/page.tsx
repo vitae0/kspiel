@@ -338,9 +338,6 @@ export default function Home(){
     return()=>window.clearInterval(timer);
   },[scenario,running,speed]);
 
-  if(!scenario)return <main className="game-shell loading-theater">GENERATING THEATER...</main>;
-  const activeScenario:Scenario=scenario;
-
   function selectUnit(e:ReactMouseEvent,u:Formation){
     e.stopPropagation();if(u.side!=="blue")return;
     if(e.shiftKey)setSelected(prev=>prev.includes(u.id)?prev.filter(id=>id!==u.id):[...prev,u.id]);else setSelected([u.id]);
@@ -378,6 +375,9 @@ export default function Home(){
     };
     window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey);
   },[selected,units,cities]);
+
+  if(!scenario)return <main className="game-shell loading-theater">GENERATING THEATER...</main>;
+  const activeScenario:Scenario=scenario;
 
   function mapPoint(clientX:number,clientY:number){
     const rect=viewport.current?.getBoundingClientRect();if(!rect)return null;
