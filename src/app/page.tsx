@@ -2,16 +2,22 @@
 
 import {useEffect,useRef,useState,type MouseEvent as ReactMouseEvent,type PointerEvent as ReactPointerEvent,type WheelEvent as ReactWheelEvent} from "react";
 import {generateScenario,polylinePath,terrainAt,TERRAIN_RULES,UNIT_LABEL,WORLD_H,WORLD_W} from "@/sim/game";
-import type {CityState,Formation,OrderType,OverlayMode,Scenario,Side,TerrainSample} from "@/sim/types";
+import {botControlledSides,createMatchConfig,defaultArmyGroups,localControlledSides} from "@/sim/session";
+import type {AttackPlan,CityState,Formation,FormationShape,OrderType,OverlayMode,Scenario,Side,TerrainSample} from "@/sim/types";
 
 const SPEED_MULTIPLIER=[0,1,2.5,6];
 const SIM_HOURS_PER_REAL_SECOND=.75;
 const MAX_FRAME_SECONDS=.12;
 const SIM_TICK_MS=100;
 const AI_COMMAND_INTERVAL_SECONDS=.55;
-const MOVEMENT_SCALE=2.7;
-const RETREAT_SUPPLY_MIN=35;
-const DIRECT_COMBAT_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","armor","recon","engineer","reserve"]);
+const MOVEMENT_SCALE=4.2;
+const RETREAT_SUPPLY_MIN=42;
+const DIRECT_COMBAT_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","armor","recon","engineer"]);
+const CAPTURE_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","engineer"]);
+const MATCH_CONFIG=createMatchConfig("singleplayer","local");
+const LOCAL_SIDES=new Set(localControlledSides(MATCH_CONFIG,"local"));
+const BOT_SIDES=botControlledSides(MATCH_CONFIG);
+const ARMY_GROUPS=defaultArmyGroups("blue");
 
 function clamp(v:number,min:number,max:number){return Math.max(min,Math.min(max,v))}
 function pct(v:number){return Math.round(clamp(v,0,100))}
@@ -42,90 +48,84 @@ function retreatDestination(u:Formation,units:Formation[],cities:CityState[]){
 function supplyAccess(scenario:Scenario,u:Formation,units:Formation[],cities:CityState[]){
   const sample=terrainAt(scenario,u.x,u.y);
   const city=sample.objective?cities.find(c=>c.name===sample.objective):undefined;
-  const connectedCity=cities.some(c=>c.owner===u.side&&Math.hypot(c.x-u.x,c.y-u.y)<900);
+  const connectedCity=cities.some(c=>c.owner===u.side&&Math.hypot(c.x-u.x,c.y-u.y)<1250);
   const relay=units
-    .filter(v=>v.side===u.side&&v.kind==="logistics"&&v.id!==u.id&&v.supply>20)
-    .map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y),range:250+v.supply*1.6}))
+    .filter(v=>v.side===u.side&&v.kind==="logistics"&&v.id!==u.id&&v.supply>30)
+    .map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y),range:320+v.supply*1.3}))
     .filter(x=>x.d<x.range)
     .sort((a,b)=>a.d-b.d)[0];
 
-  if(city?.owner===u.side)return{level:3,label:"OWNED SUPPLY NODE",supplyPerHour:3.4,fuelPerHour:2.25,range:0};
-  if(sample.road&&(connectedCity||relay))return{level:2,label:relay&&!connectedCity?"LOGISTICS-EXTENDED LINE":"ACTIVE SUPPLY LINE",supplyPerHour:1.7,fuelPerHour:1.1,range:relay?.range??0};
-  if(relay)return{level:1,label:"MOBILE LOGISTICS RELAY",supplyPerHour:.92,fuelPerHour:.58,range:relay.range};
+  if(city?.owner===u.side)return{level:3,label:"OWNED SUPPLY NODE",supplyPerHour:2.2,fuelPerHour:1.55,range:0};
+  if(sample.road&&(connectedCity||relay))return{level:2,label:relay&&!connectedCity?"LOGISTICS-EXTENDED LINE":"ACTIVE SUPPLY LINE",supplyPerHour:.9,fuelPerHour:.62,range:relay?.range??0};
+  if(relay)return{level:1,label:"MOBILE LOGISTICS RELAY",supplyPerHour:.38,fuelPerHour:.25,range:relay.range};
   return{level:0,label:city?"HOSTILE SUPPLY NODE":"OUT OF NETWORK",supplyPerHour:0,fuelPerHour:0,range:0};
 }
 
 function updateCities(cities:CityState[],units:Formation[],hours:number):CityState[]{
   return cities.map(city=>{
-    const nearby=units.filter(u=>DIRECT_COMBAT_KINDS.has(u.kind)&&u.strength>8&&Math.hypot(u.x-city.x,u.y-city.y)<72);
-    const blue=nearby.filter(u=>u.side==="blue");
-    const red=nearby.filter(u=>u.side==="red");
-    if(blue.length&&red.length)return{...city,capture:Math.max(0,city.capture-hours*8)};
+    const nearby=units.filter(u=>u.strength>5&&Math.hypot(u.x-city.x,u.y-city.y)<118);
+    const defenders=nearby.filter(u=>u.side===city.owner&&DIRECT_COMBAT_KINDS.has(u.kind));
+    const attackers=nearby.filter(u=>u.side!==city.owner&&CAPTURE_KINDS.has(u.kind));
+    if(defenders.length||!attackers.length)return{...city,capture:Math.max(0,city.capture-hours*14)};
 
-    const attackers=city.owner==="blue"?red:blue;
-    const defenders=city.owner==="blue"?blue:red;
-    if(defenders.length||!attackers.length)return{...city,capture:Math.max(0,city.capture-hours*12)};
+    const bySide=new Map<Side,Formation[]>();
+    for(const u of attackers)bySide.set(u.side,[...(bySide.get(u.side)??[]),u]);
+    const ranked=[...bySide.entries()].sort((a,b)=>b[1].reduce((s,u)=>s+u.readiness,0)-a[1].reduce((s,u)=>s+u.readiness,0));
+    if(ranked.length>1)return{...city,capture:Math.max(0,city.capture-hours*5)};
 
-    const avgReadiness=attackers.reduce((sum,u)=>sum+u.readiness,0)/attackers.length;
-    const capture=city.capture+hours*(13+5*Math.sqrt(attackers.length))*(.55+avgReadiness/220);
-    return capture>=100?{...city,owner:city.owner==="blue"?"red":"blue",capture:0}:{...city,capture};
+    const [attackingSide,force]=ranked[0];
+    const avgReadiness=force.reduce((sum,u)=>sum+u.readiness,0)/force.length;
+    const infantryWeight=force.reduce((sum,u)=>sum+(u.kind==="infantry"?1.25:u.kind==="engineer"?1.4:1),0);
+    const capture=city.capture+hours*(10+4*Math.sqrt(infantryWeight))*(.5+avgReadiness/210);
+    return capture>=100?{...city,owner:attackingSide,capture:0}:{...city,capture};
   });
 }
 
-function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[]):Formation[]{
-  const blue=units.filter(u=>u.side==="blue");
-  const red=units.filter(u=>u.side==="red");
-  const blueCities=cities.filter(c=>c.owner==="blue");
-  if(!blue.length)return units;
+function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],side:Side):Formation[]{
+  const friendly=units.filter(u=>u.side===side);
+  const hostile=units.filter(u=>u.side!==side);
+  const hostileCities=cities.filter(c=>c.owner!==side);
+  if(!hostile.length)return units;
 
   return units.map((u):Formation=>{
-    if(u.side!=="red")return u;
+    if(u.side!==side)return u;
+    const nearestHostile=hostile.map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
+    if(!nearestHostile)return u;
 
-    const nearestBlue=blue.map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
-    if(!nearestBlue)return u;
-
-    if(u.kind==="reserve"){
-      const weakFront=red
-        .filter(v=>v.id!==u.id&&DIRECT_COMBAT_KINDS.has(v.kind)&&v.kind!=="reserve"&&isInCombat(v,units)&&(v.strength<68||v.organization<45))
-        .sort((a,b)=>Math.hypot(a.x-u.x,a.y-u.y)-Math.hypot(b.x-u.x,b.y-u.y))[0];
-      if(weakFront)return{...u,order:{type:"relieve",targetUnitId:weakFront.id}};
-    }
-
-    const nearestRedCombat=red
-      .filter(v=>v.id!==u.id&&DIRECT_COMBAT_KINDS.has(v.kind)&&v.kind!=="reserve")
+    const nearestFriendlyCombat=friendly
+      .filter(v=>v.id!==u.id&&DIRECT_COMBAT_KINDS.has(v.kind))
       .map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y)}))
       .sort((a,b)=>a.d-b.d)[0];
 
     if(u.kind==="artillery"){
-      if(nearestBlue.d<=375&&u.supply>12&&u.organization>18)return{...u,order:{type:"fire",targetUnitId:nearestBlue.v.id}};
-      const anchor=nearestRedCombat?.v;
+      if(nearestHostile.d<=520&&u.supply>20&&u.organization>20)return{...u,order:{type:"fire",targetUnitId:nearestHostile.v.id}};
+      const anchor=nearestFriendlyCombat?.v;
       if(anchor){
-        const dx=anchor.x-nearestBlue.v.x,dy=anchor.y-nearestBlue.v.y,len=Math.hypot(dx,dy)||1;
-        const tx=clamp(anchor.x+dx/len*135,20,WORLD_W-20),ty=clamp(anchor.y+dy/len*135,20,WORLD_H-20);
+        const dx=anchor.x-nearestHostile.v.x,dy=anchor.y-nearestHostile.v.y,len=Math.hypot(dx,dy)||1;
+        const tx=clamp(anchor.x+dx/len*190,20,WORLD_W-20),ty=clamp(anchor.y+dy/len*190,20,WORLD_H-20);
         if(terrainAt(scenario,tx,ty).terrain!=="water")return{...u,order:{type:"move",targetX:tx,targetY:ty}};
       }
       return u;
     }
 
     if(u.kind==="logistics"){
-      const anchor=nearestRedCombat?.v;
+      const anchor=nearestFriendlyCombat?.v;
       if(!anchor)return u;
-      const dx=anchor.x-nearestBlue.v.x,dy=anchor.y-nearestBlue.v.y,len=Math.hypot(dx,dy)||1;
-      const tx=clamp(anchor.x+dx/len*210,20,WORLD_W-20),ty=clamp(anchor.y+dy/len*210,20,WORLD_H-20);
-      if(Math.hypot(tx-u.x,ty-u.y)>65&&terrainAt(scenario,tx,ty).terrain!=="water")return{...u,order:{type:"move",targetX:tx,targetY:ty}};
+      const dx=anchor.x-nearestHostile.v.x,dy=anchor.y-nearestHostile.v.y,len=Math.hypot(dx,dy)||1;
+      const tx=clamp(anchor.x+dx/len*310,20,WORLD_W-20),ty=clamp(anchor.y+dy/len*310,20,WORLD_H-20);
+      if(Math.hypot(tx-u.x,ty-u.y)>90&&terrainAt(scenario,tx,ty).terrain!=="water")return{...u,order:{type:"move",targetX:tx,targetY:ty}};
       return{...u,order:{type:"resupply"}};
     }
 
     if(DIRECT_COMBAT_KINDS.has(u.kind)){
-      if((u.organization<24||u.strength<38||u.supply<15)&&u.supply>=18){
+      if((u.organization<30||u.strength<42||u.supply<18)&&u.supply>=RETREAT_SUPPLY_MIN){
         const d=retreatDestination(u,units,cities);
         return{...u,order:{type:"retreat",targetX:d.x,targetY:d.y}};
       }
-
-      const nearestCity=blueCities.map(c=>({c,d:Math.hypot(c.x-u.x,c.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
+      const nearestCity=hostileCities.map(c=>({c,d:Math.hypot(c.x-u.x,c.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
       const n=Number(u.id.replace(/\D/g,""))||0;
-      if(nearestCity&&(nearestCity.d<nearestBlue.d*1.2||n%3===0))return{...u,order:{type:"move",targetX:nearestCity.c.x,targetY:nearestCity.c.y}};
-      return{...u,order:{type:"assault",targetUnitId:nearestBlue.v.id}};
+      if(nearestCity&&(nearestCity.d<nearestHostile.d*1.35||n%3===0))return{...u,order:{type:"move",targetX:nearestCity.c.x,targetY:nearestCity.c.y}};
+      return{...u,order:{type:"assault",targetUnitId:nearestHostile.v.id}};
     }
     return u;
   });
@@ -166,9 +166,21 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       else n.order={type:"defend"};
     }
 
+    const inCombat=isInCombat(u,units);
+    const supplyBurn=(u.kind==="armor"?1.05:u.kind==="mechanized"?.82:u.kind==="artillery"?.72:u.kind==="logistics"?.58:.48)*(inCombat?1.65:1);
+    n.supply=clamp(n.supply-hours*supplyBurn/Math.max(.38,terrain.supply),0,100);
+    if(["armor","mechanized","recon","logistics"].includes(u.kind))n.fuel=clamp(n.fuel-hours*(inCombat?.38:.16),0,100);
+
     if(access.level>0){
       n.supply=clamp(n.supply+hours*access.supplyPerHour,0,100);
       if(["armor","mechanized","recon","logistics"].includes(u.kind))n.fuel=clamp(n.fuel+hours*access.fuelPerHour,0,100);
+    }
+
+    const friendlyCity=sample.objective?cities.find(c=>c.name===sample.objective&&c.owner===u.side):undefined;
+    if(friendlyCity&&!inCombat&&n.supply>22){
+      n.strength=clamp(n.strength+hours*.16,0,100);
+      n.organization=clamp(n.organization+hours*.48,0,100);
+      n.supply=clamp(n.supply-hours*.12,0,100);
     }
 
     if(n.order?.type==="dig"){
@@ -186,7 +198,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       const dx=n.order.targetX-u.x,dy=n.order.targetY-u.y,dist=Math.hypot(dx,dy);
       if(dist<5&&!n.order.targetUnitId){
         n.x=n.order.targetX;n.y=n.order.targetY;n.order={type:"defend"};
-      }else if(dist>0&&n.supply>3){
+      }else if(dist>0&&n.supply>8){
         const posture=n.order.type==="retreat"?1.55:n.order.type==="relieve"?1.12:n.order.type==="assault"?.58:n.order.type==="probe"?.74:1;
         const roadBonus=sample.road
           ?u.kind==="artillery"?2.7
@@ -207,7 +219,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
 
         if(terrainAt(scenario,nx,ny).terrain!=="water"){
           n.x=nx;n.y=ny;
-          n.supply=clamp(n.supply-travel*(u.kind==="armor"||u.kind==="mechanized"?.012:.006),0,100);
+          n.supply=clamp(n.supply-travel*(u.kind==="armor"||u.kind==="mechanized"?.022:.012),0,100);
           n.fuel=clamp(n.fuel-travel*(u.kind==="armor"?.019:u.kind==="mechanized"||u.kind==="recon"?.012:.001),0,100);
           n.entrenchment=Math.max(0,n.entrenchment-hours*.7);
           n.organization=clamp(n.organization-hours*.12,0,100);
@@ -218,7 +230,9 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       n.entrenchment=clamp(n.entrenchment+hours*.04,0,100);
     }
 
-    if(n.supply<25)n.organization=clamp(n.organization-hours*.4,0,100);
+    if(n.supply<25)n.organization=clamp(n.organization-hours*.85,0,100);
+    if(n.supply<12){n.organization=clamp(n.organization-hours*1.4,0,100);n.strength=clamp(n.strength-hours*.16,0,100)}
+    if(n.supply<4)n.strength=clamp(n.strength-hours*.34,0,100);
     n.readiness=clamp(n.organization*.46+n.supply*.3+n.strength*.24,0,100);
     return n;
   });
@@ -253,13 +267,13 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     const target=result.find(v=>v.id===gun.order?.targetUnitId&&v.side!==gun.side);
     if(!target)continue;
     const range=Math.hypot(target.x-gun.x,target.y-gun.y);
-    if(range>390||gun.supply<4||gun.organization<8)continue;
+    if(range>540||gun.supply<10||gun.organization<10)continue;
     const terrain=TERRAIN_RULES[terrainAt(scenario,target.x,target.y).terrain];
     const rangeFactor=clamp(1-(range-80)/530,.38,1);
     const power=(gun.softAttack*(1-target.hardness)+gun.hardAttack*target.hardness)*(gun.organization/100)*(gun.supply/100)*rangeFactor;
     const loss=(power/Math.max(24,target.defense*terrain.defense+target.entrenchment*.7))*hours*1.45;
     target.strength=clamp(target.strength-loss,0,100);target.organization=clamp(target.organization-loss*2.2,0,100);
-    gun.supply=clamp(gun.supply-hours*.42,0,100);gun.organization=clamp(gun.organization-hours*.04,0,100);
+    gun.supply=clamp(gun.supply-hours*.95,0,100);gun.organization=clamp(gun.organization-hours*.04,0,100);
   }
 
   return result.filter(u=>u.strength>1);
@@ -276,12 +290,14 @@ export default function Home(){
   const [speed,setSpeed]=useState(1);
   const [hour,setHour]=useState(6);
   const [day,setDay]=useState(1);
-  const [pan,setPan]=useState({x:-235,y:-180});
-  const [zoom,setZoom]=useState(.78);
+  const [pan,setPan]=useState({x:-260,y:-190});
+  const [zoom,setZoom]=useState(.24);
   const [hovered,setHovered]=useState<TerrainSample|null>(null);
   const [warResult,setWarResult]=useState<Side|null>(null);
   const [selectionBox,setSelectionBox]=useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
   const [frontPreview,setFrontPreview]=useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
+  const [attackPlans,setAttackPlans]=useState<AttackPlan[]>([]);
+  const [pendingPlan,setPendingPlan]=useState(false);
 
   const drag=useRef<{mode:"pan"|"box"|"front";startClientX:number;startClientY:number;px:number;py:number;moved:boolean}|null>(null);
   const suppressContextMenu=useRef(false);
@@ -289,6 +305,7 @@ export default function Home(){
   const unitsRef=useRef<Formation[]>([]);
   const citiesRef=useRef<CityState[]>([]);
   const warResultRef=useRef<Side|null>(null);
+  const planCounter=useRef(1);
 
   useEffect(()=>{
     const seed=typeof crypto!=="undefined"&&"getRandomValues" in crypto?crypto.getRandomValues(new Uint32Array(1))[0]:Date.now()>>>0;
@@ -300,6 +317,18 @@ export default function Home(){
     setSelected(first?[first.id]:[]);
   },[]);
 
+  useEffect(()=>{
+    const togglePause=(e:KeyboardEvent)=>{
+      const el=e.target as HTMLElement|null;
+      if(el?.tagName==="INPUT"||el?.tagName==="TEXTAREA"||el?.isContentEditable)return;
+      if(e.code!=="Space")return;
+      e.preventDefault();e.stopPropagation();
+      setRunning(v=>warResultRef.current?v:!v);
+    };
+    window.addEventListener("keydown",togglePause,true);
+    return()=>window.removeEventListener("keydown",togglePause,true);
+  },[]);
+
   const commitUnits=(fn:(prev:Formation[])=>Formation[])=>{
     setUnits(prev=>{const next=fn(prev);unitsRef.current=next;return next});
   };
@@ -308,8 +337,8 @@ export default function Home(){
   const primary=selectedUnits[0];
   const primaryTracked=primary?.order?.targetUnitId?units.find(u=>u.id===primary.order?.targetUnitId):undefined;
   const primaryTargetX=primaryTracked?.x??primary?.order?.targetX,primaryTargetY=primaryTracked?.y??primary?.order?.targetY;
-  const blue=units.filter(u=>u.side==="blue"),enemy=units.filter(u=>u.side==="red");
-  const blueCities=cities.filter(c=>c.owner==="blue").length;
+  const blue=units.filter(u=>LOCAL_SIDES.has(u.side)),enemy=units.filter(u=>!LOCAL_SIDES.has(u.side));
+  const blueCities=cities.filter(c=>LOCAL_SIDES.has(c.owner)).length;
   const averageSupply=blue.reduce((s,u)=>s+u.supply,0)/Math.max(1,blue.length);
   const averageOrg=blue.reduce((s,u)=>s+u.organization,0)/Math.max(1,blue.length);
 
@@ -322,14 +351,14 @@ export default function Home(){
       const simHours=realSeconds*SIM_HOURS_PER_REAL_SECOND*SPEED_MULTIPLIER[speed];
 
       let working=unitsRef.current;
-      if(aiElapsed>=AI_COMMAND_INTERVAL_SECONDS){working=enemyAI(scenario,working,citiesRef.current);aiElapsed=0}
+      if(aiElapsed>=AI_COMMAND_INTERVAL_SECONDS){for(const side of BOT_SIDES)working=enemyAI(scenario,working,citiesRef.current,side);aiElapsed=0}
       const nextUnits=simulate(scenario,working,simHours,citiesRef.current);
       const nextCities=updateCities(citiesRef.current,nextUnits,simHours);
       unitsRef.current=nextUnits;citiesRef.current=nextCities;setUnits(nextUnits);setCities(nextCities);
 
-      const blueWon=nextCities.length>0&&nextCities.every(c=>c.owner==="blue"),redWon=nextCities.length>0&&nextCities.every(c=>c.owner==="red");
-      if((blueWon||redWon)&&!warResultRef.current){
-        const winner:Side=blueWon?"blue":"red";warResultRef.current=winner;setWarResult(winner);setRunning(false);
+      const owners=new Set(nextCities.map(c=>c.owner));
+      if(nextCities.length>0&&owners.size===1&&!warResultRef.current){
+        const winner=nextCities[0].owner;warResultRef.current=winner;setWarResult(winner);setRunning(false);
       }
 
       setHour(prev=>{const total=prev+simHours;if(total>=24){setDay(d=>d+Math.floor(total/24));return total%24}return total});
@@ -339,7 +368,7 @@ export default function Home(){
   },[scenario,running,speed]);
 
   function selectUnit(e:ReactMouseEvent,u:Formation){
-    e.stopPropagation();if(u.side!=="blue")return;
+    e.stopPropagation();if(!LOCAL_SIDES.has(u.side))return;
     if(e.shiftKey)setSelected(prev=>prev.includes(u.id)?prev.filter(id=>id!==u.id):[...prev,u.id]);else setSelected([u.id]);
   }
 
@@ -368,7 +397,14 @@ export default function Home(){
     const onKey=(e:KeyboardEvent)=>{
       const el=e.target as HTMLElement|null;if(el?.tagName==="INPUT"||el?.tagName==="TEXTAREA"||el?.isContentEditable)return;
       const key=e.key.toLowerCase();
-      if(key==="escape"){setPendingOrder(null);return}
+      if(key==="escape"){setPendingOrder(null);setPendingPlan(false);return}
+      const digit=/^Digit([1-6])$/.exec(e.code);
+      if(digit){
+        const group=ARMY_GROUPS[Number(digit[1])-1];
+        if(e.ctrlKey){e.preventDefault();assignGroup(group.id)}else if(!e.metaKey&&!e.altKey){e.preventDefault();selectGroup(group.id)}
+        return;
+      }
+      if(key==="b"){setPendingPlan(true);setPendingOrder(null);return}
       if(key==="m")startOrder("move");else if(key==="a")startOrder("assault");else if(key==="p")startOrder("probe");
       else if(key==="f")startOrder("fire");else if(key==="d")startOrder("defend");else if(key==="g")startOrder("dig");
       else if(key==="r")startOrder("resupply");else if(key==="t")startOrder("relieve");else if(key==="x")startOrder("retreat");
@@ -396,7 +432,7 @@ export default function Home(){
 
   function nearestLandPoint(x:number,y:number){
     const cx=clamp(x,2,WORLD_W-2),cy=clamp(y,2,WORLD_H-2);if(terrainAt(activeScenario,cx,cy).terrain!=="water")return{x:cx,y:cy};
-    for(let radius=12;radius<=120;radius+=12)for(let i=0;i<16;i++){
+    for(let radius=18;radius<=270;radius+=18)for(let i=0;i<16;i++){
       const a=i/16*Math.PI*2,nx=clamp(cx+Math.cos(a)*radius,2,WORLD_W-2),ny=clamp(cy+Math.sin(a)*radius,2,WORLD_H-2);
       if(terrainAt(activeScenario,nx,ny).terrain!=="water")return{x:nx,y:ny};
     }
@@ -409,7 +445,65 @@ export default function Home(){
     const ordered=units.filter(u=>selected.includes(u.id)).sort((a,b)=>(((a.x-start.x)*dx+(a.y-start.y)*dy)-((b.x-start.x)*dx+(b.y-start.y)*dy))/len2);
     const targets=new Map<string,{x:number;y:number}>();
     ordered.forEach((u,i)=>{const t=ordered.length===1?.5:i/(ordered.length-1);targets.set(u.id,nearestLandPoint(start.x+dx*t,start.y+dy*t))});
-    commitUnits(prev=>prev.map(u=>{const target=targets.get(u.id);return target?{...u,order:{type:"move",targetX:target.x,targetY:target.y}}:u}));setPendingOrder(null);
+    commitUnits(prev=>prev.map(u=>{const target=targets.get(u.id);return target?{...u,formationShape:"line",order:{type:"move",targetX:target.x,targetY:target.y}}:u}));setPendingOrder(null);
+  }
+
+  function assignGroup(groupId:string){
+    if(!selected.length)return;
+    commitUnits(prev=>prev.map(u=>selected.includes(u.id)?{...u,groupId}:u));
+  }
+
+  function selectGroup(groupId:string){
+    setSelected(units.filter(u=>LOCAL_SIDES.has(u.side)&&u.groupId===groupId).map(u=>u.id));
+    setPendingOrder(null);setPendingPlan(false);
+  }
+
+  function arrangeFormation(shape:FormationShape){
+    const chosen=units.filter(u=>selected.includes(u.id));if(chosen.length<2)return;
+    const cx=chosen.reduce((s,u)=>s+u.x,0)/chosen.length,cy=chosen.reduce((s,u)=>s+u.y,0)/chosen.length;
+    const nearest=enemy.map(v=>({v,d:Math.hypot(v.x-cx,v.y-cy)})).sort((a,b)=>a.d-b.d)[0]?.v;
+    const hx=nearest?(nearest.x-cx)/(Math.hypot(nearest.x-cx,nearest.y-cy)||1):1;
+    const hy=nearest?(nearest.y-cy)/(Math.hypot(nearest.x-cx,nearest.y-cy)||1):0;
+    const px=-hy,py=hx;
+    const targets=new Map<string,{x:number;y:number}>();
+    chosen.forEach((u,i)=>{
+      const centered=i-(chosen.length-1)/2;let along=0,lateral=0;
+      if(shape==="line")lateral=centered*95;
+      else if(shape==="column")along=centered*82;
+      else if(shape==="echelon"){lateral=centered*82;along=-centered*48}
+      else{
+        const rank=Math.floor(Math.sqrt(i)),rankStart=rank*rank,pos=i-rankStart;
+        lateral=(pos-rank/2)*105;along=-rank*90;
+      }
+      targets.set(u.id,nearestLandPoint(cx+hx*along+px*lateral,cy+hy*along+py*lateral));
+    });
+    commitUnits(prev=>prev.map(u=>{const t=targets.get(u.id);return t?{...u,formationShape:shape,order:{type:"move",targetX:t.x,targetY:t.y}}:u}));
+  }
+
+  function createAttackPlan(tx:number,ty:number){
+    const chosen=units.filter(u=>selected.includes(u.id));if(!chosen.length)return;
+    const side=chosen[0].side,id="plan-"+planCounter.current++;
+    setAttackPlans(prev=>[...prev,{id,name:"OP "+String(planCounter.current-1).padStart(2,"0"),side,formationIds:chosen.map(u=>u.id),targetX:tx,targetY:ty,status:"draft"}]);
+    setPendingPlan(false);
+  }
+
+  function executePlan(id:string){
+    const plan=attackPlans.find(p=>p.id===id);if(!plan)return;
+    const chosen=plan.formationIds;
+    commitUnits(prev=>prev.map(u=>{
+      if(!chosen.includes(u.id))return u;
+      const i=chosen.indexOf(u.id),angle=(i%7)/7*Math.PI*2,r=35+18*Math.floor(i/7);
+      const t=nearestLandPoint(plan.targetX+Math.cos(angle)*r,plan.targetY+Math.sin(angle)*r);
+      return{...u,order:{type:DIRECT_COMBAT_KINDS.has(u.kind)?"assault":"move",targetX:t.x,targetY:t.y}};
+    }));
+    setAttackPlans(prev=>prev.map(p=>p.id===id?{...p,status:"executing"}:p));
+  }
+
+  function cancelPlan(id:string){setAttackPlans(prev=>prev.filter(p=>p.id!==id))}
+
+  function planOrigin(plan:AttackPlan){
+    const force=units.filter(u=>plan.formationIds.includes(u.id));
+    return force.length?{x:force.reduce((s,u)=>s+u.x,0)/force.length,y:force.reduce((s,u)=>s+u.y,0)/force.length}:{x:plan.targetX,y:plan.targetY};
   }
 
   function issueTarget(e:ReactMouseEvent){
@@ -418,6 +512,7 @@ export default function Home(){
     if(!selected.length||pendingOrder==="assault"||pendingOrder==="fire"||pendingOrder==="relieve")return;
     const point=mapPoint(e.clientX,e.clientY);if(!point)return;
     const tx=clamp(point.x,1,WORLD_W-1),ty=clamp(point.y,1,WORLD_H-1);if(terrainAt(activeScenario,tx,ty).terrain==="water")return;
+    if(pendingPlan){createAttackPlan(tx,ty);return}
     const requested=pendingOrder;
     commitUnits(prev=>prev.map(u=>{
       if(!selected.includes(u.id))return u;
@@ -431,12 +526,12 @@ export default function Home(){
     const requested=pendingOrder;
 
     if(requested==="relieve"){
-      if(target.side!=="blue")return;
+      if(!primary||target.side!==primary.side)return;
       commitUnits(prev=>prev.map(u=>selected.includes(u.id)&&DIRECT_COMBAT_KINDS.has(u.kind)?{...u,order:{type:"relieve",targetUnitId:target.id}}:u));
       setPendingOrder(null);return;
     }
 
-    if((requested==="assault"||requested==="fire"||requested==="probe")&&target.side==="blue")return;
+    if((requested==="assault"||requested==="fire"||requested==="probe")&&primary&&target.side===primary.side)return;
     commitUnits(prev=>prev.map(u=>{
       if(!selected.includes(u.id))return u;
       if(requested==="fire")return u.kind==="artillery"?{...u,order:{type:"fire",targetUnitId:target.id}}:u;
@@ -451,7 +546,7 @@ export default function Home(){
 
   function onWheel(e:ReactWheelEvent<HTMLDivElement>){
     e.preventDefault();const rect=viewport.current?.getBoundingClientRect();if(!rect)return;
-    const mx=e.clientX-rect.left,my=e.clientY-rect.top,next=clamp(zoom*(e.deltaY>0?.9:1.1),.42,1.8),wx=(mx-pan.x)/zoom,wy=(my-pan.y)/zoom;
+    const mx=e.clientX-rect.left,my=e.clientY-rect.top,next=clamp(zoom*(e.deltaY>0?.9:1.1),.1,1.5),wx=(mx-pan.x)/zoom,wy=(my-pan.y)/zoom;
     setZoom(next);setPan(boundedPan({x:mx-wx*next,y:my-wy*next},next));
   }
 
@@ -481,7 +576,7 @@ export default function Home(){
       setSelectionBox(null);if(!d.moved)return;suppressContextMenu.current=true;
       const a=mapPoint(d.startClientX,d.startClientY),b=mapPoint(e.clientX,e.clientY);if(!a||!b)return;
       const minX=Math.min(a.x,b.x),maxX=Math.max(a.x,b.x),minY=Math.min(a.y,b.y),maxY=Math.max(a.y,b.y);
-      setSelected(units.filter(u=>u.side==="blue"&&u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY).map(u=>u.id));setPendingOrder(null);return;
+      setSelected(units.filter(u=>LOCAL_SIDES.has(u.side)&&u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY).map(u=>u.id));setPendingOrder(null);return;
     }
     setFrontPreview(null);if(!d.moved)return;const a=mapPoint(d.startClientX,d.startClientY),b=mapPoint(e.clientX,e.clientY);if(a&&b)deployFront(a,b);
   }
@@ -508,19 +603,21 @@ export default function Home(){
 
     <aside className="left-panel">
       <section><div className="section-title">MAP LAYERS</div><div className="segmented">{(["terrain","supply","intel"] as OverlayMode[]).map(m=><button key={m} onClick={()=>setOverlay(m)} className={overlay===m?"active":""}>{m.toUpperCase()}</button>)}</div></section>
+      <section><div className="section-title">ARMY GROUPS · CTRL+1…6 ASSIGN</div><div className="army-group-grid">{ARMY_GROUPS.map(g=><button key={g.id} onClick={()=>selectGroup(g.id)}><b>{g.hotkey}</b><span>{g.name}<small>{blue.filter(u=>u.groupId===g.id).length} formations</small></span></button>)}</div></section>
+      <section><div className="section-title">ATTACK PLANS · B THEN RMB</div><div className="plan-list">{attackPlans.length?attackPlans.map(p=><div className={"plan-row "+p.status} key={p.id}><button onClick={()=>setSelected(p.formationIds)}><b>{p.name}</b><small>{p.formationIds.length} formations · {p.status}</small></button>{p.status==="draft"&&<button onClick={()=>executePlan(p.id)}>GO</button>}<button onClick={()=>cancelPlan(p.id)}>×</button></div>):<small className="muted-line">No plans drafted.</small>}</div></section>
       <section><div className="section-title">ORDER OF BATTLE</div><div className="oob-list">{blue.map(u=><button key={u.id} onClick={()=>setSelected([u.id])} className={selected.includes(u.id)?"selected":""}><span className="oob-code">{UNIT_LABEL[u.kind]}</span><span><b>{u.name}</b><small>{pct(u.strength)} STR · {pct(u.organization)} ORG</small></span></button>)}</div></section>
     </aside>
 
-    <div ref={viewport} className={pendingOrder?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenu={issueTarget}>
+    <div ref={viewport} className={pendingOrder||pendingPlan?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenu={issueTarget}>
       <div className="world" style={{width:WORLD_W,height:WORLD_H,transform:"translate("+pan.x+"px,"+pan.y+"px) scale("+zoom+")"}}>
         <svg className="terrain" width={WORLD_W} height={WORLD_H} viewBox={"0 0 "+WORLD_W+" "+WORLD_H}>
-          <defs><linearGradient id="sea" x1="0" x2="1"><stop offset="0" stopColor="#1c313c"/><stop offset="1" stopColor="#29424b"/></linearGradient><linearGradient id="intelShade" x1="0" x2="1"><stop offset="0" stopColor="#71846a" stopOpacity=".08"/><stop offset=".55" stopColor="#151b18" stopOpacity=".22"/><stop offset="1" stopColor="#050806" stopOpacity=".68"/></linearGradient><filter id="paperNoise"><feTurbulence baseFrequency=".016" numOctaves="3" seed={activeScenario.seed%1000} result="noise"/><feBlend in="SourceGraphic" in2="noise" mode="soft-light"/></filter></defs>
+          <defs><linearGradient id="sea" x1="0" x2="1"><stop offset="0" stopColor="#1c313c"/><stop offset="1" stopColor="#29424b"/></linearGradient><linearGradient id="intelShade" x1="0" x2="1"><stop offset="0" stopColor="#71846a" stopOpacity=".08"/><stop offset=".55" stopColor="#151b18" stopOpacity=".22"/><stop offset="1" stopColor="#050806" stopOpacity=".68"/></linearGradient></defs>
           <rect width={WORLD_W} height={WORLD_H} fill="url(#sea)"/><path d={activeScenario.landPath} className="land-base"/>
           {activeScenario.terrainFeatures.map(f=><path key={f.id} d={f.path} className={"terrain-region "+f.terrain}/>)}
           {activeScenario.riverRoutes.map((route,i)=><path key={"river"+i} d={polylinePath(route)} className="river"/>)}
           {activeScenario.roadRoutes.map((route,i)=><path key={"road"+i} d={polylinePath(route)} className="road"/>)}
-          {cities.map(s=><g key={s.name} className={"site-label "+s.owner}><circle cx={s.x} cy={s.y} r="6" className="site-core"/><circle cx={s.x} cy={s.y} r="25" className="site-ring"/>{s.capture>0&&<circle cx={s.x} cy={s.y} r="30" className="capture-ring" pathLength="100" strokeDasharray={s.capture+" "+(100-s.capture)} transform={"rotate(-90 "+s.x+" "+s.y+")"}/>}<text x={s.x+11} y={s.y-11}>{s.name.toUpperCase()} · {s.owner==="blue"?"B":"R"}</text></g>)}
-          {overlay==="supply"&&<g className="supply-overlay">{activeScenario.roadRoutes.map((route,i)=><path key={i} d={polylinePath(route)} className="supply-route"/>)}{cities.map(s=><circle key={s.name} cx={s.x} cy={s.y} r="78" className={"supply-node "+s.owner}/>)}{units.filter(u=>u.kind==="logistics").map(u=><circle key={u.id} cx={u.x} cy={u.y} r={250+u.supply*1.6} className={"logistics-range "+u.side}/>)}</g>}
+          {cities.map(s=><g key={s.name} className={"site-label "+s.owner}><circle cx={s.x} cy={s.y} r="6" className="site-core"/><circle cx={s.x} cy={s.y} r="25" className="site-ring"/>{s.capture>0&&<circle cx={s.x} cy={s.y} r="30" className="capture-ring" pathLength="100" strokeDasharray={s.capture+" "+(100-s.capture)} transform={"rotate(-90 "+s.x+" "+s.y+")"}/>}<text x={s.x+11} y={s.y-11}>{s.name.toUpperCase()} · {s.owner==="blue"?"B":s.owner==="red"?"R":"G"}</text></g>)}
+          {overlay==="supply"&&<g className="supply-overlay">{activeScenario.roadRoutes.map((route,i)=><path key={i} d={polylinePath(route)} className="supply-route"/>)}{cities.map(s=><circle key={s.name} cx={s.x} cy={s.y} r="78" className={"supply-node "+s.owner}/>)}{units.filter(u=>u.kind==="logistics").map(u=><circle key={u.id} cx={u.x} cy={u.y} r={320+u.supply*1.3} className={"logistics-range "+u.side}/>)}</g>}
           {overlay==="intel"&&<path d={activeScenario.landPath} fill="url(#intelShade)" className="intel-overlay"/>}<rect x="1" y="1" width={WORLD_W-2} height={WORLD_H-2} className="world-boundary"/>
         </svg>
 
@@ -530,11 +627,13 @@ export default function Home(){
           return <button key={u.id} className={"unit-counter "+u.side+" "+(selected.includes(u.id)?"selected ":"")+(u.organization<30?"shaken ":"")+(u.order?.type==="retreat"?"retreating":"")} style={{left:u.x-16,top:u.y-16}} onPointerDown={e=>e.stopPropagation()} onClick={e=>selectUnit(e,u)} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{u.side==="blue"?"Ⅰ":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
         })}
         {primary&&primaryTargetX!==undefined&&primaryTargetY!==undefined&&<svg className="order-line" width={WORLD_W} height={WORLD_H}><line x1={primary.x} y1={primary.y} x2={primaryTargetX} y2={primaryTargetY}/><circle cx={primaryTargetX} cy={primaryTargetY} r="10"/></svg>}
+        {attackPlans.length>0&&<svg className="attack-plans" width={WORLD_W} height={WORLD_H}>{attackPlans.map(plan=>{const o=planOrigin(plan);return <g key={plan.id} className={plan.status}><line x1={o.x} y1={o.y} x2={plan.targetX} y2={plan.targetY}/><circle cx={plan.targetX} cy={plan.targetY} r="18"/><text x={plan.targetX+24} y={plan.targetY-18}>{plan.name}</text></g>})}</svg>}
       </div>
 
       {selectionBox&&<div className="selection-box" style={{left:Math.min(selectionBox.x1,selectionBox.x2),top:Math.min(selectionBox.y1,selectionBox.y2),width:Math.abs(selectionBox.x2-selectionBox.x1),height:Math.abs(selectionBox.y2-selectionBox.y1)}}/>}
       {frontPreview&&<svg className="front-preview"><line x1={frontPreview.x1} y1={frontPreview.y1} x2={frontPreview.x2} y2={frontPreview.y2}/></svg>}
       <div className="map-hud"><div><span className="dot friendly"/>FRIENDLY {blue.length}</div><div><span className="dot hostile"/>CONTACTS {enemy.length}</div><div>CITIES {blueCities}/{cities.length}</div><div>{hovered?TERRAIN_RULES[hovered.terrain].label.toUpperCase()+" · "+(hovered.road?"SUPPLY ROAD":"OFF ROAD"):"THEATER "+activeScenario.seed}</div><div>ZOOM {Math.round(zoom*100)}%</div></div>
+      {pendingPlan&&<div className="target-banner">ATTACK PLAN · RMB OBJECTIVE <button onClick={()=>setPendingPlan(false)}>ESC / CANCEL</button></div>}
       {pendingOrder&&<div className="target-banner">{pendingOrder==="relieve"?"RELIEVE ARMED · RMB FRIENDLY FRONTLINE":pendingOrder==="assault"||pendingOrder==="fire"?pendingOrder.toUpperCase()+" ARMED · RMB ENEMY FORMATION":pendingOrder.toUpperCase()+" ARMED · RMB TARGET"} <button onClick={()=>setPendingOrder(null)}>ESC / CANCEL</button></div>}
       {warResult&&<div className={"war-result "+warResult}><b>{warResult==="blue"?"VICTORY":"DEFEAT"}</b><span>ALL STRATEGIC CITIES CONTROLLED BY {warResult.toUpperCase()} FORCES</span></div>}
     </div>
@@ -545,7 +644,10 @@ export default function Home(){
         <div className="stat-grid"><Stat label="Strength" value={primary.strength}/><Stat label="Organization" value={primary.organization}/><Stat label="Supply" value={primary.supply}/><Stat label="Fuel" value={primary.fuel}/><Stat label="Entrenchment" value={primary.entrenchment}/><Stat label="Readiness" value={primary.readiness}/></div>
         <div className="section-title">COMBAT MODEL</div><div className="numbers"><Row k="Manpower" v={primary.manpower.toLocaleString()}/><Row k="Soft attack" v={String(primary.softAttack)}/><Row k="Hard attack" v={String(primary.hardAttack)}/><Row k="Defense" v={String(primary.defense)}/><Row k="Breakthrough" v={String(primary.breakthrough)}/><Row k="Recon" v={String(primary.recon)}/><Row k="Speed" v={primary.speed+" km/h"}/></div>
         <div className="section-title">SUPPLY ACCESS</div>{primaryAccess&&<div className={"supply-access level-"+primaryAccess.level}><b>{primaryAccess.label}</b><span>{primaryAccess.range>0?"Relay range "+Math.round(primaryAccess.range):primaryAccess.level===0?"Resupply severely limited":"Automatic resupply active"}</span></div>}
+        <div className="section-title">FORMATION</div><div className="formation-controls">{(["line","column","wedge","echelon"] as FormationShape[]).map(shape=><button key={shape} onClick={()=>arrangeFormation(shape)} disabled={selectedUnits.length<2}>{shape.toUpperCase()}</button>)}</div>
+        <div className="section-title">ARMY GROUP</div><div className="group-assign">{ARMY_GROUPS.map(g=><button key={g.id} className={selectedUnits.length>0&&selectedUnits.every(u=>u.groupId===g.id)?"active":""} onClick={()=>assignGroup(g.id)}>{g.hotkey}</button>)}</div>
         <div className="section-title">ORDERS</div><div className="orders">
+          <button className={pendingPlan?"active plan-button":""} onClick={()=>{setPendingPlan(true);setPendingOrder(null)}}>ATTACK PLAN <kbd>B</kbd></button>
           <button className={!pendingOrder?"active":""} onClick={()=>startOrder("move")}>MOVE <kbd>M</kbd></button>
           <button disabled={!selectedUnits.some(u=>DIRECT_COMBAT_KINDS.has(u.kind))} className={pendingOrder==="assault"?"active":""} onClick={()=>startOrder("assault")}>ASSAULT <kbd>A</kbd></button>
           <button disabled={!selectedUnits.some(u=>DIRECT_COMBAT_KINDS.has(u.kind))} className={pendingOrder==="probe"?"active":""} onClick={()=>startOrder("probe")}>PROBE <kbd>P</kbd></button>
@@ -557,7 +659,7 @@ export default function Home(){
       </div>:<div className="empty-inspector"><b>NO FORMATION SELECTED</b><span>Select a friendly counter on the map.</span></div>}
     </aside>
 
-    <footer className="statusbar"><span>LMB EMPTY: DESELECT</span><span>RMB DRAG: BOX SELECT</span><span>CTRL+LMB DRAG: FORM FRONT</span><span>T: RELIEVE · X: RETREAT</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
+    <footer className="statusbar"><span>SPACE: PAUSE</span><span>RMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
   </main>
 }
 
