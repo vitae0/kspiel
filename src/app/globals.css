@@ -25,3 +25,12 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .logistics-range{fill:none;stroke-width:2;stroke-dasharray:12 10;opacity:.2;pointer-events:none}
 .logistics-range.blue{stroke:#9ec2d2}.logistics-range.red{stroke:#d18a82}
 .unit-counter.retreating{outline:2px dashed #d8c77f;outline-offset:3px;filter:saturate(.72)}
+
+.site-label.green .site-core{fill:#78926c}.site-label.green .site-ring{stroke:#96ad87}
+.unit-counter.green{background:#78926c;color:#10160d}
+.logistics-range.green{stroke:#a6c39a}
+.army-group-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px}.army-group-grid button{display:flex;align-items:center;gap:7px;text-align:left;background:#191e18;border:1px solid #343a31;padding:6px;cursor:pointer}.army-group-grid button:hover{background:#242a22}.army-group-grid button>b{display:grid;place-items:center;width:22px;height:22px;border:1px solid #6c725e;color:#d7cb91}.army-group-grid span{font-size:8px}.army-group-grid small{display:block;color:var(--muted);font-size:7px}
+.plan-list{display:flex;flex-direction:column;gap:4px}.plan-row{display:grid;grid-template-columns:1fr auto auto;gap:3px}.plan-row button{background:#191e18;border:1px solid #3a4137;padding:5px;color:inherit;cursor:pointer;text-align:left}.plan-row>button:nth-child(2){color:#d9cd91}.plan-row.executing{opacity:.72}.plan-row small{display:block;color:var(--muted);font-size:7px}.muted-line{color:var(--muted);font-size:8px}
+.formation-controls{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:14px}.formation-controls button,.group-assign button{border:1px solid #485044;background:#20251e;padding:6px;cursor:pointer;font-size:8px}.formation-controls button:disabled{opacity:.35}.group-assign{display:grid;grid-template-columns:repeat(6,1fr);gap:3px;margin-bottom:14px}.group-assign button.active{border-color:#a59662;background:#393625;color:#eadb9b}
+.attack-plans{position:absolute;inset:0;pointer-events:none;z-index:7}.attack-plans line{stroke:#d9b45f;stroke-width:4;stroke-dasharray:18 10}.attack-plans circle{fill:none;stroke:#d9b45f;stroke-width:3}.attack-plans text{fill:#eadb9b;font:700 14px monospace;paint-order:stroke;stroke:#171a14;stroke-width:4}.attack-plans .executing line{stroke:#c06a58;stroke-dasharray:8 6}.attack-plans .executing circle{stroke:#c06a58}
+.orders .plan-button{grid-column:1/3;border-color:#8c6c45;background:#33281e}
