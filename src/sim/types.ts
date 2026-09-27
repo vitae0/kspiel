@@ -1,8 +1,9 @@
 export type ForceFamily="regular"|"asymmetric"|"paramilitary"|"contractor";
 export type PoliticalVector={stateControl:number;centralization:number;militaryInfluence:number;nationalism:number;socialConservatism:number;personalism:number};
 
-export type TerrainKind="water"|"plains"|"forest"|"hills"|"mountain"|"marsh"|"urban";
-export type UnitKind="infantry"|"mechanized"|"armor"|"artillery"|"recon"|"engineer"|"logistics";
+export type TerrainKind="water"|"plains"|"forest"|"hills"|"mountain"|"highmountain"|"marsh"|"urban"|"desert";
+export type ScenarioTheme="mixed"|"mountain"|"forest"|"desert"|"winter"|"steppe";
+export type UnitKind="infantry"|"mechanized"|"armor"|"tank"|"cavalry"|"mountaineer"|"artillery"|"heavy_artillery"|"recon"|"engineer"|"logistics";
 export type Side="blue"|"red"|"green";
 export type OrderType="move"|"defend"|"assault"|"probe"|"fire"|"resupply"|"dig"|"relieve"|"retreat";
 export type OverlayMode="terrain"|"supply"|"intel";
@@ -15,18 +16,41 @@ export type MatchConfig={id:string;mode:MatchMode;players:PlayerSlot[];authorita
 export type ArmyGroup={id:string;name:string;side:Side;hotkey:number};
 export type AttackPlan={id:string;name:string;side:Side;formationIds:string[];targetX:number;targetY:number;status:"draft"|"executing"|"complete"};
 
+export type ScenarioPreset={
+  id:string;
+  title:string;
+  subtitle:string;
+  theme:ScenarioTheme;
+  historical:boolean;
+  year?:number;
+  location:string;
+  sideNames:{blue:string;red:string;green?:string};
+  cityNames:string[];
+};
+
 export type CityState={name:string;x:number;y:number;owner:Side;capture:number};
 
 export type TerrainFeature={
-  id:string;terrain:Exclude<TerrainKind,"water"|"plains"|"urban">;
+  id:string;
+  terrain:Exclude<TerrainKind,"water"|"plains"|"urban"|"desert">;
   cx:number;cy:number;rx:number;ry:number;rotation:number;seed:number;path:string;
 };
 
 export type Scenario={
-  seed:number;landPath:string;terrainFeatures:TerrainFeature[];
+  seed:number;
+  presetId:string;
+  title:string;
+  theme:ScenarioTheme;
+  historical:boolean;
+  year?:number;
+  location:string;
+  sideNames:{blue:string;red:string;green?:string};
+  landPath:string;
+  terrainFeatures:TerrainFeature[];
   roadRoutes:Array<Array<{x:number;y:number}>>;
   riverRoutes:Array<Array<{x:number;y:number}>>;
-  cities:CityState[];formations:Formation[];
+  cities:CityState[];
+  formations:Formation[];
   coast:{base:number;amp1:number;amp2:number;amp3:number;f1:number;f2:number;f3:number;p1:number;p2:number};
 };
 
