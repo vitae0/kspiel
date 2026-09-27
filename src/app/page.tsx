@@ -643,7 +643,10 @@ export default function Home(){
   function onPointerDown(e:ReactPointerEvent<HTMLDivElement>){
     if(e.button>2)return;const screen=viewportPoint(e.clientX,e.clientY);if(!screen)return;
     let mode:"pan"|"box"|"front"|"select"="select";
-    if(e.button===1)mode="pan";else if(e.button===2)mode="box";else if(e.button===0&&e.ctrlKey&&selected.length>1)mode="front";else if(e.button!==0)return;
+    if(e.button===1)mode="pan";
+    else if(e.button===0&&e.ctrlKey&&selected.length>1)mode="front";
+    else if(e.button===0)mode="box";
+    else return;
     if(mode==="pan")e.preventDefault();
     drag.current={mode,startClientX:e.clientX,startClientY:e.clientY,px:pan.x,py:pan.y,moved:false};
     if(mode==="box")setSelectionBox({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
@@ -665,7 +668,8 @@ export default function Home(){
     if(d.mode==="pan")return;
     if(d.mode==="select"){if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false)}return}
     if(d.mode==="box"){
-      setSelectionBox(null);if(!d.moved)return;suppressContextMenu.current=true;
+      setSelectionBox(null);
+      if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false);return}
       const a=mapPoint(d.startClientX,d.startClientY),b=mapPoint(e.clientX,e.clientY);if(!a||!b)return;
       const minX=Math.min(a.x,b.x),maxX=Math.max(a.x,b.x),minY=Math.min(a.y,b.y),maxY=Math.max(a.y,b.y);
       setSelected(units.filter(u=>LOCAL_SIDES.has(u.side)&&u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY).map(u=>u.id));setPendingOrder(null);return;
@@ -751,7 +755,7 @@ export default function Home(){
       </div>:<div className="empty-inspector"><b>NO FORMATION SELECTED</b><span>Select a friendly counter on the map.</span></div>}
     </aside>
 
-    <footer className="statusbar"><span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
+    <footer className="statusbar"><span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
   </main>
 }
 
