@@ -6,7 +6,8 @@ import type {CityState,Formation,OrderType,OverlayMode,Scenario,Side,TerrainSamp
 
 const SPEED_MULTIPLIER=[0,1,2.5,6];
 const SIM_HOURS_PER_REAL_SECOND=.75;
-const MAX_FRAME_SECONDS=.035;
+const MAX_FRAME_SECONDS=.12;
+const SIM_TICK_MS=100;
 const AI_COMMAND_INTERVAL_SECONDS=.55;
 const MOVEMENT_SCALE=2.7;
 const RETREAT_SUPPLY_MIN=35;
@@ -314,8 +315,9 @@ export default function Home(){
 
   useEffect(()=>{
     if(!scenario||!running||speed===0||warResultRef.current)return;
-    let frame=0,last=performance.now(),aiElapsed=AI_COMMAND_INTERVAL_SECONDS;
-    const tick=(now:number)=>{
+    let last=performance.now(),aiElapsed=AI_COMMAND_INTERVAL_SECONDS;
+    const tick=()=>{
+      const now=performance.now();
       const realSeconds=Math.min(MAX_FRAME_SECONDS,Math.max(0,(now-last)/1000));last=now;aiElapsed+=realSeconds;
       const simHours=realSeconds*SIM_HOURS_PER_REAL_SECOND*SPEED_MULTIPLIER[speed];
 
@@ -331,10 +333,9 @@ export default function Home(){
       }
 
       setHour(prev=>{const total=prev+simHours;if(total>=24){setDay(d=>d+Math.floor(total/24));return total%24}return total});
-      frame=requestAnimationFrame(tick);
     };
-    frame=requestAnimationFrame(tick);
-    return()=>cancelAnimationFrame(frame);
+    const timer=window.setInterval(tick,SIM_TICK_MS);
+    return()=>window.clearInterval(timer);
   },[scenario,running,speed]);
 
   if(!scenario)return <main className="game-shell loading-theater">GENERATING THEATER...</main>;
