@@ -24,16 +24,21 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
+        with:
+          static_site_generator: next
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
       - name: Build static site
         run: npm run build
+
+      - name: Disable Jekyll processing
+        run: touch ./out/.nojekyll
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -49,4 +54,27 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
+
+      - name: Verify live page and static assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="${{ steps.deployment.outputs.page_url }}"
+          html=""
+
+          for attempt in {1..12}; do
+            if html="$(curl --location --fail --show-error --silent --max-time 15 "$url")"; then
+              break
+            fi
+            sleep 5
+          done
+
+          test -n "$html"
+          printf '%s' "$html" | grep -q 'GENERATING THEATER'
+
+          asset="$(printf '%s' "$html" | grep -oE '/kspiel/_next/static/[^"]+\.(js|css)' | head -n 1 || true)"
+          test -n "$asset"
+
+          origin="${url%/kspiel/}"
+          curl --location --fail --show-error --silent --max-time 15 --output /dev/null "${origin}${asset}"
