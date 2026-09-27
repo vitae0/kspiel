@@ -1,20 +1,20 @@
-import type {CityState,Formation,Scenario,TerrainFeature,TerrainKind,TerrainSample,UnitKind} from "./types";
+import type {CityState,Formation,Scenario,Side,TerrainFeature,TerrainKind,TerrainSample,UnitKind} from "./types";
 
-export const WORLD_W=2080;
-export const WORLD_H=1360;
+export const WORLD_W=6200;
+export const WORLD_H=4200;
 
 export const TERRAIN_RULES:Record<TerrainKind,{label:string;move:number;attack:number;defense:number;supply:number}>={
   water:{label:"Water",move:0,attack:0,defense:0,supply:0},
   plains:{label:"Plains",move:1,attack:1,defense:1,supply:1},
-  forest:{label:"Forest",move:.68,attack:.82,defense:1.28,supply:.76},
-  hills:{label:"Hills",move:.62,attack:.76,defense:1.38,supply:.7},
-  mountain:{label:"Mountain",move:.38,attack:.58,defense:1.72,supply:.48},
-  marsh:{label:"Marsh",move:.45,attack:.7,defense:1.16,supply:.52},
-  urban:{label:"Urban",move:.82,attack:.72,defense:1.56,supply:1.18}
+  forest:{label:"Forest",move:.66,attack:.8,defense:1.3,supply:.7},
+  hills:{label:"Hills",move:.6,attack:.74,defense:1.4,supply:.64},
+  mountain:{label:"Mountain",move:.34,attack:.54,defense:1.78,supply:.4},
+  marsh:{label:"Marsh",move:.42,attack:.66,defense:1.18,supply:.45},
+  urban:{label:"Urban",move:.78,attack:.68,defense:1.62,supply:1.12}
 };
 
 export const UNIT_LABEL:Record<UnitKind,string>={
-  infantry:"INF",mechanized:"MECH",armor:"ARM",artillery:"ART",recon:"REC",engineer:"ENG",logistics:"LOG",reserve:"RSV"
+  infantry:"INF",mechanized:"MECH",armor:"ARM",artillery:"ART",recon:"REC",engineer:"ENG",logistics:"LOG"
 };
 
 function mulberry32(seed:number){
@@ -32,9 +32,9 @@ export function polylinePath(points:{x:number;y:number}[]){
 function blobPath(cx:number,cy:number,rx:number,ry:number,rotation:number,seed:number){
   const points:string[]=[];
   const a=rotation*Math.PI/180;
-  for(let i=0;i<30;i++){
-    const t=i/30*Math.PI*2;
-    const wobble=1+.11*Math.sin(t*3+seed*.13)+.06*Math.sin(t*7+seed*.37)+.035*Math.cos(t*11+seed);
+  for(let i=0;i<34;i++){
+    const t=i/34*Math.PI*2;
+    const wobble=1+.1*Math.sin(t*3+seed*.13)+.055*Math.sin(t*7+seed*.37)+.03*Math.cos(t*11+seed);
     const ex=Math.cos(t)*rx*wobble,ey=Math.sin(t)*ry*wobble;
     const x=cx+ex*Math.cos(a)-ey*Math.sin(a);
     const y=cy+ex*Math.sin(a)+ey*Math.cos(a);
@@ -48,7 +48,7 @@ function inFeature(x:number,y:number,f:TerrainFeature){
   const dx=x-f.cx,dy=y-f.cy;
   const lx=dx*Math.cos(a)-dy*Math.sin(a),ly=dx*Math.sin(a)+dy*Math.cos(a);
   const theta=Math.atan2(ly/f.ry,lx/f.rx);
-  const boundary=1+.11*Math.sin(theta*3+f.seed*.13)+.06*Math.sin(theta*7+f.seed*.37)+.035*Math.cos(theta*11+f.seed);
+  const boundary=1+.1*Math.sin(theta*3+f.seed*.13)+.055*Math.sin(theta*7+f.seed*.37)+.03*Math.cos(theta*11+f.seed);
   return Math.hypot(lx/f.rx,ly/f.ry)<boundary;
 }
 
@@ -66,7 +66,7 @@ export function isLand(scenario:Scenario,x:number,y:number){
 
 export function terrainAt(scenario:Scenario,x:number,y:number):TerrainSample{
   if(!isLand(scenario,x,y))return{x,y,terrain:"water",elevation:0,road:false};
-  const city=scenario.cities.find(s=>Math.hypot(x-s.x,y-s.y)<44);
+  const city=scenario.cities.find(s=>Math.hypot(x-s.x,y-s.y)<70);
   if(city)return{x,y,terrain:"urban",elevation:.34,road:true,objective:city.name};
 
   const priorities:TerrainFeature["terrain"][]=["mountain","marsh","forest","hills"];
@@ -77,27 +77,27 @@ export function terrainAt(scenario:Scenario,x:number,y:number):TerrainSample{
       return{x,y,terrain,elevation,road:nearRoad(scenario,x,y)};
     }
   }
-  return{x,y,terrain:"plains",elevation:.36+.07*Math.sin(x*.008+scenario.seed)+.04*Math.cos(y*.013),road:nearRoad(scenario,x,y)};
+  return{x,y,terrain:"plains",elevation:.36+.07*Math.sin(x*.003+scenario.seed)+.04*Math.cos(y*.005),road:nearRoad(scenario,x,y)};
 }
 
 export function nearRoad(scenario:Scenario,x:number,y:number){
-  return scenario.roadRoutes.some(route=>route.slice(0,-1).some((p,i)=>pointSegmentDistance(x,y,p,route[i+1])<20));
+  return scenario.roadRoutes.some(route=>route.slice(0,-1).some((p,i)=>pointSegmentDistance(x,y,p,route[i+1])<30));
 }
 
 function makeFeatures(rnd:()=>number){
   const spec:Array<[TerrainFeature["terrain"],number,[number,number],[number,number]]>=[
-    ["mountain",7+Math.floor(rnd()*4),[105,220],[75,160]],
-    ["hills",10+Math.floor(rnd()*5),[120,250],[85,190]],
-    ["forest",18+Math.floor(rnd()*7),[100,240],[75,180]],
-    ["marsh",5+Math.floor(rnd()*5),[120,260],[80,185]]
+    ["mountain",8+Math.floor(rnd()*4),[430,920],[300,720]],
+    ["hills",11+Math.floor(rnd()*5),[480,1050],[330,800]],
+    ["forest",17+Math.floor(rnd()*7),[420,980],[300,760]],
+    ["marsh",6+Math.floor(rnd()*4),[400,900],[300,690]]
   ];
   const out:TerrainFeature[]=[];
   let id=0;
   for(const [terrain,count,rxRange,ryRange] of spec){
     for(let i=0;i<count;i++){
-      let cx=250+rnd()*(WORLD_W-340),cy=70+rnd()*(WORLD_H-140);
-      if(terrain==="mountain"){cx=720+rnd()*1230;cy=70+rnd()*610}
-      if(terrain==="marsh"){cy=650+rnd()*620}
+      let cx=500+rnd()*(WORLD_W-650),cy=180+rnd()*(WORLD_H-360);
+      if(terrain==="mountain"){cx=1750+rnd()*(WORLD_W-2050);cy=160+rnd()*2050}
+      if(terrain==="marsh"){cy=1900+rnd()*1900}
       const rx=rxRange[0]+rnd()*(rxRange[1]-rxRange[0]);
       const ry=ryRange[0]+rnd()*(ryRange[1]-ryRange[0]);
       const rotation=-55+rnd()*110;
@@ -110,46 +110,38 @@ function makeFeatures(rnd:()=>number){
 
 const CITY_NAMES=[
   "Varen","Orlov","Karsen","Drey","Helmstadt","Serev","Vesta","Belgor","Rovina","Tarsk",
-  "Miren","Ostrel","Karvin","Dunava","Brask","Velin","Sodra","Narev","Korven","Aster"
+  "Miren","Ostrel","Karvin","Dunava","Brask","Velin","Sodra","Narev","Korven","Aster",
+  "Lydin","Morava","Draven","Kelm","Vezna","Orel","Rask","Tovin","Berez","Arden",
+  "Novar","Selin","Korda","Veles","Ruden","Zorin","Merva","Dalen","Korin","Savin"
 ];
 
 function makeCities(rnd:()=>number):CityState[]{
-  const count=7+Math.floor(rnd()*3);
+  const count=15+Math.floor(rnd()*4);
   const shuffled=[...CITY_NAMES].sort(()=>rnd()-.5);
   const cities:CityState[]=[];
-
   for(let i=0;i<count;i++){
     const t=count===1?.5:i/(count-1);
-    const x=330+t*1420+(rnd()-.5)*170;
-    const y=170+rnd()*1020;
-    cities.push({
-      name:shuffled[i],
-      x:Math.max(250,Math.min(WORLD_W-120,x)),
-      y,
-      owner:x<WORLD_W*.5?"blue":"red",
-      capture:0
-    });
+    const x=720+t*(WORLD_W-1440)+(rnd()-.5)*430;
+    const y=360+rnd()*(WORLD_H-720);
+    cities.push({name:shuffled[i],x:Math.max(420,Math.min(WORLD_W-220,x)),y,owner:x<WORLD_W*.5?"blue":"red",capture:0});
   }
-
-  // Guarantee a meaningful opening split even on eccentric seeds.
   cities.sort((a,b)=>a.x-b.x);
-  for(let i=0;i<cities.length;i++){
-    cities[i].owner=i<Math.floor(cities.length/2)?"blue":"red";
-  }
+  for(let i=0;i<cities.length;i++)cities[i].owner=i<Math.floor(cities.length/2)?"blue":"red";
   return cities;
 }
 
 function routeBetween(a:{x:number;y:number},b:{x:number;y:number},rnd:()=>number){
-  const mx=(a.x+b.x)/2+(rnd()-.5)*90;
-  const my=(a.y+b.y)/2+(rnd()-.5)*120;
-  return[{x:a.x,y:a.y},{x:mx,y:my},{x:b.x,y:b.y}];
+  const dx=b.x-a.x,dy=b.y-a.y;
+  const p1={x:a.x+dx*.34+(rnd()-.5)*180,y:a.y+dy*.34+(rnd()-.5)*230};
+  const p2={x:a.x+dx*.68+(rnd()-.5)*180,y:a.y+dy*.68+(rnd()-.5)*230};
+  return[{x:a.x,y:a.y},p1,p2,{x:b.x,y:b.y}];
 }
 
 function makeRoads(cities:CityState[],rnd:()=>number){
   const sorted=[...cities].sort((a,b)=>a.x-b.x);
   const roads:Array<Array<{x:number;y:number}>>=[];
   for(let i=0;i<sorted.length-1;i++)roads.push(routeBetween(sorted[i],sorted[i+1],rnd));
-  for(let i=0;i<Math.max(2,Math.floor(cities.length/3));i++){
+  for(let i=0;i<Math.max(5,Math.floor(cities.length/2));i++){
     const a=cities[Math.floor(rnd()*cities.length)];
     let b=cities[Math.floor(rnd()*cities.length)];
     if(a===b)b=cities[(cities.indexOf(a)+2)%cities.length];
@@ -159,14 +151,12 @@ function makeRoads(cities:CityState[],rnd:()=>number){
 }
 
 function makeRivers(rnd:()=>number){
-  const count=2+Math.floor(rnd()*2);
+  const count=3+Math.floor(rnd()*2);
   const routes:Array<Array<{x:number;y:number}>>=[];
   for(let r=0;r<count;r++){
-    const base=720+r*520+(rnd()-.5)*180;
+    const base=1500+r*1100+(rnd()-.5)*360;
     const pts:Array<{x:number;y:number}>=[];
-    for(let y=40;y<=WORLD_H;y+=170){
-      pts.push({x:base+70*Math.sin(y*.006+r)+ (rnd()-.5)*75,y});
-    }
+    for(let y=80;y<=WORLD_H;y+=260)pts.push({x:base+160*Math.sin(y*.0024+r)+(rnd()-.5)*150,y});
     routes.push(pts);
   }
   return routes;
@@ -180,69 +170,68 @@ function unitBase(kind:UnitKind):Pick<Formation,"manpower"|"hardness"|"softAttac
     artillery:{manpower:3900,hardness:.08,softAttack:92,hardAttack:35,defense:24,breakthrough:18,speed:3,recon:16},
     recon:{manpower:2600,hardness:.38,softAttack:31,hardAttack:22,defense:36,breakthrough:45,speed:9,recon:92},
     engineer:{manpower:4300,hardness:.14,softAttack:35,hardAttack:14,defense:71,breakthrough:40,speed:4,recon:30},
-    logistics:{manpower:2300,hardness:.1,softAttack:10,hardAttack:4,defense:22,breakthrough:8,speed:6,recon:18},
-    reserve:{manpower:8600,hardness:.14,softAttack:49,hardAttack:17,defense:64,breakthrough:38,speed:4.5,recon:30}
+    logistics:{manpower:2300,hardness:.1,softAttack:10,hardAttack:4,defense:22,breakthrough:8,speed:6,recon:18}
   };
   return base[kind];
 }
 
-function unit(id:string,name:string,side:"blue"|"red",kind:UnitKind,x:number,y:number,rnd:()=>number,mods:Partial<Formation>={}):Formation{
+function unit(id:string,name:string,side:Side,kind:UnitKind,x:number,y:number,rnd:()=>number,mods:Partial<Formation>={}):Formation{
   return{
     id,name,side,kind,x,y,
-    strength:92+rnd()*8,
-    organization:kind==="reserve"?78+rnd()*8:82+rnd()*12,
-    supply:82+rnd()*16,
-    fuel:["infantry","artillery","engineer","reserve"].includes(kind)?100:76+rnd()*18,
-    entrenchment:rnd()*18,
+    strength:88+rnd()*12,
+    organization:80+rnd()*14,
+    supply:76+rnd()*20,
+    fuel:["infantry","artillery","engineer"].includes(kind)?100:72+rnd()*22,
+    entrenchment:rnd()*16,
     experience:25+rnd()*45,
-    readiness:78+rnd()*14,
+    readiness:76+rnd()*16,
     movementProgress:0,
     ...unitBase(kind),
     ...mods
   };
 }
 
-function spawnPoint(side:"blue"|"red",cities:CityState[],scenario:Scenario,rnd:()=>number){
+function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>number){
   const owned=cities.filter(c=>c.owner===side);
-  for(let tries=0;tries<40;tries++){
-    const anchor=owned[Math.floor(rnd()*owned.length)]??{x:side==="blue"?520:1560,y:680};
+  for(let tries=0;tries<60;tries++){
+    const anchor=owned[Math.floor(rnd()*owned.length)]??{x:side==="blue"?1300:4900,y:WORLD_H*.5};
     const angle=rnd()*Math.PI*2;
-    const radius=70+rnd()*210;
-    const x=Math.max(210,Math.min(WORLD_W-50,anchor.x+Math.cos(angle)*radius));
-    const y=Math.max(40,Math.min(WORLD_H-40,anchor.y+Math.sin(angle)*radius));
+    const radius=140+rnd()*430;
+    const x=Math.max(330,Math.min(WORLD_W-90,anchor.x+Math.cos(angle)*radius));
+    const y=Math.max(90,Math.min(WORLD_H-90,anchor.y+Math.sin(angle)*radius));
     if(isLand(scenario,x,y))return{x,y};
   }
-  return{x:side==="blue"?520:1560,y:220+rnd()*920};
+  return{x:side==="blue"?1300:4900,y:500+rnd()*(WORLD_H-1000)};
 }
 
-function makeFormations(side:"blue"|"red",scenario:Scenario,rnd:()=>number){
+function makeFormations(side:Side,scenario:Scenario,rnd:()=>number){
   const kinds:UnitKind[]=[
-    "infantry","infantry","infantry","infantry","infantry","infantry",
-    "mechanized","mechanized","mechanized","armor","armor",
-    "artillery","artillery","artillery","recon","recon","engineer",
-    "logistics","logistics","reserve","reserve","reserve"
+    "infantry","infantry","infantry","infantry","infantry","infantry","infantry","infantry","infantry","infantry","infantry","infantry",
+    "mechanized","mechanized","mechanized","mechanized","armor","armor","armor",
+    "artillery","artillery","artillery","artillery","recon","recon","engineer","logistics","logistics"
   ];
   const labels:Record<UnitKind,string>={
     infantry:"Infantry",mechanized:"Mechanized",armor:"Armored",artillery:"Field Artillery",
-    recon:"Recon",engineer:"Engineers",logistics:"Logistics",reserve:"Reserve"
+    recon:"Recon",engineer:"Engineers",logistics:"Logistics"
   };
   return kinds.map((kind,i)=>{
     const p=spawnPoint(side,scenario.cities,scenario,rnd);
-    const prefix=side==="blue"?"b":"r";
-    return unit(prefix+(i+1),(i+1)+(side==="blue"?"th ":"th ")+labels[kind],side,kind,p.x,p.y,rnd,kind==="logistics"?{supply:100}:undefined);
+    const prefix=side[0];
+    const groupId=side+"-army-"+(1+Math.floor(i/7));
+    return unit(prefix+(i+1),(i+1)+"th "+labels[kind],side,kind,p.x,p.y,rnd,{groupId,...(kind==="logistics"?{supply:100}: {})});
   });
 }
 
 export function generateScenario(seed:number):Scenario{
   const rnd=mulberry32(seed||1);
   const coast={
-    base:105+rnd()*85,
-    amp1:35+rnd()*38,
-    amp2:18+rnd()*26,
-    amp3:10+rnd()*18,
-    f1:.0055+rnd()*.0028,
-    f2:.014+rnd()*.006,
-    f3:.026+rnd()*.009,
+    base:210+rnd()*150,
+    amp1:85+rnd()*90,
+    amp2:50+rnd()*70,
+    amp3:28+rnd()*42,
+    f1:.0018+rnd()*.001,
+    f2:.0042+rnd()*.002,
+    f3:.007+rnd()*.0025,
     p1:rnd()*Math.PI*2,
     p2:rnd()*Math.PI*2
   };
@@ -251,17 +240,12 @@ export function generateScenario(seed:number):Scenario{
   const terrainFeatures=makeFeatures(rnd);
   const roadRoutes=makeRoads(cities,rnd);
   const riverRoutes=makeRivers(rnd);
-
-  const shell:Scenario={
-    seed,coast,cities,terrainFeatures,roadRoutes,riverRoutes,formations:[],landPath:""
-  };
+  const shell:Scenario={seed,coast,cities,terrainFeatures,roadRoutes,riverRoutes,formations:[],landPath:""};
 
   const pts:Array<{x:number;y:number}>=[];
-  for(let y=0;y<=WORLD_H;y+=35)pts.push({x:coastX(coast,y),y});
+  for(let y=0;y<=WORLD_H;y+=70)pts.push({x:coastX(coast,y),y});
   shell.landPath="M "+WORLD_W+" 0 L "+coastX(coast,0)+" 0 "+pts.slice(1).map(p=>"L "+p.x.toFixed(1)+" "+p.y).join(" ")+" L "+WORLD_W+" "+WORLD_H+" Z";
 
-  const blue=makeFormations("blue",shell,rnd);
-  const red=makeFormations("red",shell,rnd);
-  shell.formations=[...blue,...red];
+  shell.formations=[...makeFormations("blue",shell,rnd),...makeFormations("red",shell,rnd)];
   return shell;
 }
