@@ -599,7 +599,7 @@ export default function Home(){
 
   function selectGroup(groupId:string){
     setSelected(units.filter(u=>localSides.has(u.side)&&u.groupId===groupId).map(u=>u.id));
-    setPendingOrder(null);setPendingPlan(false);
+    setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);
   }
 
   function arrangeFormation(shape:FormationShape){
@@ -628,7 +628,7 @@ export default function Home(){
     const chosen=units.filter(u=>selected.includes(u.id));if(!chosen.length)return;
     const side=chosen[0].side,id="plan-"+planCounter.current++;
     setAttackPlans(prev=>[...prev,{id,name:"OP "+String(planCounter.current-1).padStart(2,"0"),side,formationIds:chosen.map(u=>u.id),targetX:tx,targetY:ty,status:"draft"}]);
-    setPendingPlan(false);
+    setPendingPlan(false);setPendingBuild(null);
   }
 
   function executePlan(id:string){
@@ -650,12 +650,35 @@ export default function Home(){
     return force.length?{x:force.reduce((s,u)=>s+u.x,0)/force.length,y:force.reduce((s,u)=>s+u.y,0)/force.length}:{x:plan.targetX,y:plan.targetY};
   }
 
+  function armConstruction(kind:EmplacementKind){
+    const engineers=selectedUnits.filter(u=>u.kind==="engineer"&&localSides.has(u.side));
+    if(!engineers.length)return;
+    setPendingBuild(kind);setPendingOrder(null);setPendingPlan(false);
+  }
+
+  function createConstruction(tx:number,ty:number){
+    if(!pendingBuild)return;
+    const engineers=selectedUnits.filter(u=>u.kind==="engineer"&&localSides.has(u.side));
+    if(!engineers.length){setPendingBuild(null);return}
+    const terrain=terrainAt(activeScenario,tx,ty).terrain;
+    if(terrain==="water"||terrain==="highmountain")return;
+    const id="build-"+buildCounter.current++;
+    const project:ConstructionProject={
+      id,kind:pendingBuild,side:engineers[0].side,x:tx,y:ty,builderIds:engineers.map(u=>u.id),progress:0,
+      requiredHours:pendingBuild==="observatory"?30:54
+    };
+    const next=[...projectsRef.current,project];projectsRef.current=next;setConstructionProjects(next);
+    commitUnits(prev=>prev.map(u=>project.builderIds.includes(u.id)?{...u,order:{type:"move",targetX:tx,targetY:ty}}:u));
+    setPendingBuild(null);
+  }
+
   function issueTarget(e:ReactMouseEvent){
     e.preventDefault();
     if(suppressContextMenu.current){suppressContextMenu.current=false;return}
     if(!selected.length||pendingOrder==="assault"||pendingOrder==="fire"||pendingOrder==="relieve")return;
     const point=mapPoint(e.clientX,e.clientY);if(!point)return;
     const tx=clamp(point.x,1,WORLD_W-1),ty=clamp(point.y,1,WORLD_H-1);if(terrainAt(activeScenario,tx,ty).terrain==="water")return;
+    if(pendingBuild){createConstruction(tx,ty);return}
     if(pendingPlan){createAttackPlan(tx,ty);return}
     const requested=pendingOrder;
     commitUnits(prev=>prev.map(u=>{
@@ -723,7 +746,7 @@ export default function Home(){
     if(d.mode==="select"){if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false)}return}
     if(d.mode==="box"){
       setSelectionBox(null);
-      if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false);return}
+      if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);return}
       const a=mapPoint(d.startClientX,d.startClientY),b=mapPoint(e.clientX,e.clientY);if(!a||!b)return;
       const minX=Math.min(a.x,b.x),maxX=Math.max(a.x,b.x),minY=Math.min(a.y,b.y),maxY=Math.max(a.y,b.y);
       setSelected(units.filter(u=>localSides.has(u.side)&&u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY).map(u=>u.id));setPendingOrder(null);return;
