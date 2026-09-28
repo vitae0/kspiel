@@ -2,7 +2,9 @@ export type ForceFamily="regular"|"asymmetric"|"paramilitary"|"contractor";
 export type PoliticalVector={stateControl:number;centralization:number;militaryInfluence:number;nationalism:number;socialConservatism:number;personalism:number};
 
 export type TerrainKind="water"|"plains"|"forest"|"hills"|"mountain"|"highmountain"|"marsh"|"urban"|"desert";
-export type ScenarioTheme="mixed"|"mountain"|"forest"|"desert"|"winter"|"steppe";
+export type ScenarioTheme="mixed"|"mountain"|"forest"|"desert"|"winter"|"steppe"|"urban";
+export type Era="medieval"|"early_modern"|"napoleonic"|"industrial"|"modern";
+export type FlagStyle="generic-blue"|"generic-red"|"ussr"|"germany-ww2"|"ottoman"|"crusader"|"sweden"|"imperial"|"france"|"austria"|"russia"|"german-empire"|"britain"|"axis";
 export type UnitKind="infantry"|"mechanized"|"armor"|"tank"|"cavalry"|"mountaineer"|"artillery"|"heavy_artillery"|"recon"|"engineer"|"logistics";
 export type Side="blue"|"red"|"green";
 export type OrderType="move"|"defend"|"assault"|"probe"|"fire"|"resupply"|"dig"|"relieve"|"retreat";
@@ -21,10 +23,12 @@ export type ScenarioPreset={
   title:string;
   subtitle:string;
   theme:ScenarioTheme;
+  era:Era;
   historical:boolean;
   year?:number;
   location:string;
   sideNames:{blue:string;red:string;green?:string};
+  sideFlags:{blue:FlagStyle;red:FlagStyle;green?:FlagStyle};
   cityNames:string[];
 };
 
@@ -41,10 +45,12 @@ export type Scenario={
   presetId:string;
   title:string;
   theme:ScenarioTheme;
+  era:Era;
   historical:boolean;
   year?:number;
   location:string;
   sideNames:{blue:string;red:string;green?:string};
+  sideFlags:{blue:FlagStyle;red:FlagStyle;green?:FlagStyle};
   landPath:string;
   terrainFeatures:TerrainFeature[];
   roadRoutes:Array<Array<{x:number;y:number}>>;
@@ -74,3 +80,25 @@ export type GameCommand=
   |{kind:"execute-plan";playerId:string;side:Side;planId:string};
 
 export type SessionSnapshot={tick:number;scenarioSeed:number;formations:Formation[];cities:CityState[];plans:AttackPlan[]};
+
+
+export type EmplacementKind="observatory"|"fixed_artillery";
+export type Emplacement={
+  id:string;
+  kind:EmplacementKind;
+  side:Side;
+  x:number;
+  y:number;
+  strength:number;
+  range:number;
+};
+export type ConstructionProject={
+  id:string;
+  kind:EmplacementKind;
+  side:Side;
+  x:number;
+  y:number;
+  builderIds:string[];
+  progress:number;
+  requiredHours:number;
+};
