@@ -419,6 +419,10 @@ export default function Home(){
   },[]);
 
   useEffect(()=>{
+    if(isMobile&&(pendingOrder||pendingPlan||pendingBuild))setMobilePanel("none");
+  },[isMobile,pendingOrder,pendingPlan,pendingBuild]);
+
+  useEffect(()=>{
     const togglePause=(e:KeyboardEvent)=>{
       const el=e.target as HTMLElement|null;
       if(el?.tagName==="INPUT"||el?.tagName==="TEXTAREA"||el?.isContentEditable)return;
@@ -856,12 +860,14 @@ export default function Home(){
       <div className="time-controls"><button className="setup-return" onClick={returnToSetup}>SETUP</button><button onClick={()=>setRunning(v=>warResult?v:!v)} className="icon-btn">{running?"Ⅱ":"▶"}</button>{[1,2,3].map(s=><button key={s} onClick={()=>{if(!warResult){setSpeed(s);setRunning(true)}}} className={speed===s?"active":""}>×{s}</button>)}</div>
     </header>
 
-    <aside className="left-panel">
+    {isMobile&&mobilePanel!=="none"&&<button className="mobile-backdrop" aria-label="Close panel" onClick={()=>setMobilePanel("none")}/>}
+    <aside className={"left-panel "+(mobilePanel==="forces"?"mobile-open":"")}>
+      <button className="mobile-panel-close" onClick={()=>setMobilePanel("none")}>CLOSE</button>
       <section><div className="section-title">MAP LAYERS</div><div className="segmented">{(["terrain","supply","intel"] as OverlayMode[]).map(m=><button key={m} onClick={()=>setOverlay(m)} className={overlay===m?"active":""}>{m.toUpperCase()}</button>)}</div></section>
       <section><div className="section-title">ARMY GROUPS · CTRL+1…6 ASSIGN</div><div className="army-group-grid">{armyGroups.map(g=><button key={g.id} onClick={()=>selectGroup(g.id)}><b>{g.hotkey}</b><span>{g.name}<small>{blue.filter(u=>u.groupId===g.id).length} formations</small></span></button>)}</div></section>
       <section><div className="section-title">ATTACK PLANS · B THEN RMB</div><div className="plan-list">{attackPlans.length?attackPlans.map(p=><div className={"plan-row "+p.status} key={p.id}><button onClick={()=>setSelected(p.formationIds)}><b>{p.name}</b><small>{p.formationIds.length} formations · {p.status}</small></button>{p.status==="draft"&&<button onClick={()=>executePlan(p.id)}>GO</button>}<button onClick={()=>cancelPlan(p.id)}>×</button></div>):<small className="muted-line">No plans drafted.</small>}</div></section>
       <section><div className="section-title">ENGINEER WORKS</div><div className="construction-list">{constructionProjects.length?constructionProjects.filter(p=>localSides.has(p.side)).map(project=><div className="construction-row" key={project.id}><b>{project.kind==="observatory"?"OBSERVATORY":"FIXED ARTILLERY"}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span><i><em style={{width:Math.min(100,project.progress/project.requiredHours*100)+"%"}}/></i></div>):<small className="muted-line">No active construction.</small>}</div></section>
-      <section><div className="section-title">ORDER OF BATTLE</div><div className="oob-list">{blue.map(u=><button key={u.id} onClick={()=>setSelected([u.id])} className={selected.includes(u.id)?"selected":""}><span className="oob-code">{UNIT_LABEL[u.kind]}</span><span><b>{u.name}</b><small>{pct(u.strength)} STR · {pct(u.organization)} ORG</small></span></button>)}</div></section>
+      <section><div className="section-title">ORDER OF BATTLE</div><div className="oob-list">{blue.map(u=><button key={u.id} onClick={()=>{setSelected([u.id]);if(isMobile)setMobilePanel("unit")}} className={selected.includes(u.id)?"selected":""}><span className="oob-code">{UNIT_LABEL[u.kind]}</span><span><b>{u.name}</b><small>{pct(u.strength)} STR · {pct(u.organization)} ORG</small></span></button>)}</div></section>
     </aside>
 
     <div ref={viewport} className={pendingOrder||pendingPlan||pendingBuild?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenu={issueTarget}>
@@ -895,13 +901,14 @@ export default function Home(){
       {selectionBox&&<div className="selection-box" style={{left:Math.min(selectionBox.x1,selectionBox.x2),top:Math.min(selectionBox.y1,selectionBox.y2),width:Math.abs(selectionBox.x2-selectionBox.x1),height:Math.abs(selectionBox.y2-selectionBox.y1)}}/>}
       {frontPreview&&<svg className="front-preview"><line x1={frontPreview.x1} y1={frontPreview.y1} x2={frontPreview.x2} y2={frontPreview.y2}/></svg>}
       <div className="map-hud"><div><span className="dot friendly"/>FRIENDLY {blue.length}</div><div><span className="dot hostile"/>CONTACTS {enemy.length}</div><div>CITIES {blueCities}/{cities.length}</div><div>{hovered?TERRAIN_RULES[hovered.terrain].label.toUpperCase()+" · "+(hovered.road?"SUPPLY ROAD":"OFF ROAD"):activeScenario.location.toUpperCase()}</div><div>ZOOM {Math.round(zoom*100)}%</div></div>
-      {pendingBuild&&<div className="target-banner">{pendingBuild==="observatory"?"OBSERVATORY TOWER":"FIXED ARTILLERY"} · RMB CONSTRUCTION SITE <button onClick={()=>setPendingBuild(null)}>ESC / CANCEL</button></div>}
-      {pendingPlan&&<div className="target-banner">ATTACK PLAN · RMB OBJECTIVE <button onClick={()=>setPendingPlan(false)}>ESC / CANCEL</button></div>}
-      {pendingOrder&&<div className="target-banner">{pendingOrder==="relieve"?"RELIEVE ARMED · RMB FRIENDLY FRONTLINE":pendingOrder==="assault"||pendingOrder==="fire"?pendingOrder.toUpperCase()+" ARMED · RMB ENEMY FORMATION":pendingOrder.toUpperCase()+" ARMED · RMB TARGET"} <button onClick={()=>setPendingOrder(null)}>ESC / CANCEL</button></div>}
+      {pendingBuild&&<div className="target-banner">{pendingBuild==="observatory"?"OBSERVATORY TOWER":"FIXED ARTILLERY"} · {isMobile?"TAP CONSTRUCTION SITE":"RMB CONSTRUCTION SITE"} <button onClick={()=>setPendingBuild(null)}>CANCEL</button></div>}
+      {pendingPlan&&<div className="target-banner">ATTACK PLAN · {isMobile?"TAP OBJECTIVE":"RMB OBJECTIVE"} <button onClick={()=>setPendingPlan(false)}>CANCEL</button></div>}
+      {pendingOrder&&<div className="target-banner">{pendingOrder==="relieve"?"RELIEVE ARMED · "+(isMobile?"TAP FRIENDLY":"RMB FRIENDLY FRONTLINE"):pendingOrder==="assault"||pendingOrder==="fire"?pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP ENEMY":"RMB ENEMY FORMATION"):pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP TARGET":"RMB TARGET")} <button onClick={()=>setPendingOrder(null)}>CANCEL</button></div>}
       {warResult&&<div className={"war-result "+warResult}><b>{localSides.has(warResult)?"VICTORY":"DEFEAT"}</b><span>ALL STRATEGIC CITIES CONTROLLED BY {activeScenario.sideNames[warResult]??warResult.toUpperCase()}</span></div>}
     </div>
 
-    <aside className="right-panel">
+    <aside className={"right-panel "+(mobilePanel==="unit"?"mobile-open":"")}>
+      <button className="mobile-panel-close" onClick={()=>setMobilePanel("none")}>CLOSE</button>
       {primary?<div className="inspector">
         <div className="unit-heading"><div className="big-counter">{UNIT_LABEL[primary.kind]}</div><div><small>{primary.kind.toUpperCase()} FORMATION</small><h2>{primary.name}</h2><span>{orderLabel(primary)}</span></div></div>
         <div className="stat-grid"><Stat label="Strength" value={primary.strength}/><Stat label="Organization" value={primary.organization}/><Stat label="Supply" value={primary.supply}/><Stat label="Fuel" value={primary.fuel}/><Stat label="Entrenchment" value={primary.entrenchment}/><Stat label="Readiness" value={primary.readiness}/></div>
@@ -922,6 +929,15 @@ export default function Home(){
         </div>
       </div>:<div className="empty-inspector"><b>NO FORMATION SELECTED</b><span>Select a friendly counter on the map.</span></div>}
     </aside>
+
+    <nav className="mobile-toolbar" aria-label="Mobile controls">
+      <button className={mobileTool==="pan"?"active":""} onClick={()=>{setMobileTool("pan");setMobilePanel("none")}}><b>✥</b><span>PAN</span></button>
+      <button className={mobileTool==="select"?"active":""} onClick={()=>{setMobileTool("select");setMobilePanel("none")}}><b>▧</b><span>SELECT</span></button>
+      <button disabled={selected.length<2} className={mobileTool==="front"?"active":""} onClick={()=>{setMobileTool("front");setMobilePanel("none")}}><b>╱</b><span>FRONT</span></button>
+      <button className={mobilePanel==="forces"?"active":""} onClick={()=>setMobilePanel(v=>v==="forces"?"none":"forces")}><b>☷</b><span>FORCES</span></button>
+      <button disabled={!primary} className={mobilePanel==="unit"?"active":""} onClick={()=>setMobilePanel(v=>v==="unit"?"none":"unit")}><b>⌖</b><span>ORDERS</span></button>
+      <button onClick={()=>setRunning(v=>warResult?v:!v)}><b>{running?"Ⅱ":"▶"}</b><span>{running?"PAUSE":"PLAY"}</span></button>
+    </nav>
 
     <footer className="statusbar"><span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><span>ENGINEERS: BUILD WORKS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
   </main>
