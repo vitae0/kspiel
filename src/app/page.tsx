@@ -745,7 +745,32 @@ export default function Home(){
     setZoom(next);setPan(boundedPan({x:mx-wx*next,y:my-wy*next},next));
   }
 
+  function beginPinch(){
+    const rect=viewport.current?.getBoundingClientRect();
+    const points=[...touchPoints.current.values()];
+    if(!rect||points.length<2)return;
+    const [a,b]=points;
+    const distance=Math.max(1,Math.hypot(a.x-b.x,a.y-b.y));
+    const midX=(a.x+b.x)/2-rect.left,midY=(a.y+b.y)/2-rect.top;
+    pinch.current={distance,zoom,worldX:(midX-pan.x)/zoom,worldY:(midY-pan.y)/zoom};
+    drag.current=null;setSelectionBox(null);setFrontPreview(null);
+  }
+
   function onPointerDown(e:ReactPointerEvent<HTMLDivElement>){
+    if(e.pointerType==="touch"){
+      e.preventDefault();
+      touchPoints.current.set(e.pointerId,{x:e.clientX,y:e.clientY});
+      e.currentTarget.setPointerCapture(e.pointerId);
+      if(touchPoints.current.size>=2){beginPinch();return}
+      const screen=viewportPoint(e.clientX,e.clientY);if(!screen)return;
+      const targeting=Boolean(pendingOrder||pendingPlan||pendingBuild);
+      const mode:"pan"|"box"|"front"|"target"=targeting?"target":mobileTool==="select"?"box":mobileTool==="front"&&selected.length>1?"front":"pan";
+      drag.current={mode,startClientX:e.clientX,startClientY:e.clientY,px:pan.x,py:pan.y,moved:false};
+      if(mode==="box")setSelectionBox({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
+      if(mode==="front")setFrontPreview({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
+      return;
+    }
+
     if(e.button>2)return;const screen=viewportPoint(e.clientX,e.clientY);if(!screen)return;
     let mode:"pan"|"box"|"front"|"select"="select";
     if(e.button===1)mode="pan";
@@ -760,18 +785,43 @@ export default function Home(){
   }
 
   function onPointerMove(e:ReactPointerEvent<HTMLDivElement>){
-    const p=mapPoint(e.clientX,e.clientY);if(p)setHovered(terrainAt(activeScenario,p.x,p.y));
+    const point=mapPoint(e.clientX,e.clientY);if(point)setHovered(terrainAt(activeScenario,point.x,point.y));
+
+    if(e.pointerType==="touch"){
+      if(touchPoints.current.has(e.pointerId))touchPoints.current.set(e.pointerId,{x:e.clientX,y:e.clientY});
+      if(pinch.current&&touchPoints.current.size>=2){
+        const rect=viewport.current?.getBoundingClientRect(),points=[...touchPoints.current.values()];if(!rect||points.length<2)return;
+        const [a,b]=points,distance=Math.max(1,Math.hypot(a.x-b.x,a.y-b.y));
+        const midX=(a.x+b.x)/2-rect.left,midY=(a.y+b.y)/2-rect.top;
+        const nextZoom=clamp(pinch.current.zoom*(distance/pinch.current.distance),.12,1.5);
+        setZoom(nextZoom);
+        setPan(boundedPan({x:midX-pinch.current.worldX*nextZoom,y:midY-pinch.current.worldY*nextZoom},nextZoom));
+        return;
+      }
+    }
+
     const d=drag.current;if(!d)return;
     if(Math.hypot(e.clientX-d.startClientX,e.clientY-d.startClientY)>6)d.moved=true;
     if(d.mode==="pan"){setPan(boundedPan({x:d.px+e.clientX-d.startClientX,y:d.py+e.clientY-d.startClientY}));return}
+    if(d.mode==="target"||d.mode==="select")return;
     const screen=viewportPoint(e.clientX,e.clientY),start=viewportPoint(d.startClientX,d.startClientY);if(!screen||!start)return;
-    if(d.mode==="box")setSelectionBox({x1:start.x,y1:start.y,x2:screen.x,y2:screen.y});else setFrontPreview({x1:start.x,y1:start.y,x2:screen.x,y2:screen.y});
+    if(d.mode==="box")setSelectionBox({x1:start.x,y1:start.y,x2:screen.x,y2:screen.y});
+    if(d.mode==="front")setFrontPreview({x1:start.x,y1:start.y,x2:screen.x,y2:screen.y});
   }
 
   function onPointerUp(e:ReactPointerEvent<HTMLDivElement>){
+    if(e.pointerType==="touch"){
+      touchPoints.current.delete(e.pointerId);
+      if(pinch.current){
+        if(touchPoints.current.size<2)pinch.current=null;
+        drag.current=null;return;
+      }
+    }
+
     const d=drag.current;if(!d)return;drag.current=null;
     if(d.mode==="pan")return;
-    if(d.mode==="select"){if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false)}return}
+    if(d.mode==="target"){if(!d.moved)issueMapTargetAt(e.clientX,e.clientY);return}
+    if(d.mode==="select"){if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null)}return}
     if(d.mode==="box"){
       setSelectionBox(null);
       if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);return}
@@ -782,7 +832,11 @@ export default function Home(){
     setFrontPreview(null);if(!d.moved)return;const a=mapPoint(d.startClientX,d.startClientY),b=mapPoint(e.clientX,e.clientY);if(a&&b)deployFront(a,b);
   }
 
-  function onPointerCancel(){drag.current=null;setSelectionBox(null);setFrontPreview(null)}
+  function onPointerCancel(e:ReactPointerEvent<HTMLDivElement>){
+    if(e.pointerType==="touch")touchPoints.current.delete(e.pointerId);
+    if(touchPoints.current.size<2)pinch.current=null;
+    drag.current=null;setSelectionBox(null);setFrontPreview(null);
+  }
 
   function orderLabel(u:Formation){
     if(!u.order)return"NO ORDERS";
