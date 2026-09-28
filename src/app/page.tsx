@@ -394,8 +394,13 @@ export default function Home(){
   const [emplacements,setEmplacements]=useState<Emplacement[]>([]);
   const [constructionProjects,setConstructionProjects]=useState<ConstructionProject[]>([]);
   const [pendingBuild,setPendingBuild]=useState<EmplacementKind|null>(null);
+  const [isMobile,setIsMobile]=useState(false);
+  const [mobilePanel,setMobilePanel]=useState<"none"|"forces"|"unit">("none");
+  const [mobileTool,setMobileTool]=useState<"pan"|"select"|"front">("pan");
 
-  const drag=useRef<{mode:"pan"|"box"|"front"|"select";startClientX:number;startClientY:number;px:number;py:number;moved:boolean}|null>(null);
+  const drag=useRef<{mode:"pan"|"box"|"front"|"select"|"target";startClientX:number;startClientY:number;px:number;py:number;moved:boolean}|null>(null);
+  const touchPoints=useRef<Map<number,{x:number;y:number}>>(new Map());
+  const pinch=useRef<{distance:number;zoom:number;worldX:number;worldY:number}|null>(null);
   const suppressContextMenu=useRef(false);
   const viewport=useRef<HTMLDivElement>(null);
   const unitsRef=useRef<Formation[]>([]);
@@ -405,6 +410,13 @@ export default function Home(){
   const buildCounter=useRef(1);
   const emplacementsRef=useRef<Emplacement[]>([]);
   const projectsRef=useRef<ConstructionProject[]>([]);
+
+  useEffect(()=>{
+    const media=window.matchMedia("(max-width: 760px), (pointer: coarse)");
+    const sync=()=>setIsMobile(media.matches);
+    sync();media.addEventListener?.("change",sync);
+    return()=>media.removeEventListener?.("change",sync);
+  },[]);
 
   useEffect(()=>{
     const togglePause=(e:KeyboardEvent)=>{
@@ -474,7 +486,7 @@ export default function Home(){
     if(!selected.length)return;
     setPendingBuild(null);
     const selectedNow=units.filter(u=>selected.includes(u.id));
-    if(type==="move"){setPendingOrder(null);return}
+    if(type==="move"){setPendingOrder("move");setPendingPlan(false);return}
     if((type==="assault"||type==="probe")&&!selectedNow.some(u=>DIRECT_COMBAT_KINDS.has(u.kind)))return;
     if(type==="fire"&&!selectedNow.some(u=>ARTILLERY_KINDS.has(u.kind)))return;
 
@@ -515,11 +527,11 @@ export default function Home(){
     const seed=typeof crypto!=="undefined"&&"getRandomValues" in crypto?crypto.getRandomValues(new Uint32Array(1))[0]:Date.now()>>>0;
     const generated=generateScenario(seed,selectedPresetId);
     warResultRef.current=null;setWarResult(null);setAttackPlans([]);setPendingPlan(false);setPendingOrder(null);setPendingBuild(null);
-    setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];
+    setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setMobilePanel("none");
     setScenario(generated);setUnits(generated.formations);unitsRef.current=generated.formations;
     setCities(generated.cities);citiesRef.current=generated.cities;
     const first=generated.formations.find(u=>u.side===playerSide);setSelected(first?[first.id]:[]);
-    setRunning(true);setSpeed(1);setHour(6);setDay(1);setPan({x:-260,y:-190});setZoom(.24);
+    setRunning(true);setSpeed(1);setHour(6);setDay(1);setPan({x:-260,y:-190});setZoom(isMobile?.34:.24);setMobilePanel("none");setMobileTool("pan");
   }
 
   function returnToSetup(){
