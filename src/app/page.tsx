@@ -478,7 +478,12 @@ export default function Home(){
   },[scenario,running,speed]);
 
   function selectUnit(e:ReactMouseEvent,u:Formation){
-    e.stopPropagation();if(!localSides.has(u.side))return;
+    e.stopPropagation();
+    if(!localSides.has(u.side)){
+      if(pendingOrder==="assault"||pendingOrder==="fire"||pendingOrder==="probe")issueUnitTargetCore(u,false);
+      return;
+    }
+    if(pendingOrder==="relieve"&&primary&&u.id!==primary.id){issueUnitTargetCore(u,false);return}
     if(e.shiftKey)setSelected(prev=>prev.includes(u.id)?prev.filter(id=>id!==u.id):[...prev,u.id]);else setSelected([u.id]);
   }
 
@@ -531,7 +536,7 @@ export default function Home(){
     setScenario(generated);setUnits(generated.formations);unitsRef.current=generated.formations;
     setCities(generated.cities);citiesRef.current=generated.cities;
     const first=generated.formations.find(u=>u.side===playerSide);setSelected(first?[first.id]:[]);
-    setRunning(true);setSpeed(1);setHour(6);setDay(1);setPan({x:-260,y:-190});setZoom(isMobile?.34:.24);setMobilePanel("none");setMobileTool("pan");
+    setRunning(true);setSpeed(1);setHour(6);setDay(1);setPan({x:-260,y:-190});setZoom(isMobile ? .34 : .24);setMobilePanel("none");setMobileTool("pan");
   }
 
   function returnToSetup(){
@@ -684,11 +689,9 @@ export default function Home(){
     setPendingBuild(null);
   }
 
-  function issueTarget(e:ReactMouseEvent){
-    e.preventDefault();
-    if(suppressContextMenu.current){suppressContextMenu.current=false;return}
+  function issueMapTargetAt(clientX:number,clientY:number){
     if(!selected.length||pendingOrder==="assault"||pendingOrder==="fire"||pendingOrder==="relieve")return;
-    const point=mapPoint(e.clientX,e.clientY);if(!point)return;
+    const point=mapPoint(clientX,clientY);if(!point)return;
     const tx=clamp(point.x,1,WORLD_W-1),ty=clamp(point.y,1,WORLD_H-1);if(terrainAt(activeScenario,tx,ty).terrain==="water")return;
     if(pendingBuild){createConstruction(tx,ty);return}
     if(pendingPlan){createAttackPlan(tx,ty);return}
@@ -697,12 +700,20 @@ export default function Home(){
       if(!selected.includes(u.id))return u;
       if(requested==="probe"&&DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:"probe",targetX:tx,targetY:ty}};
       return{...u,order:{type:"move",targetX:tx,targetY:ty}};
-    }));setPendingOrder(null);
+    }));
+    setPendingOrder(null);
   }
 
-  function issueUnitTarget(e:ReactMouseEvent,target:Formation){
-    e.preventDefault();e.stopPropagation();if(!selected.length||selected.includes(target.id))return;
+  function issueTarget(e:ReactMouseEvent){
+    e.preventDefault();
+    if(suppressContextMenu.current){suppressContextMenu.current=false;return}
+    issueMapTargetAt(e.clientX,e.clientY);
+  }
+
+  function issueUnitTargetCore(target:Formation,allowDefaultMove:boolean){
+    if(!selected.length||selected.includes(target.id))return;
     const requested=pendingOrder;
+    if(!requested&&!allowDefaultMove)return;
 
     if(requested==="relieve"){
       if(!primary||target.side!==primary.side)return;
@@ -720,7 +731,12 @@ export default function Home(){
         return u;
       }
       return{...u,order:{type:"move",targetUnitId:target.id}};
-    }));setPendingOrder(null);
+    }));
+    setPendingOrder(null);
+  }
+
+  function issueUnitTarget(e:ReactMouseEvent,target:Formation){
+    e.preventDefault();e.stopPropagation();issueUnitTargetCore(target,true);
   }
 
   function onWheel(e:ReactWheelEvent<HTMLDivElement>){
