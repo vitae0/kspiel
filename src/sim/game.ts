@@ -5,39 +5,69 @@ export const WORLD_H=4200;
 
 export const SCENARIO_PRESETS:ScenarioPreset[]=[
   {
-    id:"frontier",title:"Frontier War",subtitle:"Balanced fictional operational theater",theme:"mixed",historical:false,
-    location:"Fictional continental frontier",sideNames:{blue:"Blue Coalition",red:"Red Coalition"},
+    id:"frontier",title:"Frontier War",subtitle:"Balanced fictional operational theater",theme:"mixed",era:"modern",historical:false,
+    location:"Fictional continental frontier",sideNames:{blue:"Blue Coalition",red:"Red Coalition"},sideFlags:{blue:"generic-blue",red:"generic-red"},
     cityNames:["Varen","Orlov","Karsen","Drey","Helmstadt","Serev","Vesta","Belgor","Rovina","Tarsk","Miren","Ostrel","Karvin","Dunava","Brask","Velin","Sodra","Narev"]
   },
   {
-    id:"alpine",title:"Alpine Corridor",subtitle:"Mountain passes, ridges and narrow supply routes",theme:"mountain",historical:false,
-    location:"Fictional alpine region",sideNames:{blue:"North Command",red:"South Command"},
+    id:"alpine",title:"Alpine Corridor",subtitle:"Mountain passes, ridges and narrow supply routes",theme:"mountain",era:"modern",historical:false,
+    location:"Fictional alpine region",sideNames:{blue:"North Command",red:"South Command"},sideFlags:{blue:"generic-blue",red:"generic-red"},
     cityNames:["Aster","Kelm","Ruden","Veles","Morava","Dalen","Korda","Selin","Novar","Arden","Tovin","Rask","Savin","Korin","Merva"]
   },
   {
-    id:"deep-forest",title:"Black Forest Front",subtitle:"Dense woodland, poor visibility and road-dependent logistics",theme:"forest",historical:false,
-    location:"Fictional temperate forest",sideNames:{blue:"Western Corps",red:"Eastern Corps"},
+    id:"deep-forest",title:"Black Forest Front",subtitle:"Dense woodland, poor visibility and road-dependent logistics",theme:"forest",era:"modern",historical:false,
+    location:"Fictional temperate forest",sideNames:{blue:"Western Corps",red:"Eastern Corps"},sideFlags:{blue:"generic-blue",red:"generic-red"},
     cityNames:["Lydin","Berez","Vezna","Orel","Draven","Zorin","Karvin","Brask","Velin","Sodra","Narev","Rovina","Miren","Aster","Tarsk"]
   },
   {
-    id:"desert-front",title:"Desert Front",subtitle:"Open maneuver warfare with fragile long supply lines",theme:"desert",historical:false,
-    location:"Fictional arid basin",sideNames:{blue:"Expeditionary Force",red:"Desert Army"},
+    id:"desert-front",title:"Desert Front",subtitle:"Open maneuver warfare with fragile long supply lines",theme:"desert",era:"modern",historical:false,
+    location:"Fictional arid basin",sideNames:{blue:"Expeditionary Force",red:"Desert Army"},sideFlags:{blue:"generic-blue",red:"generic-red"},
     cityNames:["Qadir","Mersa","Tobir","Nahal","Safa","Rasif","Birat","Kharim","Dara","Hajar","Qasr","Madin","Sahil","Aqra","Faris"]
   },
   {
-    id:"ardennes-1944",title:"Ardennes 1944",subtitle:"Historically inspired winter forest scenario",theme:"winter",historical:true,year:1944,
-    location:"Ardennes, Belgium and Luxembourg",sideNames:{blue:"U.S. First Army",red:"German Forces"},
-    cityNames:["Bastogne","St. Vith","Houffalize","Malmedy","Clervaux","Wiltz","Ettelbruck","Diekirch","La Roche","Vielsalm","Spa","Marche","Neufchateau","Echternach","Trois-Ponts"]
+    id:"varna-1444",title:"Varna 1444",subtitle:"Late-medieval field battle between the Ottoman army and the Polish-Hungarian crusading host",theme:"mixed",era:"medieval",historical:true,year:1444,
+    location:"Varna, Bulgaria",sideNames:{blue:"Polish-Hungarian Crusaders",red:"Ottoman Empire"},sideFlags:{blue:"crusader",red:"ottoman"},
+    cityNames:["Varna","Galata","Devnya","Beloslav","Provadia","Shumen","Aksakovo","Belogradets","Kaspichan","Novi Pazar","Dobrina","Avren","Priseltsi","Vetrino","Topoli"]
   },
   {
-    id:"kursk-1943",title:"Kursk 1943",subtitle:"Historically inspired steppe armored battle",theme:"steppe",historical:true,year:1943,
-    location:"Kursk salient, Soviet Union",sideNames:{blue:"Red Army",red:"German Forces"},
+    id:"breitenfeld-1631",title:"Breitenfeld 1631",subtitle:"Pike-and-shot battle with cavalry wings and artillery lines",theme:"steppe",era:"early_modern",historical:true,year:1631,
+    location:"Breitenfeld near Leipzig, Saxony",sideNames:{blue:"Swedish-Saxon Army",red:"Imperial-Catholic League"},sideFlags:{blue:"sweden",red:"imperial"},
+    cityNames:["Leipzig","Breitenfeld","Podelwitz","Seehausen","Wiederitzsch","Rackwitz","Gohlis","Lindenthal","Eutritzsch","Mockau","Taucha","Delitzsch","Schkeuditz","Lützschena","Schoenefeld"]
+  },
+  {
+    id:"vienna-1683",title:"Vienna 1683",subtitle:"Relief battle around a besieged capital with strongpoints and constrained approaches",theme:"hills",era:"early_modern",historical:true,year:1683,
+    location:"Vienna, Habsburg Monarchy",sideNames:{blue:"Holy League",red:"Ottoman Empire"},sideFlags:{blue:"austria",red:"ottoman"},
+    cityNames:["Vienna","Kahlenberg","Leopoldsberg","Nussdorf","Döbling","Hernals","Ottakring","Schwechat","Simmering","Klosterneuburg","Heiligenstadt","Grinzing","Perchtoldsdorf","Mödling","Liesing"]
+  },
+  {
+    id:"austerlitz-1805",title:"Austerlitz 1805",subtitle:"Napoleonic maneuver battle across villages, heights and open ground",theme:"steppe",era:"napoleonic",historical:true,year:1805,
+    location:"Austerlitz, Moravia",sideNames:{blue:"French Empire",red:"Third Coalition"},sideFlags:{blue:"france",red:"austria"},
+    cityNames:["Austerlitz","Pratzen","Telnitz","Sokolnitz","Kobelnitz","Bellowitz","Kruh","Holubitz","Blasowitz","Krenowitz","Tellnitz","Menitz","Zuran","Santon","Littawa"]
+  },
+  {
+    id:"verdun-1916",title:"Verdun 1916",subtitle:"Industrial-era attritional battle dominated by forts, artillery and difficult terrain",theme:"forest",era:"industrial",historical:true,year:1916,
+    location:"Verdun, France",sideNames:{blue:"French Army",red:"German Empire"},sideFlags:{blue:"france",red:"german-empire"},
+    cityNames:["Verdun","Douaumont","Vaux","Mort-Homme","Côte 304","Fleury","Thiaumont","Souville","Haudromont","Forges","Avocourt","Cumières","Damloup","Bras","Bezonvaux"]
+  },
+  {
+    id:"stalingrad-1942",title:"Stalingrad 1942",subtitle:"Urban attritional warfare along the Volga with dense objectives and brutal logistics",theme:"urban",era:"modern",historical:true,year:1942,
+    location:"Stalingrad, Soviet Union",sideNames:{blue:"Soviet 62nd Army",red:"German Sixth Army"},sideFlags:{blue:"ussr",red:"germany-ww2"},
+    cityNames:["Mamayev Kurgan","Central Station","Grain Elevator","Red October","Barrikady","Tractor Factory","Spartakovka","Rynok","Orlovka","Gumrak","Tsaritsa","Volga Landing","Kuporosnoye","Beketovka","Krasny Oktyabr"]
+  },
+  {
+    id:"el-alamein-1942",title:"El Alamein 1942",subtitle:"Historically inspired desert scenario",theme:"desert",era:"modern",historical:true,year:1942,
+    location:"El Alamein, Egypt",sideNames:{blue:"British Eighth Army",red:"Axis Forces"},sideFlags:{blue:"britain",red:"axis"},
+    cityNames:["El Alamein","Ruweisat","Tel el Eisa","Kidney Ridge","Miteiriya","Alam Halfa","El Imayid","Sidi Abd el Rahman","El Daba","Burg el Arab","Qattara","Deir el Munassib","Tell Aqqaqir","El Hammam","Fuka"]
+  },
+  {
+    id:"kursk-1943",title:"Kursk 1943",subtitle:"Historically inspired steppe armored battle",theme:"steppe",era:"modern",historical:true,year:1943,
+    location:"Kursk salient, Soviet Union",sideNames:{blue:"Red Army",red:"German Forces"},sideFlags:{blue:"ussr",red:"germany-ww2"},
     cityNames:["Kursk","Oboyan","Belgorod","Prokhorovka","Ponyri","Olkhovatka","Tomarovka","Korocha","Rylsk","Lgov","Fatezh","Sudzha","Gubkin","Stary Oskol","Dmitriyev"]
   },
   {
-    id:"el-alamein-1942",title:"El Alamein 1942",subtitle:"Historically inspired desert scenario",theme:"desert",historical:true,year:1942,
-    location:"El Alamein, Egypt",sideNames:{blue:"British Eighth Army",red:"Axis Forces"},
-    cityNames:["El Alamein","Ruweisat","Tel el Eisa","Kidney Ridge","Miteiriya","Alam Halfa","El Imayid","Sidi Abd el Rahman","El Daba","Burg el Arab","Qattara","Deir el Munassib","Tell Aqqaqir","El Hammam","Fuka"]
+    id:"ardennes-1944",title:"Ardennes 1944",subtitle:"Historically inspired winter forest scenario",theme:"winter",era:"modern",historical:true,year:1944,
+    location:"Ardennes, Belgium and Luxembourg",sideNames:{blue:"U.S. First Army",red:"German Forces"},sideFlags:{blue:"usa",red:"germany-ww2"},
+    cityNames:["Bastogne","St. Vith","Houffalize","Malmedy","Clervaux","Wiltz","Ettelbruck","Diekirch","La Roche","Vielsalm","Spa","Marche","Neufchateau","Echternach","Trois-Ponts"]
   }
 ];
 
@@ -150,6 +180,11 @@ function featureSpec(theme:ScenarioTheme,rnd:()=>number):Array<[TerrainFeature["
     ["forest",8+Math.floor(rnd()*4),[360,780],[260,600]],
     ["marsh",3+Math.floor(rnd()*2),[320,700],[250,560]]
   ];
+  if(theme==="urban")return[
+    ["hills",8+Math.floor(rnd()*3),[360,760],[260,580]],
+    ["forest",5+Math.floor(rnd()*3),[300,650],[230,520]],
+    ["marsh",2+Math.floor(rnd()*2),[280,580],[220,480]]
+  ];
   return[
     ["mountain",8+Math.floor(rnd()*4),[430,920],[300,720]],
     ["highmountain",3+Math.floor(rnd()*2),[320,620],[280,520]],
@@ -218,7 +253,7 @@ function makeRoads(cities:CityState[],rnd:()=>number){
 }
 
 function makeRivers(rnd:()=>number,theme:ScenarioTheme){
-  const count=theme==="desert"?Math.floor(rnd()*2):theme==="mountain"||theme==="forest"?4+Math.floor(rnd()*2):3+Math.floor(rnd()*2);
+  const count=theme==="desert"?Math.floor(rnd()*2):theme==="urban"?2+Math.floor(rnd()*2):theme==="mountain"||theme==="forest"?4+Math.floor(rnd()*2):3+Math.floor(rnd()*2);
   const routes:Array<Array<{x:number;y:number}>>=[];
   for(let r=0;r<count;r++){
     const base=1100+r*(4200/Math.max(1,count))+(rnd()-.5)*360;
@@ -264,7 +299,20 @@ function unit(id:string,name:string,side:Side,kind:UnitKind,x:number,y:number,rn
 
 function repeated(kind:UnitKind,count:number){return Array.from({length:count},()=>kind)}
 
-function rosterForTheme(theme:ScenarioTheme):UnitKind[]{
+function rosterForScenario(scenario:Scenario):UnitKind[]{
+  if(scenario.era==="medieval")return[
+    ...repeated("infantry",26),...repeated("cavalry",14),...repeated("artillery",4),...repeated("engineer",2),...repeated("logistics",2)
+  ];
+  if(scenario.era==="early_modern")return[
+    ...repeated("infantry",30),...repeated("cavalry",10),...repeated("artillery",8),...repeated("heavy_artillery",2),...repeated("engineer",3),...repeated("logistics",3)
+  ];
+  if(scenario.era==="napoleonic")return[
+    ...repeated("infantry",30),...repeated("cavalry",10),...repeated("artillery",9),...repeated("heavy_artillery",2),...repeated("recon",2),...repeated("engineer",3),...repeated("logistics",3)
+  ];
+  if(scenario.era==="industrial")return[
+    ...repeated("infantry",34),...repeated("cavalry",4),...repeated("artillery",10),...repeated("heavy_artillery",6),...repeated("recon",3),...repeated("engineer",5),...repeated("logistics",5)
+  ];
+  const theme=scenario.theme;
   if(theme==="mountain")return[
     ...repeated("infantry",18),...repeated("mountaineer",11),...repeated("cavalry",3),...repeated("tank",2),
     ...repeated("artillery",5),...repeated("heavy_artillery",2),...repeated("recon",3),...repeated("engineer",4),...repeated("logistics",4)
@@ -281,12 +329,15 @@ function rosterForTheme(theme:ScenarioTheme):UnitKind[]{
     ...repeated("infantry",14),...repeated("cavalry",5),...repeated("tank",11),...repeated("mechanized",8),
     ...repeated("artillery",6),...repeated("heavy_artillery",4),...repeated("recon",4),...repeated("engineer",3),...repeated("logistics",5)
   ];
+  if(theme==="urban")return[
+    ...repeated("infantry",30),...repeated("tank",7),...repeated("mechanized",3),...repeated("artillery",8),
+    ...repeated("heavy_artillery",4),...repeated("recon",3),...repeated("engineer",7),...repeated("logistics",5)
+  ];
   return[
     ...repeated("infantry",18),...repeated("mountaineer",3),...repeated("cavalry",3),...repeated("tank",7),...repeated("mechanized",6),
     ...repeated("artillery",6),...repeated("heavy_artillery",3),...repeated("recon",4),...repeated("engineer",4),...repeated("logistics",4)
   ];
 }
-
 function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>number,kind:UnitKind){
   const owned=cities.filter(c=>c.owner===side);
   for(let tries=0;tries<80;tries++){
@@ -302,7 +353,7 @@ function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>numbe
 }
 
 function makeFormations(side:Side,scenario:Scenario,rnd:()=>number){
-  const kinds=rosterForTheme(scenario.theme);
+  const kinds=rosterForScenario(scenario);
   const labels:Record<UnitKind,string>={
     infantry:"Infantry",mechanized:"Mechanized",armor:"Armored",tank:"Tank",cavalry:"Cavalry",mountaineer:"Mountain",
     artillery:"Field Artillery",heavy_artillery:"Heavy Artillery",recon:"Recon",engineer:"Engineers",logistics:"Logistics"
@@ -316,7 +367,7 @@ function makeFormations(side:Side,scenario:Scenario,rnd:()=>number){
 }
 
 function coastForTheme(theme:ScenarioTheme,rnd:()=>number){
-  const inland=theme==="mountain"||theme==="forest"||theme==="winter"||theme==="steppe";
+  const inland=theme==="mountain"||theme==="forest"||theme==="winter"||theme==="steppe"||theme==="urban";
   return{
     base:inland?-620:210+rnd()*150,
     amp1:inland?45:85+rnd()*90,
@@ -339,8 +390,8 @@ export function generateScenario(seed:number,presetId="frontier"):Scenario{
   const roadRoutes=makeRoads(cities,rnd);
   const riverRoutes=makeRivers(rnd,preset.theme);
   const shell:Scenario={
-    seed,presetId:preset.id,title:preset.title,theme:preset.theme,historical:preset.historical,year:preset.year,
-    location:preset.location,sideNames:preset.sideNames,coast,cities,terrainFeatures,roadRoutes,riverRoutes,formations:[],landPath:""
+    seed,presetId:preset.id,title:preset.title,theme:preset.theme,era:preset.era,historical:preset.historical,year:preset.year,
+    location:preset.location,sideNames:preset.sideNames,sideFlags:preset.sideFlags,coast,cities,terrainFeatures,roadRoutes,riverRoutes,formations:[],landPath:""
   };
 
   const pts:Array<{x:number;y:number}>=[];
