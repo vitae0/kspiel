@@ -334,6 +334,41 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
   return result.filter(u=>u.strength>1);
 }
 
+function applyEmplacementFire(units:Formation[],emplacements:Emplacement[],cities:CityState[],hours:number){
+  const result=units.map(u=>({...u,order:u.order?{...u.order}:undefined}));
+  for(const emplacement of emplacements){
+    if(emplacement.kind!=="fixed_artillery"||emplacement.strength<=0)continue;
+    const target=result
+      .filter(u=>u.side!==emplacement.side&&u.strength>1&&Math.hypot(u.x-emplacement.x,u.y-emplacement.y)<=emplacement.range)
+      .sort((a,b)=>Math.hypot(a.x-emplacement.x,a.y-emplacement.y)-Math.hypot(b.x-emplacement.x,b.y-emplacement.y))[0];
+    if(!target)continue;
+    const supplied=cities.some(c=>c.owner===emplacement.side&&Math.hypot(c.x-emplacement.x,c.y-emplacement.y)<1150);
+    const fireFactor=supplied?1:.32;
+    target.strength=clamp(target.strength-hours*.34*fireFactor,0,100);
+    target.organization=clamp(target.organization-hours*.92*fireFactor,0,100);
+  }
+  return result.filter(u=>u.strength>1);
+}
+
+function advanceConstruction(projects:ConstructionProject[],emplacements:Emplacement[],units:Formation[],hours:number){
+  const nextProjects:ConstructionProject[]=[];
+  const nextEmplacements=[...emplacements];
+  for(const project of projects){
+    const builders=units.filter(u=>project.builderIds.includes(u.id)&&u.side===project.side&&u.kind==="engineer"&&u.strength>8);
+    const active=builders.filter(u=>Math.hypot(u.x-project.x,u.y-project.y)<78&&u.supply>18&&!isInCombat(u,units));
+    const workerPower=Math.min(3,active.length);
+    for(const builder of active)builder.supply=clamp(builder.supply-hours*(project.kind==="fixed_artillery"?.34:.2),0,100);
+    const progress=project.progress+hours*workerPower;
+    if(progress>=project.requiredHours){
+      nextEmplacements.push({
+        id:"em-"+project.id,kind:project.kind,side:project.side,x:project.x,y:project.y,strength:100,
+        range:project.kind==="observatory"?980:860
+      });
+    }else nextProjects.push({...project,progress});
+  }
+  return{projects:nextProjects,emplacements:nextEmplacements};
+}
+
 export default function Home(){
   const [scenario,setScenario]=useState<Scenario|null>(null);
   const [units,setUnits]=useState<Formation[]>([]);
@@ -411,7 +446,11 @@ export default function Home(){
 
       let working=unitsRef.current;
       if(aiElapsed>=AI_COMMAND_INTERVAL_SECONDS){for(const side of botSides)working=enemyAI(scenario,working,citiesRef.current,side);aiElapsed=0}
-      const nextUnits=simulate(scenario,working,simHours,citiesRef.current);
+      let nextUnits=simulate(scenario,working,simHours,citiesRef.current);
+      nextUnits=applyEmplacementFire(nextUnits,emplacementsRef.current,citiesRef.current,simHours);
+      const built=advanceConstruction(projectsRef.current,emplacementsRef.current,nextUnits,simHours);
+      projectsRef.current=built.projects;emplacementsRef.current=built.emplacements;
+      setConstructionProjects(built.projects);setEmplacements(built.emplacements);
       const nextCities=updateCities(citiesRef.current,nextUnits,simHours);
       unitsRef.current=nextUnits;citiesRef.current=nextCities;setUnits(nextUnits);setCities(nextCities);
 
@@ -433,6 +472,7 @@ export default function Home(){
 
   function startOrder(type:OrderType){
     if(!selected.length)return;
+    setPendingBuild(null);
     const selectedNow=units.filter(u=>selected.includes(u.id));
     if(type==="move"){setPendingOrder(null);return}
     if((type==="assault"||type==="probe")&&!selectedNow.some(u=>DIRECT_COMBAT_KINDS.has(u.kind)))return;
@@ -456,14 +496,14 @@ export default function Home(){
     const onKey=(e:KeyboardEvent)=>{
       const el=e.target as HTMLElement|null;if(el?.tagName==="INPUT"||el?.tagName==="TEXTAREA"||el?.isContentEditable)return;
       const key=e.key.toLowerCase();
-      if(key==="escape"){setPendingOrder(null);setPendingPlan(false);return}
+      if(key==="escape"){setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);return}
       const digit=/^Digit([1-6])$/.exec(e.code);
       if(digit){
         const group=armyGroups[Number(digit[1])-1];
         if(e.ctrlKey){e.preventDefault();assignGroup(group.id)}else if(!e.metaKey&&!e.altKey){e.preventDefault();selectGroup(group.id)}
         return;
       }
-      if(key==="b"){setPendingPlan(true);setPendingOrder(null);return}
+      if(key==="b"){setPendingPlan(true);setPendingOrder(null);setPendingBuild(null);return}
       if(key==="m")startOrder("move");else if(key==="a")startOrder("assault");else if(key==="p")startOrder("probe");
       else if(key==="f")startOrder("fire");else if(key==="d")startOrder("defend");else if(key==="g")startOrder("dig");
       else if(key==="r")startOrder("resupply");else if(key==="t")startOrder("relieve");else if(key==="x")startOrder("retreat");
