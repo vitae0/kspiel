@@ -2,25 +2,26 @@ import type {ArmyGroup,GameCommand,MatchConfig,MatchMode,Side} from "./types";
 
 export const LOCAL_PLAYER_ID="local";
 
-export function createMatchConfig(mode:MatchMode,localPlayerId=LOCAL_PLAYER_ID):MatchConfig{
-  const common={id:"local-"+mode,mode,authoritativeTickRate:10,commandDelayTicks:0};
+export function createMatchConfig(mode:MatchMode,localPlayerId=LOCAL_PLAYER_ID,localSide:Side="blue"):MatchConfig{
+  const enemySide:Side=localSide==="blue"?"red":"blue";
+  const common={id:"local-"+mode+"-"+localSide,mode,authoritativeTickRate:10,commandDelayTicks:0};
   if(mode==="coop")return{...common,players:[
-    {id:localPlayerId,name:"Player 1",side:"blue",controller:"human",local:true},
-    {id:"remote-1",name:"Player 2",side:"blue",controller:"human"},
-    {id:"bot-red",name:"Red Command",side:"red",controller:"bot"}
+    {id:localPlayerId,name:"Player 1",side:localSide,controller:"human",local:true},
+    {id:"remote-1",name:"Player 2",side:localSide,controller:"human"},
+    {id:"bot-opponent",name:"Opponent Command",side:enemySide,controller:"bot"}
   ]};
   if(mode==="pvp")return{...common,players:[
-    {id:localPlayerId,name:"Player 1",side:"blue",controller:"human",local:true},
-    {id:"remote-1",name:"Player 2",side:"red",controller:"human"}
+    {id:localPlayerId,name:"Player 1",side:localSide,controller:"human",local:true},
+    {id:"remote-1",name:"Player 2",side:enemySide,controller:"human"}
   ]};
   if(mode==="pvpve")return{...common,players:[
-    {id:localPlayerId,name:"Player 1",side:"blue",controller:"human",local:true},
-    {id:"remote-1",name:"Player 2",side:"red",controller:"human"},
+    {id:localPlayerId,name:"Player 1",side:localSide,controller:"human",local:true},
+    {id:"remote-1",name:"Player 2",side:enemySide,controller:"human"},
     {id:"bot-green",name:"Green Command",side:"green",controller:"bot"}
   ]};
   return{...common,players:[
-    {id:localPlayerId,name:"Player",side:"blue",controller:"human",local:true},
-    {id:"bot-red",name:"Red Command",side:"red",controller:"bot"}
+    {id:localPlayerId,name:"Player",side:localSide,controller:"human",local:true},
+    {id:"bot-opponent",name:"Opponent Command",side:enemySide,controller:"bot"}
   ]};
 }
 
