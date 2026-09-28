@@ -35,7 +35,7 @@ export const SCENARIO_PRESETS:ScenarioPreset[]=[
     cityNames:["Leipzig","Breitenfeld","Podelwitz","Seehausen","Wiederitzsch","Rackwitz","Gohlis","Lindenthal","Eutritzsch","Mockau","Taucha","Delitzsch","Schkeuditz","Lützschena","Schoenefeld"]
   },
   {
-    id:"vienna-1683",title:"Vienna 1683",subtitle:"Relief battle around a besieged capital with strongpoints and constrained approaches",theme:"hills",era:"early_modern",historical:true,year:1683,
+    id:"vienna-1683",title:"Vienna 1683",subtitle:"Relief battle around a besieged capital with strongpoints and constrained approaches",theme:"mixed",era:"early_modern",historical:true,year:1683,
     location:"Vienna, Habsburg Monarchy",sideNames:{blue:"Holy League",red:"Ottoman Empire"},sideFlags:{blue:"austria",red:"ottoman"},
     cityNames:["Vienna","Kahlenberg","Leopoldsberg","Nussdorf","Döbling","Hernals","Ottakring","Schwechat","Simmering","Klosterneuburg","Heiligenstadt","Grinzing","Perchtoldsdorf","Mödling","Liesing"]
   },
