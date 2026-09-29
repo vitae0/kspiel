@@ -73,6 +73,61 @@ function nearestCityTo(point:{x:number;y:number},cities:CityState[]){
   return cities.map(c=>({c,d:Math.hypot(c.x-point.x,c.y-point.y)})).sort((a,b)=>a.d-b.d)[0]?.c;
 }
 
+function roadRoutePlan(scenario:Scenario,cities:CityState[],from:{x:number;y:number},to:{x:number;y:number}){
+  const start=nearestCityTo(from,cities),goal=nearestCityTo(to,cities);
+  if(!start||!goal||start.name===goal.name)return[{x:to.x,y:to.y}];
+
+  type Edge={to:string;route:Array<{x:number;y:number}>;cost:number};
+  const graph=new Map<string,Edge[]>();
+  for(const city of cities)graph.set(city.name,[]);
+  for(const route of scenario.roadRoutes){
+    if(route.length<2)continue;
+    const a=nearestCityTo(route[0],cities),b=nearestCityTo(route[route.length-1],cities);
+    if(!a||!b||a.name===b.name)continue;
+    let cost=0;
+    for(let i=0;i<route.length-1;i++)cost+=Math.hypot(route[i+1].x-route[i].x,route[i+1].y-route[i].y);
+    graph.get(a.name)?.push({to:b.name,route:[...route],cost});
+    graph.get(b.name)?.push({to:a.name,route:[...route].reverse(),cost});
+  }
+
+  const dist=new Map<string,number>(),prev=new Map<string,{city:string;route:Array<{x:number;y:number}>}>();
+  const unvisited=new Set(cities.map(c=>c.name));
+  for(const city of cities)dist.set(city.name,Infinity);
+  dist.set(start.name,0);
+  while(unvisited.size){
+    let current:string|undefined,best=Infinity;
+    for(const name of unvisited){const d=dist.get(name)??Infinity;if(d<best){best=d;current=name}}
+    if(!current||!Number.isFinite(best))break;
+    unvisited.delete(current);
+    if(current===goal.name)break;
+    for(const edge of graph.get(current)??[]){
+      if(!unvisited.has(edge.to))continue;
+      const next=best+edge.cost;
+      if(next<(dist.get(edge.to)??Infinity)){
+        dist.set(edge.to,next);
+        prev.set(edge.to,{city:current,route:edge.route});
+      }
+    }
+  }
+
+  if(!prev.has(goal.name))return[{x:to.x,y:to.y}];
+  const segments:Array<Array<{x:number;y:number}>>=[];
+  let cursor=goal.name;
+  while(cursor!==start.name){
+    const step=prev.get(cursor);if(!step)break;
+    segments.push(step.route);cursor=step.city;
+  }
+  segments.reverse();
+
+  const points:Array<{x:number;y:number}>=[];
+  if(Math.hypot(from.x-start.x,from.y-start.y)>45)points.push({x:start.x,y:start.y});
+  for(const route of segments){
+    for(const point of route.slice(1))points.push({x:point.x,y:point.y});
+  }
+  if(!points.length||Math.hypot(points[points.length-1].x-to.x,points[points.length-1].y-to.y)>8)points.push({x:to.x,y:to.y});
+  return points;
+}
+
 function computeSupplyNetwork(scenario:Scenario,units:Formation[],cities:CityState[]):SupplyNetwork{
   const adjacency=new Map<string,Set<string>>();
   for(const city of cities)adjacency.set(city.name,new Set());
@@ -392,7 +447,8 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
         const passable=nextTerrain!=="water"&&(nextTerrain!=="highmountain"||u.kind==="mountaineer");
         if(passable){
           n.x=nx;n.y=ny;
-          n.supply=clamp(n.supply-travel*(u.kind==="armor"||u.kind==="tank"||u.kind==="mechanized"?.024:u.kind==="heavy_artillery"?.02:.012),0,100);
+          const movementSupplyCost=sample.road?0:travel*(u.kind==="armor"||u.kind==="tank"||u.kind==="mechanized"?.024:u.kind==="heavy_artillery"?.02:.012);
+          n.supply=clamp(n.supply-movementSupplyCost,0,100);
           n.fuel=clamp(n.fuel-travel*(u.kind==="armor"||u.kind==="tank"?.021:u.kind==="mechanized"||u.kind==="recon"?.013:.001),0,100);
           n.entrenchment=Math.max(0,n.entrenchment-hours*.7);
           n.organization=clamp(n.organization-hours*.12,0,100);
@@ -841,10 +897,14 @@ export default function Home(){
     commitUnits(prev=>prev.map(u=>{
       if(!selected.includes(u.id))return u;
       if(append&&u.order?.targetX!==undefined&&u.order?.targetY!==undefined&&!u.order.targetUnitId){
-        return{...u,order:{...u.order,waypoints:[...(u.order.waypoints??[]),{x:tx,y:ty}]}};
+        const tail=u.order.waypoints?.length?u.order.waypoints[u.order.waypoints.length-1]:{x:u.order.targetX,y:u.order.targetY};
+        const leg=roadRoutePlan(activeScenario,cities,tail,{x:tx,y:ty});
+        return{...u,order:{...u.order,waypoints:[...(u.order.waypoints??[]),...leg]}};
       }
       if(requested==="probe"&&DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:"probe",targetX:tx,targetY:ty}};
-      return{...u,order:{type:"move",targetX:tx,targetY:ty}};
+      const route=roadRoutePlan(activeScenario,cities,{x:u.x,y:u.y},{x:tx,y:ty});
+      const [first,...rest]=route;
+      return first?{...u,order:{type:"move",targetX:first.x,targetY:first.y,waypoints:rest}}:{...u,order:{type:"move",targetX:tx,targetY:ty}};
     }));
     if(!append)setPendingOrder(null);
   }
