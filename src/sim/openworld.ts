@@ -28,7 +28,7 @@ export const UNIT_COST:Partial<Record<UnitKind,{family:"infantry_barracks"|"mobi
 };
 
 const SIDES:Side[]=["blue","red","green"];
-const sideSeed=(s:Side)=>s==="blue"?1:s==="red"?2:3;
+const WORLD_FALLBACK_X=3100, WORLD_FALLBACK_Y=2100;
 
 function mkUnit(kind:UnitKind,side:Side,x:number,y:number,id:string):Formation{
   const base={
@@ -50,10 +50,11 @@ function mkUnit(kind:UnitKind,side:Side,x:number,y:number,id:string):Formation{
 }
 
 export function createOpenWorldState(scenario:Scenario,units:Formation[],cities:CityState[]):{state:OpenWorldState;units:Formation[];cities:CityState[]}{
-  const nextCities=cities.map((c,i)=>({...c,owner:i<cities.length/3?"blue":i<2*cities.length/3?"green":"red"}));
+  const nextCities:CityState[]=cities.map((c,i)=>({...c,owner:(i<cities.length/3?"blue":i<2*cities.length/3?"green":"red") as Side}));
   const blue=units.filter(u=>u.side==="blue").slice(0,10).map((u,i)=>({...u,x:nextCities[Math.min(i%4,nextCities.length-1)]?.x??900,y:(nextCities[Math.min(i%4,nextCities.length-1)]?.y??900)+i*18}));
   const red=units.filter(u=>u.side==="red").slice(0,10);
-  const green=red.slice(0,8).map((u,i)=>({...u,id:"g"+i,name:"Green "+u.name,side:"green" as Side,x:scenario.cities[Math.floor(scenario.cities.length/2)]?.x+(i%4)*35,y:scenario.cities[Math.floor(scenario.cities.length/2)]?.y+Math.floor(i/4)*35}));
+  const greenAnchor=scenario.cities[Math.floor(scenario.cities.length/2)]??{x:WORLD_FALLBACK_X,y:WORLD_FALLBACK_Y};
+  const green=red.slice(0,8).map((u,i)=>({...u,id:"g"+i,name:"Green "+u.name,side:"green" as Side,x:greenAnchor.x+(i%4)*35,y:greenAnchor.y+Math.floor(i/4)*35}));
   const territory:TerritoryCell[]=[];
   let n=0;
   for(let y=240;y<4200;y+=420)for(let x=520;x<6200;x+=420){
