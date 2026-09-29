@@ -40,6 +40,7 @@ export type TerrainFeature={
   cx:number;cy:number;rx:number;ry:number;rotation:number;seed:number;path:string;
 };
 
+export type RoadNode={id:string;x:number;y:number;cityName?:string};
 export type Scenario={
   seed:number;
   presetId:string;
@@ -53,6 +54,7 @@ export type Scenario={
   sideFlags:{blue:FlagStyle;red:FlagStyle;green?:FlagStyle};
   landPath:string;
   terrainFeatures:TerrainFeature[];
+  roadNodes:RoadNode[];
   roadRoutes:Array<Array<{x:number;y:number}>>;
   riverRoutes:Array<Array<{x:number;y:number}>>;
   cities:CityState[];
@@ -82,7 +84,7 @@ export type GameCommand=
 export type SessionSnapshot={tick:number;scenarioSeed:number;formations:Formation[];cities:CityState[];plans:AttackPlan[]};
 
 
-export type EmplacementKind="observatory"|"fixed_artillery";
+export type EmplacementKind="observatory"|"fixed_artillery"|"field_fortification"|"supply_depot";
 export type Emplacement={
   id:string;
   kind:EmplacementKind;
