@@ -324,3 +324,24 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .unit-counter.kind-mortar .unit-top{
   letter-spacing:.08em;
 }
+
+
+/* Open-world dominion */
+.openworld-intro{margin:18px 0;padding:22px;border:1px solid var(--line);background:rgba(255,255,255,.035);display:grid;gap:8px}
+.openworld-intro>b{font-size:18px;letter-spacing:.08em}.openworld-intro p{margin:0;font-size:15px}.openworld-intro span{font-size:11px;opacity:.68;line-height:1.55}
+.openworld-panel{border-top:1px solid var(--line)}
+.resource-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:12px}
+.resource-strip b{padding:7px 5px;border:1px solid var(--line);font-size:10px;text-align:center;background:rgba(255,255,255,.025)}
+.recruit-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:12px}
+.recruit-grid button{min-height:42px;padding:6px;display:flex;flex-direction:column;align-items:flex-start;justify-content:center}
+.recruit-grid button b{font-size:10px}.recruit-grid button small{font-size:8px;opacity:.64}
+.strategic-build-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:8px}
+.strategic-build-grid button{font-size:9px;padding:7px 5px}
+.territory-layer{pointer-events:none}.territory-cell.blue{fill:#5888ff}.territory-cell.red{fill:#e25c5c}.territory-cell.green{fill:#58b879}
+.ow-structure{position:absolute;width:32px;height:32px;border:1px solid rgba(255,255,255,.55);display:grid;place-items:center;font-size:8px;font-weight:800;z-index:12;pointer-events:none;box-shadow:0 2px 8px #0008}
+.ow-structure.blue{background:#25457d}.ow-structure.red{background:#783434}.ow-structure.green{background:#285b3a}
+.ow-structure.road{border-radius:50%;width:18px;height:18px}.ow-structure.wall{border-width:2px;border-radius:2px}.ow-structure.fort{transform:rotate(45deg)}.ow-structure.fort b{transform:rotate(-45deg)}
+.minimap{position:absolute;right:14px;bottom:48px;width:190px;height:128px;border:1px solid rgba(255,255,255,.28);background:#111b1de8;z-index:30;box-shadow:0 6px 24px #0008;overflow:hidden}
+.minimap svg{width:100%;height:100%;display:block}.minimap rect.blue,.minimap circle.blue{fill:#5888ff}.minimap rect.red,.minimap circle.red{fill:#e25c5c}.minimap rect.green,.minimap circle.green{fill:#58b879}.minimap rect{opacity:.33}.minimap circle{opacity:.95}
+.openworld-inspector{padding:14px;display:grid;gap:10px}.openworld-inspector>b{font-size:17px}.openworld-inspector>span{font-size:11px;opacity:.72;line-height:1.5}
+@media(max-width:760px){.minimap{width:135px;height:92px;bottom:76px;right:8px}.recruit-grid{grid-template-columns:1fr}}
