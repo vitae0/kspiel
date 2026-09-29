@@ -85,7 +85,7 @@ export const TERRAIN_RULES:Record<TerrainKind,{label:string;move:number;attack:n
 
 export const UNIT_LABEL:Record<UnitKind,string>={
   infantry:"INF",mechanized:"MECH",armor:"ARM",tank:"TNK",cavalry:"CAV",mountaineer:"MNT",special_forces:"SOF",
-  artillery:"ART",heavy_artillery:"HART",recon:"REC",engineer:"ENG",logistics:"LOG"
+  mortar:"MTR",artillery:"ART",heavy_artillery:"HART",recon:"REC",engineer:"ENG",logistics:"LOG"
 };
 
 function mulberry32(seed:number){
@@ -282,6 +282,7 @@ function unitBase(kind:UnitKind):Pick<Formation,"manpower"|"hardness"|"softAttac
     cavalry:{manpower:7200,hardness:.08,softAttack:46,hardAttack:12,defense:48,breakthrough:52,speed:8.3,recon:58},
     mountaineer:{manpower:8600,hardness:.1,softAttack:58,hardAttack:20,defense:76,breakthrough:42,speed:4.4,recon:44},
     special_forces:{manpower:3400,hardness:.14,softAttack:64,hardAttack:26,defense:72,breakthrough:58,speed:5.2,recon:78},
+    mortar:{manpower:2800,hardness:.06,softAttack:78,hardAttack:20,defense:28,breakthrough:20,speed:3.8,recon:20},
     artillery:{manpower:3900,hardness:.08,softAttack:92,hardAttack:35,defense:24,breakthrough:18,speed:3,recon:16},
     heavy_artillery:{manpower:4700,hardness:.1,softAttack:132,hardAttack:62,defense:20,breakthrough:14,speed:2.1,recon:10},
     recon:{manpower:2600,hardness:.38,softAttack:31,hardAttack:22,defense:36,breakthrough:45,speed:9,recon:92},
@@ -297,7 +298,7 @@ function unit(id:string,name:string,side:Side,kind:UnitKind,x:number,y:number,rn
     strength:86+rnd()*14,
     organization:78+rnd()*16,
     supply:72+rnd()*24,
-    fuel:["infantry","artillery","heavy_artillery","engineer","mountaineer","special_forces","cavalry"].includes(kind)?100:70+rnd()*24,
+    fuel:["infantry","mortar","artillery","heavy_artillery","engineer","mountaineer","special_forces","cavalry"].includes(kind)?100:70+rnd()*24,
     entrenchment:rnd()*10,
     experience:25+rnd()*45,
     readiness:74+rnd()*18,
@@ -320,32 +321,32 @@ function rosterForScenario(scenario:Scenario):UnitKind[]{
     ...repeated("infantry",30),...repeated("cavalry",10),...repeated("artillery",9),...repeated("heavy_artillery",2),...repeated("recon",2),...repeated("engineer",3),...repeated("logistics",3)
   ];
   if(scenario.era==="industrial")return[
-    ...repeated("infantry",34),...repeated("cavalry",4),...repeated("artillery",10),...repeated("heavy_artillery",6),...repeated("recon",3),...repeated("engineer",5),...repeated("logistics",5)
+    ...repeated("infantry",34),...repeated("cavalry",4),...repeated("mortar",6),...repeated("artillery",10),...repeated("heavy_artillery",6),...repeated("recon",3),...repeated("engineer",5),...repeated("logistics",5)
   ];
   const theme=scenario.theme;
   if(theme==="mountain")return[
     ...repeated("infantry",16),...repeated("mountaineer",11),...repeated("special_forces",2),...repeated("cavalry",3),...repeated("tank",2),
-    ...repeated("artillery",5),...repeated("heavy_artillery",2),...repeated("recon",3),...repeated("engineer",4),...repeated("logistics",4)
+    ...repeated("mortar",5),...repeated("artillery",5),...repeated("heavy_artillery",2),...repeated("recon",3),...repeated("engineer",4),...repeated("logistics",4)
   ];
   if(theme==="forest"||theme==="winter")return[
     ...repeated("infantry",19),...repeated("mountaineer",3),...repeated("special_forces",2),...repeated("cavalry",4),...repeated("tank",5),...repeated("mechanized",4),
-    ...repeated("artillery",6),...repeated("heavy_artillery",2),...repeated("recon",4),...repeated("engineer",4),...repeated("logistics",4)
+    ...repeated("mortar",5),...repeated("artillery",6),...repeated("heavy_artillery",2),...repeated("recon",4),...repeated("engineer",4),...repeated("logistics",4)
   ];
   if(theme==="desert")return[
     ...repeated("infantry",9),...repeated("special_forces",1),...repeated("cavalry",8),...repeated("tank",11),...repeated("mechanized",8),
-    ...repeated("artillery",5),...repeated("heavy_artillery",4),...repeated("recon",5),...repeated("engineer",2),...repeated("logistics",5)
+    ...repeated("mortar",4),...repeated("artillery",5),...repeated("heavy_artillery",4),...repeated("recon",5),...repeated("engineer",2),...repeated("logistics",5)
   ];
   if(theme==="steppe")return[
     ...repeated("infantry",13),...repeated("special_forces",1),...repeated("cavalry",5),...repeated("tank",11),...repeated("mechanized",8),
-    ...repeated("artillery",6),...repeated("heavy_artillery",4),...repeated("recon",4),...repeated("engineer",3),...repeated("logistics",5)
+    ...repeated("mortar",4),...repeated("artillery",6),...repeated("heavy_artillery",4),...repeated("recon",4),...repeated("engineer",3),...repeated("logistics",5)
   ];
   if(theme==="urban")return[
-    ...repeated("infantry",28),...repeated("special_forces",2),...repeated("tank",7),...repeated("mechanized",3),...repeated("artillery",8),
+    ...repeated("infantry",28),...repeated("special_forces",2),...repeated("tank",7),...repeated("mechanized",3),...repeated("mortar",6),...repeated("artillery",8),
     ...repeated("heavy_artillery",4),...repeated("recon",3),...repeated("engineer",7),...repeated("logistics",5)
   ];
   return[
     ...repeated("infantry",16),...repeated("mountaineer",3),...repeated("special_forces",2),...repeated("cavalry",3),...repeated("tank",7),...repeated("mechanized",6),
-    ...repeated("artillery",6),...repeated("heavy_artillery",3),...repeated("recon",4),...repeated("engineer",4),...repeated("logistics",4)
+    ...repeated("mortar",5),...repeated("artillery",6),...repeated("heavy_artillery",3),...repeated("recon",4),...repeated("engineer",4),...repeated("logistics",4)
   ];
 }
 function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>number,kind:UnitKind){
@@ -385,7 +386,7 @@ function makeFormations(side:Side,scenario:Scenario,rnd:()=>number){
   const kinds=rosterForScenario(scenario);
   const labels:Record<UnitKind,string>={
     infantry:"Infantry",mechanized:"Mechanized",armor:"Armored",tank:"Tank",cavalry:"Cavalry",mountaineer:"Mountain",special_forces:"Special Forces",
-    artillery:"Field Artillery",heavy_artillery:"Heavy Artillery",recon:"Recon",engineer:"Engineers",logistics:"Logistics"
+    mortar:"Mortar",artillery:"Field Artillery",heavy_artillery:"Heavy Artillery",recon:"Recon",engineer:"Engineers",logistics:"Logistics"
   };
   return kinds.map((kind,i)=>{
     const p=spawnPoint(side,scenario.cities,scenario,rnd,kind);
