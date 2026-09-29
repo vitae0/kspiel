@@ -404,7 +404,7 @@ function forageSupply(u:Formation,terrain:TerrainSample["terrain"],inCombat:bool
   return 0;
 }
 
-function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CityState[],emplacements:Emplacement[]=[]){
+function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CityState[],emplacements:Emplacement[]=[],openWorld:OpenWorldState|null=null){
   const supplyNetwork=computeSupplyNetwork(scenario,units,cities);
   const logisticsGraph=computeLogisticsLinks(scenario,units,cities,supplyNetwork,emplacements);
   const next=units.map(u=>{
@@ -456,7 +456,8 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
         n.order=nextWaypoint?{type:"move",targetX:nextWaypoint.x,targetY:nextWaypoint.y,waypoints:remaining}:{type:"defend"};
       }else if(dist>0){
         const posture=n.order.type==="retreat"?1.55:n.order.type==="relieve"?1.12:n.order.type==="assault"?.58:n.order.type==="probe"?.74:1;
-        const roadBonus=sample.road
+        const builtRoad=openWorld?.structures.some(s=>s.kind==="road"&&s.side===u.side&&Math.hypot(s.x-u.x,s.y-u.y)<190);
+        const roadBonus=(sample.road||builtRoad)
           ?ARTILLERY_KINDS.has(u.kind)?2.5
           :u.kind==="logistics"?2.05
           :u.kind==="armor"||u.kind==="tank"||u.kind==="mechanized"||u.kind==="recon"?1.8
@@ -514,8 +515,10 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
 
       const aCan=DIRECT_COMBAT_KINDS.has(a.kind),bCan=DIRECT_COMBAT_KINDS.has(b.kind);
       if(!aCan&&!bCan)continue;
-      const aDef=TERRAIN_RULES[terrainAt(scenario,a.x,a.y).terrain].defense;
-      const bDef=TERRAIN_RULES[terrainAt(scenario,b.x,b.y).terrain].defense;
+      const aWall=openWorld?.structures.some(s=>(s.kind==="wall"||s.kind==="fort")&&s.side===a.side&&Math.hypot(s.x-a.x,s.y-a.y)<150)?1.32:1;
+      const bWall=openWorld?.structures.some(s=>(s.kind==="wall"||s.kind==="fort")&&s.side===b.side&&Math.hypot(s.x-b.x,s.y-b.y)<150)?1.32:1;
+      const aDef=TERRAIN_RULES[terrainAt(scenario,a.x,a.y).terrain].defense*aWall;
+      const bDef=TERRAIN_RULES[terrainAt(scenario,b.x,b.y).terrain].defense*bWall;
       const aRetreat=a.order?.type==="retreat",bRetreat=b.order?.type==="retreat";
       const aPower=aCan&&!aRetreat?(a.softAttack*(1-b.hardness)+a.hardAttack*b.hardness)*(a.organization/100)*(a.supply/100):0;
       const bPower=bCan&&!bRetreat?(b.softAttack*(1-a.hardness)+b.hardAttack*a.hardness)*(b.organization/100)*(b.supply/100):0;
@@ -703,7 +706,7 @@ export default function Home(){
 
   const matchConfig=createMatchConfig("singleplayer","local",playerSide);
   const localSides=new Set(localControlledSides(matchConfig,"local"));
-  const botSides=botControlledSides(matchConfig);
+  const botSides=openWorld?(["blue","red","green"] as Side[]).filter(side=>!localSides.has(side)):botControlledSides(matchConfig);
   const armyGroups=defaultArmyGroups(playerSide);
 
   const selectedUnits=units.filter(u=>selected.includes(u.id));
@@ -725,7 +728,7 @@ export default function Home(){
 
       let working=unitsRef.current;
       if(aiElapsed>=AI_COMMAND_INTERVAL_SECONDS){for(const side of botSides)working=enemyAI(scenario,working,citiesRef.current,side);aiElapsed=0}
-      let nextUnits=simulate(scenario,working,simHours,citiesRef.current,emplacementsRef.current);
+      let nextUnits=simulate(scenario,working,simHours,citiesRef.current,emplacementsRef.current,openWorldRef.current);
       if(openWorldRef.current){
         const ow=advanceOpenWorld(openWorldRef.current,nextUnits,citiesRef.current,simHours);
         openWorldRef.current=ow.state;setOpenWorld(ow.state);
