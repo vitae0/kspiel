@@ -368,7 +368,7 @@ function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>numbe
 function makeFormations(side:Side,scenario:Scenario,rnd:()=>number){
   const kinds=rosterForScenario(scenario);
   const labels:Record<UnitKind,string>={
-    infantry:"Infantry",mechanized:"Mechanized",armor:"Armored",tank:"Tank",cavalry:"Cavalry",mountaineer:"Mountain",
+    infantry:"Infantry",mechanized:"Mechanized",armor:"Armored",tank:"Tank",cavalry:"Cavalry",mountaineer:"Mountain",special_forces:"Special Forces",
     artillery:"Field Artillery",heavy_artillery:"Heavy Artillery",recon:"Recon",engineer:"Engineers",logistics:"Logistics"
   };
   return kinds.map((kind,i)=>{
