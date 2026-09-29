@@ -524,6 +524,14 @@ export default function Home(){
   },[isMobile,pendingOrder,pendingPlan,pendingBuild]);
 
   useEffect(()=>{
+    const el=viewport.current;
+    if(!el)return;
+    const block=(event:Event)=>event.preventDefault();
+    el.addEventListener("contextmenu",block,{capture:true});
+    return()=>el.removeEventListener("contextmenu",block,{capture:true});
+  },[scenario]);
+
+  useEffect(()=>{
     const togglePause=(e:KeyboardEvent)=>{
       const el=e.target as HTMLElement|null;
       if(el?.tagName==="INPUT"||el?.tagName==="TEXTAREA"||el?.isContentEditable)return;
@@ -812,10 +820,15 @@ export default function Home(){
     if(!append)setPendingOrder(null);
   }
 
+  function suppressNativeContextMenu(e:ReactMouseEvent){
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
   function issueTarget(e:ReactMouseEvent){
     e.preventDefault();
     if(suppressContextMenu.current){suppressContextMenu.current=false;return}
-    issueMapTargetAt(e.clientX,e.clientY,e.shiftKey);
+    issueMapTargetAt(e.clientX,e.clientY,e.shiftKey||e.ctrlKey);
   }
 
   function issueUnitTargetCore(target:Formation,allowDefaultMove:boolean){
@@ -975,7 +988,7 @@ export default function Home(){
       <section><div className="section-title">ORDER OF BATTLE</div><div className="oob-list">{blue.map(u=><button key={u.id} onClick={()=>{setSelected([u.id]);if(isMobile)setMobilePanel("unit")}} className={selected.includes(u.id)?"selected":""}><span className="oob-code">{UNIT_LABEL[u.kind]}</span><span><b>{u.name}</b><small>{pct(u.strength)} STR · {pct(u.organization)} ORG</small></span></button>)}</div></section>
     </aside>
 
-    <div ref={viewport} className={pendingOrder||pendingPlan||pendingBuild?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenu={issueTarget}>
+    <div ref={viewport} className={pendingOrder||pendingPlan||pendingBuild?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenuCapture={suppressNativeContextMenu} onContextMenu={issueTarget}>
       <div className="world" style={{width:WORLD_W,height:WORLD_H,transform:"translate("+pan.x+"px,"+pan.y+"px) scale("+zoom+")"}}>
         <svg className="terrain" width={WORLD_W} height={WORLD_H} viewBox={"0 0 "+WORLD_W+" "+WORLD_H}>
           <defs><linearGradient id="sea" x1="0" x2="1"><stop offset="0" stopColor="#1c313c"/><stop offset="1" stopColor="#29424b"/></linearGradient><linearGradient id="intelShade" x1="0" x2="1"><stop offset="0" stopColor="#71846a" stopOpacity=".08"/><stop offset=".55" stopColor="#151b18" stopOpacity=".22"/><stop offset="1" stopColor="#050806" stopOpacity=".68"/></linearGradient><mask id="fogMask" maskUnits="userSpaceOnUse"><rect width={WORLD_W} height={WORLD_H} fill="white"/>{blue.map(u=><circle key={"fog-u-"+u.id} cx={u.x} cy={u.y} r={visionRange(u)} fill="black"/>)}{cities.filter(c=>localSides.has(c.owner)).map(c=><circle key={"fog-c-"+c.name} cx={c.x} cy={c.y} r="270" fill="black"/>)}{emplacements.filter(e=>localSides.has(e.side)&&e.kind==="observatory").map(e=><circle key={"fog-e-"+e.id} cx={e.x} cy={e.y} r={e.range} fill="black"/>)}</mask></defs>
@@ -992,7 +1005,7 @@ export default function Home(){
         {units.map(u=>{
           const visible=localSides.has(u.side)||blue.some(b=>Math.hypot(b.x-u.x,b.y-u.y)<visionRange(b))||cities.some(c=>localSides.has(c.owner)&&Math.hypot(c.x-u.x,c.y-u.y)<270)||emplacements.some(e=>localSides.has(e.side)&&e.kind==="observatory"&&Math.hypot(e.x-u.x,e.y-u.y)<e.range);
           if(!visible)return null;
-          return <button key={u.id} className={"unit-counter "+u.side+" kind-"+u.kind+" "+(selected.includes(u.id)?"selected ":"")+(u.organization<30?"shaken ":"")+(u.order?.type==="retreat"?"retreating":"")} style={{left:u.x-16,top:u.y-16}} onPointerDown={e=>e.stopPropagation()} onClick={e=>selectUnit(e,u)} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{localSides.has(u.side)?"Ⅰ":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
+          return <button key={u.id} className={"unit-counter "+u.side+" kind-"+u.kind+" "+(selected.includes(u.id)?"selected ":"")+(u.organization<30?"shaken ":"")+(u.order?.type==="retreat"?"retreating":"")} style={{left:u.x-16,top:u.y-16}} onPointerDown={e=>{if(e.button===2)e.preventDefault();e.stopPropagation()}} onClick={e=>selectUnit(e,u)} onContextMenuCapture={e=>e.preventDefault()} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{localSides.has(u.side)?"Ⅰ":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
         })}
         {emplacements.map(e=>{
           return <div key={e.id} className={"emplacement "+e.kind+" "+e.side} style={{left:e.x-18,top:e.y-18}} title={e.kind==="observatory"?"Observatory tower":e.kind==="fixed_artillery"?"Stationary artillery battery":e.kind==="field_fortification"?"Field fortification":"Supply depot"}><b>{e.kind==="observatory"?"OBS":e.kind==="fixed_artillery"?"BAT":e.kind==="field_fortification"?"FORT":"DEP"}</b><small>{Math.round(e.strength)}</small></div>
@@ -1043,7 +1056,7 @@ export default function Home(){
       <button onClick={()=>setRunning(v=>warResult?v:!v)}><b>{running?"Ⅱ":"▶"}</b><span>{running?"PAUSE":"PLAY"}</span></button>
     </nav>
 
-    <footer className="statusbar"><span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB: MOVE · SHIFT+RMB: QUEUE</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><span>ENGINEERS: BUILD WORKS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
+    <footer className="statusbar"><span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB: MOVE · SHIFT/CTRL+RMB: QUEUE</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><span>ENGINEERS: BUILD WORKS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
   </main>
 }
 
