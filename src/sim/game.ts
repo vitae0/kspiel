@@ -233,23 +233,32 @@ function makeCities(rnd:()=>number,preset:ScenarioPreset):CityState[]{
 }
 
 function routeBetween(a:{x:number;y:number},b:{x:number;y:number},rnd:()=>number){
-  const dx=b.x-a.x,dy=b.y-a.y;
-  const p1={x:a.x+dx*.34+(rnd()-.5)*180,y:a.y+dy*.34+(rnd()-.5)*230};
-  const p2={x:a.x+dx*.68+(rnd()-.5)*180,y:a.y+dy*.68+(rnd()-.5)*230};
-  return[{x:a.x,y:a.y},p1,p2,{x:b.x,y:b.y}];
+  const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1;
+  const nx=-dy/len,ny=dx/len;
+  const bend=(rnd()-.5)*Math.min(90,len*.09);
+  const mid={x:(a.x+b.x)/2+nx*bend,y:(a.y+b.y)/2+ny*bend};
+  return[{x:a.x,y:a.y},mid,{x:b.x,y:b.y}];
 }
 
-function makeRoads(cities:CityState[],rnd:()=>number){
-  const sorted=[...cities].sort((a,b)=>a.x-b.x);
+function makeRoadNetwork(cities:CityState[],rnd:()=>number){
+  const edges=new Set<string>();
   const roads:Array<Array<{x:number;y:number}>>=[];
-  for(let i=0;i<sorted.length-1;i++)roads.push(routeBetween(sorted[i],sorted[i+1],rnd));
-  for(let i=0;i<Math.max(6,Math.floor(cities.length*.7));i++){
-    const a=cities[Math.floor(rnd()*cities.length)];
-    let b=cities[Math.floor(rnd()*cities.length)];
-    if(a===b)b=cities[(cities.indexOf(a)+2)%cities.length];
-    roads.push(routeBetween(a,b,rnd));
+  const connect=(a:CityState,b:CityState)=>{
+    const ia=cities.indexOf(a),ib=cities.indexOf(b);
+    const key=ia<ib?ia+"-"+ib:ib+"-"+ia;
+    if(edges.has(key)||a===b)return;
+    edges.add(key);roads.push(routeBetween(a,b,rnd));
+  };
+  const sorted=[...cities].sort((a,b)=>a.x-b.x);
+  for(let i=0;i<sorted.length-1;i++)connect(sorted[i],sorted[i+1]);
+  for(const city of cities){
+    const nearest=cities.filter(c=>c!==city).sort((a,b)=>Math.hypot(a.x-city.x,a.y-city.y)-Math.hypot(b.x-city.x,b.y-city.y));
+    for(const other of nearest.slice(0,2))connect(city,other);
   }
-  return roads;
+  return{
+    nodes:cities.map((city,i)=>({id:"road-"+i,x:city.x,y:city.y,cityName:city.name})),
+    routes:roads
+  };
 }
 
 function makeRivers(rnd:()=>number,theme:ScenarioTheme){
@@ -342,14 +351,17 @@ function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>numbe
   const owned=cities.filter(c=>c.owner===side);
   for(let tries=0;tries<80;tries++){
     const anchor=owned[Math.floor(rnd()*owned.length)]??{x:side==="blue"?1300:4900,y:WORLD_H*.5};
-    const angle=rnd()*Math.PI*2;
-    const radius=120+rnd()*470;
-    const x=Math.max(330,Math.min(WORLD_W-90,anchor.x+Math.cos(angle)*radius));
-    const y=Math.max(90,Math.min(WORLD_H-90,anchor.y+Math.sin(angle)*radius));
+    const connected=scenario.roadRoutes.filter(route=>Math.hypot(route[0].x-anchor.x,route[0].y-anchor.y)<5||Math.hypot(route[route.length-1].x-anchor.x,route[route.length-1].y-anchor.y)<5);
+    const route=connected[Math.floor(rnd()*connected.length)];
+    const base=route?route[Math.floor(rnd()*Math.min(2,route.length))]:anchor;
+    const angle=rnd()*Math.PI*2,radius=rnd()*26;
+    const x=Math.max(330,Math.min(WORLD_W-90,base.x+Math.cos(angle)*radius));
+    const y=Math.max(90,Math.min(WORLD_H-90,base.y+Math.sin(angle)*radius));
     const terrain=terrainAt(scenario,x,y).terrain;
     if(terrain!=="water"&&(terrain!=="highmountain"||kind==="mountaineer"))return{x,y};
   }
-  return{x:side==="blue"?1300:4900,y:500+rnd()*(WORLD_H-1000)};
+  const anchor=owned[0]??{x:side==="blue"?1300:4900,y:WORLD_H*.5};
+  return{x:anchor.x,y:anchor.y};
 }
 
 function makeFormations(side:Side,scenario:Scenario,rnd:()=>number){
@@ -387,11 +399,12 @@ export function generateScenario(seed:number,presetId="frontier"):Scenario{
   const coast=coastForTheme(preset.theme,rnd);
   const cities=makeCities(rnd,preset);
   const terrainFeatures=makeFeatures(rnd,preset.theme);
-  const roadRoutes=makeRoads(cities,rnd);
+  const roadNetwork=makeRoadNetwork(cities,rnd);
+  const roadRoutes=roadNetwork.routes;
   const riverRoutes=makeRivers(rnd,preset.theme);
   const shell:Scenario={
     seed,presetId:preset.id,title:preset.title,theme:preset.theme,era:preset.era,historical:preset.historical,year:preset.year,
-    location:preset.location,sideNames:preset.sideNames,sideFlags:preset.sideFlags,coast,cities,terrainFeatures,roadRoutes,riverRoutes,formations:[],landPath:""
+    location:preset.location,sideNames:preset.sideNames,sideFlags:preset.sideFlags,coast,cities,terrainFeatures,roadNodes:roadNetwork.nodes,roadRoutes,riverRoutes,formations:[],landPath:""
   };
 
   const pts:Array<{x:number;y:number}>=[];
