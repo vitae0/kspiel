@@ -822,7 +822,6 @@ export default function Home(){
 
   function suppressNativeContextMenu(e:ReactMouseEvent){
     e.preventDefault();
-    e.stopPropagation();
   }
 
   function issueTarget(e:ReactMouseEvent){
