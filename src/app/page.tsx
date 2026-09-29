@@ -14,7 +14,10 @@ const MOVEMENT_SCALE=4.2;
 const RETREAT_SUPPLY_MIN=0;
 const DIRECT_COMBAT_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","armor","tank","cavalry","mountaineer","special_forces","recon","engineer"]);
 const CAPTURE_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","tank","cavalry","mountaineer","special_forces","engineer"]);
-const ARTILLERY_KINDS=new Set<Formation["kind"]>(["artillery","heavy_artillery"]);
+const ARTILLERY_KINDS=new Set<Formation["kind"]>(["mortar","artillery","heavy_artillery"]);
+const GUN_ARTILLERY_KINDS=new Set<Formation["kind"]>(["artillery","heavy_artillery"]);
+const MORTAR_BASE_RANGE=980;
+const MORTAR_BASE_DISPERSION=170;
 const MOTORIZED_KINDS=new Set<Formation["kind"]>(["armor","tank","mechanized","recon","logistics"]);
 
 function clamp(v:number,min:number,max:number){return Math.max(min,Math.min(max,v))}
@@ -57,6 +60,31 @@ function routeCutForSide(route:{x:number;y:number}[],side:Side,units:Formation[]
 
 function visionRange(u:Formation){
   return u.kind==="recon"?650+u.recon*4.6:300+u.recon*2.5;
+}
+
+function mortarTerrainProfile(terrain:TerrainSample["terrain"]){
+  return {
+    water:{dispersion:1.8,effect:.25},
+    plains:{dispersion:1,effect:1},
+    desert:{dispersion:.94,effect:1.06},
+    forest:{dispersion:1.28,effect:.76},
+    hills:{dispersion:1.16,effect:.84},
+    mountain:{dispersion:1.34,effect:.7},
+    highmountain:{dispersion:1.5,effect:.58},
+    marsh:{dispersion:1.24,effect:.9},
+    urban:{dispersion:1.3,effect:.72}
+  }[terrain];
+}
+
+function mortarMaxRange(scenario:Scenario,u:Formation){
+  const terrain=terrainAt(scenario,u.x,u.y).terrain;
+  const terrainFactor=terrain==="mountain"?1.12:terrain==="hills"?1.08:terrain==="highmountain"?1.15:terrain==="forest"?.94:terrain==="marsh"?.92:1;
+  return MORTAR_BASE_RANGE*terrainFactor;
+}
+
+function mortarDispersion(scenario:Scenario,x:number,y:number,rangeRatio=.5){
+  const terrain=mortarTerrainProfile(terrainAt(scenario,x,y).terrain);
+  return MORTAR_BASE_DISPERSION*terrain.dispersion*(.82+.42*clamp(rangeRatio,0,1));
 }
 
 function movementSupplyFactor(u:Formation){
@@ -285,11 +313,17 @@ function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],side:Sid
       .sort((a,b)=>a.d-b.d)[0];
 
     if(ARTILLERY_KINDS.has(u.kind)){
-      if(nearestHostile.d<=520&&u.supply>20&&u.organization>24)return{...u,order:{type:"fire",targetUnitId:nearestHostile.v.id}};
+      const maxRange=u.kind==="mortar"?mortarMaxRange(scenario,u):u.kind==="heavy_artillery"?820:540;
+      if(nearestHostile.d<=maxRange&&u.supply>20&&u.organization>24){
+        return u.kind==="mortar"
+          ?{...u,order:{type:"fire",targetX:nearestHostile.v.x,targetY:nearestHostile.v.y}}
+          :{...u,order:{type:"fire",targetUnitId:nearestHostile.v.id}};
+      }
       const anchor=nearestFriendlyCombat?.v;
       if(anchor){
         const dx=anchor.x-nearestHostile.v.x,dy=anchor.y-nearestHostile.v.y,len=Math.hypot(dx,dy)||1;
-        const tx=clamp(anchor.x+dx/len*230,20,WORLD_W-20),ty=clamp(anchor.y+dy/len*230,20,WORLD_H-20);
+        const standoff=u.kind==="mortar"?330:230;
+        const tx=clamp(anchor.x+dx/len*standoff,20,WORLD_W-20),ty=clamp(anchor.y+dy/len*standoff,20,WORLD_H-20);
         if(terrainAt(scenario,tx,ty).terrain!=="water")return{...u,order:{type:"move",targetX:tx,targetY:ty}};
       }
       return{...u,order:{type:"defend"}};
@@ -385,7 +419,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     }
 
     const inCombat=isInCombat(u,units);
-    const supplyBurn=(u.kind==="tank"||u.kind==="armor"?1.12:u.kind==="mechanized"?.86:u.kind==="heavy_artillery"?.96:u.kind==="artillery"?.72:u.kind==="logistics"?.58:u.kind==="special_forces"?.26:u.kind==="cavalry"?.38:.5)*(inCombat?1.72:1);
+    const supplyBurn=(u.kind==="tank"||u.kind==="armor"?1.12:u.kind==="mechanized"?.86:u.kind==="heavy_artillery"?.96:u.kind==="artillery"?.72:u.kind==="mortar"?.62:u.kind==="logistics"?.58:u.kind==="special_forces"?.26:u.kind==="cavalry"?.38:.5)*(inCombat?1.72:1);
     n.supply=clamp(n.supply-hours*supplyBurn/Math.max(.38,terrain.supply),0,100);
     n.supply=clamp(n.supply+hours*forageSupply(u,sample.terrain,inCombat),0,100);
     if(MOTORIZED_KINDS.has(u.kind))n.fuel=clamp(n.fuel-hours*(inCombat?.42:.18),0,100);
@@ -494,7 +528,36 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
   }
 
   for(const gun of result){
-    if(!ARTILLERY_KINDS.has(gun.kind)||gun.order?.type!=="fire"||!gun.order.targetUnitId)continue;
+    if(!ARTILLERY_KINDS.has(gun.kind)||gun.order?.type!=="fire")continue;
+
+    if(gun.kind==="mortar"){
+      if(gun.order.targetX===undefined||gun.order.targetY===undefined)continue;
+      const tx=gun.order.targetX,ty=gun.order.targetY;
+      const range=Math.hypot(tx-gun.x,ty-gun.y),maxRange=mortarMaxRange(scenario,gun);
+      if(range>maxRange||gun.supply<8||gun.organization<10)continue;
+      const targetTerrain=terrainAt(scenario,tx,ty).terrain;
+      const profile=mortarTerrainProfile(targetTerrain);
+      const dispersion=mortarDispersion(scenario,tx,ty,range/maxRange);
+      const angle=Math.random()*Math.PI*2,radius=Math.sqrt(Math.random())*dispersion;
+      const impactX=clamp(tx+Math.cos(angle)*radius,1,WORLD_W-1),impactY=clamp(ty+Math.sin(angle)*radius,1,WORLD_H-1);
+      const rangeFactor=clamp(1-range/maxRange*.42,.58,1);
+      for(const target of result){
+        if(target.id===gun.id)continue;
+        const d=Math.hypot(target.x-impactX,target.y-impactY);
+        if(d>105)continue;
+        const falloff=clamp(1-d/115,.08,1);
+        const friendlyFire=target.side===gun.side?.55:1;
+        const cover=mortarTerrainProfile(terrainAt(scenario,target.x,target.y).terrain).effect;
+        const power=(gun.softAttack*(1-target.hardness)+gun.hardAttack*target.hardness)*(gun.organization/100)*(gun.supply/100)*rangeFactor*profile.effect*falloff*friendlyFire;
+        const loss=(power/Math.max(22,target.defense*.62+target.entrenchment*1.3))*hours*1.22*cover;
+        target.strength=clamp(target.strength-loss,0,100);
+        target.organization=clamp(target.organization-loss*3.25,0,100);
+      }
+      gun.supply=clamp(gun.supply-hours*.82,0,100);gun.organization=clamp(gun.organization-hours*.035,0,100);
+      continue;
+    }
+
+    if(!gun.order.targetUnitId||!GUN_ARTILLERY_KINDS.has(gun.kind))continue;
     const target=result.find(v=>v.id===gun.order?.targetUnitId&&v.side!==gun.side);
     if(!target)continue;
     const range=Math.hypot(target.x-gun.x,target.y-gun.y);
@@ -569,6 +632,7 @@ export default function Home(){
   const [pan,setPan]=useState({x:-260,y:-190});
   const [zoom,setZoom]=useState(.24);
   const [hovered,setHovered]=useState<TerrainSample|null>(null);
+  const [aimPoint,setAimPoint]=useState<{x:number;y:number}|null>(null);
   const [warResult,setWarResult]=useState<Side|null>(null);
   const [selectionBox,setSelectionBox]=useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
   const [frontPreview,setFrontPreview]=useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
@@ -888,7 +952,7 @@ export default function Home(){
   }
 
   function issueMapTargetAt(clientX:number,clientY:number,append=false){
-    if(!selected.length||pendingOrder==="assault"||pendingOrder==="fire"||pendingOrder==="relieve")return;
+    if(!selected.length||pendingOrder==="assault"||pendingOrder==="relieve")return;
     const point=mapPoint(clientX,clientY);if(!point)return;
     const tx=clamp(point.x,1,WORLD_W-1),ty=clamp(point.y,1,WORLD_H-1);if(terrainAt(activeScenario,tx,ty).terrain==="water")return;
     if(pendingBuild){createConstruction(tx,ty);return}
@@ -900,6 +964,12 @@ export default function Home(){
         const tail=u.order.waypoints?.length?u.order.waypoints[u.order.waypoints.length-1]:{x:u.order.targetX,y:u.order.targetY};
         const leg=roadRoutePlan(activeScenario,cities,tail,{x:tx,y:ty});
         return{...u,order:{...u.order,waypoints:[...(u.order.waypoints??[]),...leg]}};
+      }
+      if(requested==="fire"){
+        if(u.kind!=="mortar")return u;
+        const range=Math.hypot(tx-u.x,ty-u.y);
+        if(range>mortarMaxRange(activeScenario,u))return u;
+        return{...u,order:{type:"fire",targetX:tx,targetY:ty}};
       }
       if(requested==="probe"&&DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:"probe",targetX:tx,targetY:ty}};
       const route=roadRoutePlan(activeScenario,cities,{x:u.x,y:u.y},{x:tx,y:ty});
@@ -933,7 +1003,7 @@ export default function Home(){
     if((requested==="assault"||requested==="fire"||requested==="probe")&&primary&&target.side===primary.side)return;
     commitUnits(prev=>prev.map(u=>{
       if(!selected.includes(u.id))return u;
-      if(requested==="fire")return ARTILLERY_KINDS.has(u.kind)?{...u,order:{type:"fire",targetUnitId:target.id}}:u;
+      if(requested==="fire")return u.kind==="mortar"?{...u,order:{type:"fire",targetX:target.x,targetY:target.y}}:GUN_ARTILLERY_KINDS.has(u.kind)?{...u,order:{type:"fire",targetUnitId:target.id}}:u;
       if(requested==="assault"||requested==="probe"){
         if(ARTILLERY_KINDS.has(u.kind))return{...u,order:{type:"fire",targetUnitId:target.id}};
         if(DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:requested,targetUnitId:target.id}};
@@ -994,7 +1064,7 @@ export default function Home(){
   }
 
   function onPointerMove(e:ReactPointerEvent<HTMLDivElement>){
-    const point=mapPoint(e.clientX,e.clientY);if(point)setHovered(terrainAt(activeScenario,point.x,point.y));
+    const point=mapPoint(e.clientX,e.clientY);if(point){setHovered(terrainAt(activeScenario,point.x,point.y));setAimPoint({x:point.x,y:point.y})}
 
     if(e.pointerType==="touch"){
       if(touchPoints.current.has(e.pointerId))touchPoints.current.set(e.pointerId,{x:e.clientX,y:e.clientY});
@@ -1090,7 +1160,8 @@ export default function Home(){
           {overlay==="intel"&&<path d={activeScenario.landPath} fill="url(#intelShade)" className="intel-overlay"/>}<rect width={WORLD_W} height={WORLD_H} className="fog-dark" mask="url(#fogMask)"/><rect x="1" y="1" width={WORLD_W-2} height={WORLD_H-2} className="world-boundary"/>
         </svg>
 
-        {selectedUnits.some(u=>ARTILLERY_KINDS.has(u.kind))&&<svg className="artillery-ranges" width={WORLD_W} height={WORLD_H}>{selectedUnits.filter(u=>ARTILLERY_KINDS.has(u.kind)).map(u=><g key={"range-"+u.id}><circle cx={u.x} cy={u.y} r={u.kind==="heavy_artillery"?820:540}/><text x={u.x+10} y={u.y-(u.kind==="heavy_artillery"?820:540)+22}>{u.kind==="heavy_artillery"?"820":"540"} RANGE</text></g>)}</svg>}
+        {selectedUnits.some(u=>ARTILLERY_KINDS.has(u.kind))&&<svg className="artillery-ranges" width={WORLD_W} height={WORLD_H}>{selectedUnits.filter(u=>ARTILLERY_KINDS.has(u.kind)).map(u=>{const r=u.kind==="mortar"?mortarMaxRange(activeScenario,u):u.kind==="heavy_artillery"?820:540;return <g key={"range-"+u.id}><circle cx={u.x} cy={u.y} r={r}/><text x={u.x+10} y={u.y-r+22}>{Math.round(r)} RANGE</text></g>})}</svg>}
+        {pendingOrder==="fire"&&aimPoint&&selectedUnits.some(u=>u.kind==="mortar")&&<svg className="mortar-aim" width={WORLD_W} height={WORLD_H}><circle cx={aimPoint.x} cy={aimPoint.y} r={mortarDispersion(activeScenario,aimPoint.x,aimPoint.y,Math.min(1,Math.min(...selectedUnits.filter(u=>u.kind==="mortar").map(u=>Math.hypot(aimPoint.x-u.x,aimPoint.y-u.y)/mortarMaxRange(activeScenario,u)))))} /><circle className="mortar-aim-core" cx={aimPoint.x} cy={aimPoint.y} r="7"/></svg>}
         {units.map(u=>{
           const visible=localSides.has(u.side)||blue.some(b=>Math.hypot(b.x-u.x,b.y-u.y)<visionRange(b))||cities.some(c=>localSides.has(c.owner)&&Math.hypot(c.x-u.x,c.y-u.y)<270)||emplacements.some(e=>localSides.has(e.side)&&e.kind==="observatory"&&Math.hypot(e.x-u.x,e.y-u.y)<e.range);
           if(!visible)return null;
@@ -1109,7 +1180,7 @@ export default function Home(){
       <div className="map-hud"><div><span className="dot friendly"/>FRIENDLY {blue.length}</div><div><span className="dot hostile"/>CONTACTS {enemy.length}</div><div>CITIES {blueCities}/{cities.length}</div><div>{hovered?TERRAIN_RULES[hovered.terrain].label.toUpperCase()+" · "+(hovered.road?"SUPPLY ROAD":"OFF ROAD"):activeScenario.location.toUpperCase()}</div><div>ZOOM {Math.round(zoom*100)}%</div></div>
       {pendingBuild&&<div className="target-banner">{pendingBuild==="observatory"?"OBSERVATORY TOWER":pendingBuild==="fixed_artillery"?"FIXED ARTILLERY":pendingBuild==="field_fortification"?"FIELD FORTIFICATION":"SUPPLY DEPOT"} · {isMobile?"TAP CONSTRUCTION SITE":"RMB CONSTRUCTION SITE"} <button onClick={()=>setPendingBuild(null)}>CANCEL</button></div>}
       {pendingPlan&&<div className="target-banner">ATTACK PLAN · {isMobile?"TAP OBJECTIVE":"RMB OBJECTIVE"} <button onClick={()=>setPendingPlan(false)}>CANCEL</button></div>}
-      {pendingOrder&&<div className="target-banner">{pendingOrder==="relieve"?"RELIEVE ARMED · "+(isMobile?"TAP FRIENDLY":"RMB FRIENDLY FRONTLINE"):pendingOrder==="assault"||pendingOrder==="fire"?pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP ENEMY":"RMB ENEMY FORMATION"):pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP TARGET":"RMB TARGET")} <button onClick={()=>setPendingOrder(null)}>CANCEL</button></div>}
+      {pendingOrder&&<div className="target-banner">{pendingOrder==="relieve"?"RELIEVE ARMED · "+(isMobile?"TAP FRIENDLY":"RMB FRIENDLY FRONTLINE"):pendingOrder==="fire"&&selectedUnits.some(u=>u.kind==="mortar")?"MORTAR FIRE · "+(isMobile?"TAP IMPACT AREA":"RMB IMPACT AREA"):pendingOrder==="assault"||pendingOrder==="fire"?pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP ENEMY":"RMB ENEMY FORMATION"):pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP TARGET":"RMB TARGET")} <button onClick={()=>setPendingOrder(null)}>CANCEL</button></div>}
       {warResult&&<div className={"war-result "+warResult}><b>{localSides.has(warResult)?"VICTORY":"DEFEAT"}</b><span>ALL STRATEGIC CITIES CONTROLLED BY {activeScenario.sideNames[warResult]??warResult.toUpperCase()}</span></div>}
     </div>
 
