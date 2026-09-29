@@ -350,18 +350,34 @@ function rosterForScenario(scenario:Scenario):UnitKind[]{
 }
 function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>number,kind:UnitKind){
   const owned=cities.filter(c=>c.owner===side);
-  for(let tries=0;tries<80;tries++){
+  const hostile=cities.filter(c=>c.owner!==side);
+  for(let tries=0;tries<100;tries++){
     const anchor=owned[Math.floor(rnd()*owned.length)]??{x:side==="blue"?1300:4900,y:WORLD_H*.5};
     const connected=scenario.roadRoutes.filter(route=>Math.hypot(route[0].x-anchor.x,route[0].y-anchor.y)<5||Math.hypot(route[route.length-1].x-anchor.x,route[route.length-1].y-anchor.y)<5);
     const route=connected[Math.floor(rnd()*connected.length)];
-    const base=route?route[Math.floor(rnd()*Math.min(2,route.length))]:anchor;
-    const angle=rnd()*Math.PI*2,radius=rnd()*26;
+    let base:{x:number;y:number}=anchor;
+    if(route){
+      const startDist=Math.hypot(route[0].x-anchor.x,route[0].y-anchor.y);
+      const endDist=Math.hypot(route[route.length-1].x-anchor.x,route[route.length-1].y-anchor.y);
+      if(startDist<=endDist){
+        base=route[Math.floor(rnd()*Math.min(2,route.length))];
+      }else{
+        const offset=Math.floor(rnd()*Math.min(2,route.length));
+        base=route[Math.max(0,route.length-1-offset)];
+      }
+    }
+    const angle=rnd()*Math.PI*2,radius=rnd()*34;
     const x=Math.max(330,Math.min(WORLD_W-90,base.x+Math.cos(angle)*radius));
     const y=Math.max(90,Math.min(WORLD_H-90,base.y+Math.sin(angle)*radius));
     const terrain=terrainAt(scenario,x,y).terrain;
-    if(terrain!=="water"&&(terrain!=="highmountain"||kind==="mountaineer"))return{x,y};
+    const nearHostileCity=hostile.some(c=>Math.hypot(c.x-x,c.y-y)<180);
+    if(!nearHostileCity&&terrain!=="water"&&(terrain!=="highmountain"||kind==="mountaineer"||kind==="special_forces"))return{x,y};
   }
-  const anchor=owned[0]??{x:side==="blue"?1300:4900,y:WORLD_H*.5};
+  const anchor=owned.sort((a,b)=>{
+    const da=Math.min(...hostile.map(c=>Math.hypot(c.x-a.x,c.y-a.y)),Infinity);
+    const db=Math.min(...hostile.map(c=>Math.hypot(c.x-b.x,c.y-b.y)),Infinity);
+    return db-da;
+  })[0]??{x:side==="blue"?1300:4900,y:WORLD_H*.5};
   return{x:anchor.x,y:anchor.y};
 }
 
