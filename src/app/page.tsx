@@ -12,8 +12,8 @@ const SIM_TICK_MS=100;
 const AI_COMMAND_INTERVAL_SECONDS=.55;
 const MOVEMENT_SCALE=4.2;
 const RETREAT_SUPPLY_MIN=0;
-const DIRECT_COMBAT_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","armor","tank","cavalry","mountaineer","recon","engineer"]);
-const CAPTURE_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","tank","cavalry","mountaineer","engineer"]);
+const DIRECT_COMBAT_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","armor","tank","cavalry","mountaineer","special_forces","recon","engineer"]);
+const CAPTURE_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","tank","cavalry","mountaineer","special_forces","engineer"]);
 const ARTILLERY_KINDS=new Set<Formation["kind"]>(["artillery","heavy_artillery"]);
 const MOTORIZED_KINDS=new Set<Formation["kind"]>(["armor","tank","mechanized","recon","logistics"]);
 
@@ -61,6 +61,7 @@ function visionRange(u:Formation){
 
 function movementSupplyFactor(u:Formation){
   const s=clamp(u.supply/100,0,1);
+  if(u.kind==="special_forces")return .9+.1*Math.sqrt(s);
   if(u.kind==="infantry"||u.kind==="mountaineer"||u.kind==="engineer")return .72+.28*Math.sqrt(s);
   if(u.kind==="cavalry")return .62+.38*Math.sqrt(s);
   if(ARTILLERY_KINDS.has(u.kind))return .38+.62*s;
@@ -90,19 +91,30 @@ function computeSupplyNetwork(scenario:Scenario,units:Formation[],cities:CitySta
       seen.add(name);component.push(name);
       for(const next of adjacency.get(name)??[])if(!seen.has(next))stack.push(next);
     }
-    const capacity=Math.min(3,Math.max(1,component.length));
+    const capacity=Math.max(1,component.length);
     for(const name of component)out.set(name,capacity);
   }
   return out;
 }
 
 type LogisticsLink={from:{x:number;y:number;id:string};to:{x:number;y:number;id:string};unitId:string;depth:number};
+type HubLink={from:{x:number;y:number;id:string};to:{x:number;y:number;id:string};hubId:string;active:boolean};
 
 function computeLogisticsLinks(scenario:Scenario,units:Formation[],cities:CityState[],network:SupplyNetwork,emplacements:Emplacement[]=[]){
   const logistics=units.filter(u=>u.kind==="logistics"&&u.strength>8);
   const supplied=new Map<string,{depth:number;source:{x:number;y:number;id:string}}>();
   const links:LogisticsLink[]=[];
-  const cityRange=520,relayRange=620;
+  const hubLinks:HubLink[]=[];
+  const activeHubs=new Set<string>();
+  const cityRange=520,relayRange=620,hubCityRange=1150;
+
+  for(const hub of emplacements.filter(e=>e.kind==="supply_depot"&&e.strength>0)){
+    const nearest=cities.filter(c=>c.owner===hub.side).map(c=>({c,d:Math.hypot(c.x-hub.x,c.y-hub.y)})).sort((a,b)=>a.d-b.d)[0];
+    if(!nearest)continue;
+    const active=nearest.d<=hubCityRange&&(network.get(nearest.c.name)??0)>0;
+    hubLinks.push({from:{x:nearest.c.x,y:nearest.c.y,id:"city:"+nearest.c.name},to:{x:hub.x,y:hub.y,id:hub.id},hubId:hub.id,active});
+    if(active)activeHubs.add(hub.id);
+  }
 
   for(const u of logistics){
     const city=cities
@@ -111,7 +123,7 @@ function computeLogisticsLinks(scenario:Scenario,units:Formation[],cities:CitySt
       .filter(x=>x.d<=cityRange)
       .sort((a,b)=>a.d-b.d)[0];
     const depot=emplacements
-      .filter(e=>e.side===u.side&&e.kind==="supply_depot"&&e.strength>0)
+      .filter(e=>e.side===u.side&&e.kind==="supply_depot"&&e.strength>0&&activeHubs.has(e.id))
       .map(e=>({e,d:Math.hypot(e.x-u.x,e.y-u.y)}))
       .filter(x=>x.d<=x.e.range)
       .sort((a,b)=>a.d-b.d)[0];
@@ -141,7 +153,7 @@ function computeLogisticsLinks(scenario:Scenario,units:Formation[],cities:CitySt
       changed=true;
     }
   }
-  return{supplied,links,cityRange,relayRange};
+  return{supplied,links,hubLinks,activeHubs,cityRange,relayRange,hubCityRange};
 }
 
 function supplyAccess(scenario:Scenario,u:Formation,units:Formation[],cities:CityState[],network=computeSupplyNetwork(scenario,units,cities),emplacements:Emplacement[]=[],logisticsGraph=computeLogisticsLinks(scenario,units,cities,network,emplacements)){
@@ -151,7 +163,7 @@ function supplyAccess(scenario:Scenario,u:Formation,units:Formation[],cities:Cit
   const nearest=ownedCities.map(c=>({c,d:Math.hypot(c.x-u.x,c.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
   const roadAlive=sample.road&&scenario.roadRoutes.some(route=>routeDistance(route,u.x,u.y)<36&&!routeCutForSide(route,u.side,units));
   const depot=emplacements
-    .filter(e=>e.side===u.side&&e.kind==="supply_depot"&&e.strength>0)
+    .filter(e=>e.side===u.side&&e.kind==="supply_depot"&&e.strength>0&&logisticsGraph.activeHubs.has(e.id))
     .map(e=>({e,d:Math.hypot(e.x-u.x,e.y-u.y)}))
     .filter(x=>x.d<x.e.range)
     .sort((a,b)=>a.d-b.d)[0];
@@ -166,11 +178,13 @@ function supplyAccess(scenario:Scenario,u:Formation,units:Formation[],cities:Cit
   if(depot)return{level:2,label:"FIELD SUPPLY DEPOT",supplyPerHour:1.05,fuelPerHour:.72,range:depot.e.range};
   if(city?.owner===u.side){
     const capacity=network.get(city.name)??1;
-    return{level:capacity,label:capacity===1?"ISOLATED CITY SUPPLY":"CITY NETWORK ×"+capacity,supplyPerHour:.62+capacity*.56,fuelPerHour:.38+capacity*.4,range:0};
+    const throughput=1+Math.log2(capacity);
+    return{level:capacity,label:capacity===1?"ISOLATED CITY SUPPLY":"CITY NETWORK ×"+capacity,supplyPerHour:.62+throughput*.56,fuelPerHour:.38+throughput*.4,range:0};
   }
   if(roadAlive&&nearest&&nearest.d<1500){
     const capacity=network.get(nearest.c.name)??1;
-    return{level:Math.max(1,capacity),label:capacity===1?"LOCAL ROAD SUPPLY":"CONNECTED ROAD NETWORK ×"+capacity,supplyPerHour:.3+capacity*.36,fuelPerHour:.2+capacity*.25,range:0};
+    const throughput=1+Math.log2(capacity);
+    return{level:Math.max(1,capacity),label:capacity===1?"LOCAL ROAD SUPPLY":"CONNECTED ROAD NETWORK ×"+capacity,supplyPerHour:.3+throughput*.36,fuelPerHour:.2+throughput*.25,range:0};
   }
   if(relay)return{level:1,label:"MOBILE LOGISTICS RELAY",supplyPerHour:.34,fuelPerHour:.22,range:relay.range};
   return{level:0,label:city?"HOSTILE SUPPLY NODE":"SUPPLY LINE CUT",supplyPerHour:0,fuelPerHour:0,range:0};
@@ -287,6 +301,19 @@ function resolveReliefs(units:Formation[],cities:CityState[]):Formation[]{
   return out;
 }
 
+function forageSupply(u:Formation,terrain:TerrainSample["terrain"],inCombat:boolean){
+  if(inCombat)return 0;
+  if(u.kind==="special_forces"){
+    const rate={forest:.42,hills:.38,mountain:.34,highmountain:.22,marsh:.28,plains:.18,desert:.08,urban:.12,water:0}[terrain];
+    return rate;
+  }
+  if(u.kind==="mountaineer"){
+    const rate={forest:.14,hills:.22,mountain:.3,highmountain:.24,marsh:.08,plains:.07,desert:.03,urban:.06,water:0}[terrain];
+    return rate;
+  }
+  return 0;
+}
+
 function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CityState[],emplacements:Emplacement[]=[]){
   const supplyNetwork=computeSupplyNetwork(scenario,units,cities);
   const logisticsGraph=computeLogisticsLinks(scenario,units,cities,supplyNetwork,emplacements);
@@ -303,8 +330,9 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     }
 
     const inCombat=isInCombat(u,units);
-    const supplyBurn=(u.kind==="tank"||u.kind==="armor"?1.12:u.kind==="mechanized"?.86:u.kind==="heavy_artillery"?.96:u.kind==="artillery"?.72:u.kind==="logistics"?.58:u.kind==="cavalry"?.38:.5)*(inCombat?1.72:1);
+    const supplyBurn=(u.kind==="tank"||u.kind==="armor"?1.12:u.kind==="mechanized"?.86:u.kind==="heavy_artillery"?.96:u.kind==="artillery"?.72:u.kind==="logistics"?.58:u.kind==="special_forces"?.26:u.kind==="cavalry"?.38:.5)*(inCombat?1.72:1);
     n.supply=clamp(n.supply-hours*supplyBurn/Math.max(.38,terrain.supply),0,100);
+    n.supply=clamp(n.supply+hours*forageSupply(u,sample.terrain,inCombat),0,100);
     if(MOTORIZED_KINDS.has(u.kind))n.fuel=clamp(n.fuel-hours*(inCombat?.42:.18),0,100);
 
     if(access.level>0){
@@ -324,7 +352,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       n.organization=clamp(n.organization+hours*.18,0,100);
       n.supply=clamp(n.supply-hours*.05,0,100);
     }else if(n.order?.type==="resupply"){
-      const orderSupply=access.level===0?.12:access.level===1?.6:access.level===2?1.45:2.4;
+      const orderSupply=access.level===0?.12:.45+Math.log2(access.level+1)*.92;
       n.supply=clamp(n.supply+hours*orderSupply,0,100);
       n.fuel=clamp(n.fuel+hours*(access.level===0?.04:.85),0,100);
       n.organization=clamp(n.organization+hours*(access.level===0?.12:.5),0,100);
@@ -375,10 +403,11 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       n.entrenchment=clamp(n.entrenchment+hours*.012,0,100);
     }
 
+    const special=u.kind==="special_forces";
     const foot=u.kind==="infantry"||u.kind==="mountaineer"||u.kind==="engineer";
-    if(n.supply<25)n.organization=clamp(n.organization-hours*(foot?.34:.78),0,100);
-    if(n.supply<12){n.organization=clamp(n.organization-hours*(foot?.62:1.25),0,100);n.strength=clamp(n.strength-hours*(foot?.05:.14),0,100)}
-    if(n.supply<4)n.strength=clamp(n.strength-hours*(foot?.12:.3),0,100);
+    if(n.supply<25)n.organization=clamp(n.organization-hours*(special?.08:foot?.34:.78),0,100);
+    if(n.supply<12){n.organization=clamp(n.organization-hours*(special?.16:foot?.62:1.25),0,100);n.strength=clamp(n.strength-hours*(special?.012:foot?.05:.14),0,100)}
+    if(n.supply<4)n.strength=clamp(n.strength-hours*(special?.035:foot?.12:.3),0,100);
     n.readiness=clamp(n.organization*.46+n.supply*.3+n.strength*.24,0,100);
     return n;
   });
@@ -997,10 +1026,11 @@ export default function Home(){
           {activeScenario.roadRoutes.map((route,i)=><path key={"road"+i} d={polylinePath(route)} className="road"/>)}{activeScenario.roadNodes.map(node=><circle key={node.id} cx={node.x} cy={node.y} r="7" className="road-node"/>)}
           {cities.map(s=><g key={s.name} className={"site-label "+s.owner}><circle cx={s.x} cy={s.y} r="6" className="site-core"/><circle cx={s.x} cy={s.y} r="25" className="site-ring"/>{s.capture>0&&<circle cx={s.x} cy={s.y} r="30" className="capture-ring" pathLength="100" strokeDasharray={s.capture+" "+(100-s.capture)} transform={"rotate(-90 "+s.x+" "+s.y+")"}/>}<text x={s.x+11} y={s.y-11}>{s.name.toUpperCase()} · {s.owner==="blue"?"B":s.owner==="red"?"R":"G"}</text></g>)}
           {<g className="city-supply-ranges">{cities.map(s=><circle key={"range-"+s.name} cx={s.x} cy={s.y} r={currentLogisticsGraph.cityRange} className={"city-supply-range "+s.owner}/>)}</g>}
-          {overlay==="supply"&&<g className="supply-overlay">{activeScenario.roadRoutes.map((route,i)=><path key={i} d={polylinePath(route)} className={"supply-route "+(routeCutForSide(route,playerSide,units)?"cut":"")}/>)}{cities.map(s=><g key={s.name}><circle cx={s.x} cy={s.y} r="78" className={"supply-node "+s.owner}/>{localSides.has(s.owner)&&<text x={s.x+30} y={s.y+34} className="supply-capacity">×{currentSupplyNetwork.get(s.name)??1}</text>}</g>)}{currentLogisticsGraph.links.filter(link=>units.find(u=>u.id===link.unitId&&localSides.has(u.side))).map(link=><line key={"log-link-"+link.unitId} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className={"logistics-link depth-"+Math.min(3,link.depth)}/>)}{units.filter(u=>u.kind==="logistics"&&localSides.has(u.side)).map(u=><circle key={u.id} cx={u.x} cy={u.y} r={currentLogisticsGraph.relayRange} className={"logistics-range "+u.side}/>)}</g>}
+          {overlay==="supply"&&<g className="supply-overlay">{activeScenario.roadRoutes.map((route,i)=><path key={i} d={polylinePath(route)} className={"supply-route "+(routeCutForSide(route,playerSide,units)?"cut":"")}/>)}{cities.map(s=><g key={s.name}><circle cx={s.x} cy={s.y} r="78" className={"supply-node "+s.owner}/>{localSides.has(s.owner)&&<text x={s.x+30} y={s.y+34} className="supply-capacity">×{currentSupplyNetwork.get(s.name)??1}</text>}</g>)}{currentLogisticsGraph.hubLinks.filter(link=>emplacements.some(e=>e.id===link.hubId&&localSides.has(e.side))).map(link=><line key={"hub-link-"+link.hubId} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className={"hub-link "+(link.active?"active":"cut")}/>)}{currentLogisticsGraph.links.filter(link=>units.find(u=>u.id===link.unitId&&localSides.has(u.side))).map(link=><line key={"log-link-"+link.unitId} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className={"logistics-link depth-"+Math.min(3,link.depth)}/>)}{units.filter(u=>u.kind==="logistics"&&localSides.has(u.side)).map(u=><circle key={u.id} cx={u.x} cy={u.y} r={currentLogisticsGraph.relayRange} className={"logistics-range "+u.side}/>)}</g>}
           {overlay==="intel"&&<path d={activeScenario.landPath} fill="url(#intelShade)" className="intel-overlay"/>}<rect width={WORLD_W} height={WORLD_H} className="fog-dark" mask="url(#fogMask)"/><rect x="1" y="1" width={WORLD_W-2} height={WORLD_H-2} className="world-boundary"/>
         </svg>
 
+        {selectedUnits.some(u=>ARTILLERY_KINDS.has(u.kind))&&<svg className="artillery-ranges" width={WORLD_W} height={WORLD_H}>{selectedUnits.filter(u=>ARTILLERY_KINDS.has(u.kind)).map(u=><g key={"range-"+u.id}><circle cx={u.x} cy={u.y} r={u.kind==="heavy_artillery"?820:540}/><text x={u.x+10} y={u.y-(u.kind==="heavy_artillery"?820:540)+22}>{u.kind==="heavy_artillery"?"820":"540"} RANGE</text></g>)}</svg>}
         {units.map(u=>{
           const visible=localSides.has(u.side)||blue.some(b=>Math.hypot(b.x-u.x,b.y-u.y)<visionRange(b))||cities.some(c=>localSides.has(c.owner)&&Math.hypot(c.x-u.x,c.y-u.y)<270)||emplacements.some(e=>localSides.has(e.side)&&e.kind==="observatory"&&Math.hypot(e.x-u.x,e.y-u.y)<e.range);
           if(!visible)return null;
