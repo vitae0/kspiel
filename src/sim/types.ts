@@ -71,7 +71,7 @@ export type Formation={
   softAttack:number;hardAttack:number;defense:number;breakthrough:number;
   speed:number;recon:number;movementProgress:number;
   groupId?:string;formationShape?:FormationShape;
-  order?:{type:OrderType;targetX?:number;targetY?:number;targetUnitId?:string};
+  order?:{type:OrderType;targetX?:number;targetY?:number;targetUnitId?:string;waypoints?:Array<{x:number;y:number}>};
 };
 
 export type GameCommand=
