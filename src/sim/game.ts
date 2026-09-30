@@ -1,7 +1,7 @@
 import type {CityState,Formation,Scenario,ScenarioPreset,ScenarioTheme,Side,TerrainFeature,TerrainKind,TerrainSample,UnitKind} from "./types";
 
-export const WORLD_W=6200;
-export const WORLD_H=4200;
+export const WORLD_W=8400;
+export const WORLD_H=5600;
 
 export const SCENARIO_PRESETS:ScenarioPreset[]=[
   {
@@ -203,9 +203,9 @@ function makeFeatures(rnd:()=>number,theme:ScenarioTheme){
       let cx=500+rnd()*(WORLD_W-650),cy=180+rnd()*(WORLD_H-360);
       if(terrain==="mountain"||terrain==="highmountain"){
         if(theme==="mountain"){cx=950+rnd()*(WORLD_W-1500);cy=180+rnd()*(WORLD_H-360)}
-        else{cx=1600+rnd()*(WORLD_W-1950);cy=160+rnd()*2300}
+        else{cx=WORLD_W*.24+rnd()*(WORLD_W*.7);cy=160+rnd()*(WORLD_H*.58)}
       }
-      if(terrain==="marsh")cy=1900+rnd()*1900;
+      if(terrain==="marsh")cy=WORLD_H*.42+rnd()*(WORLD_H*.46);
       const rx=rxRange[0]+rnd()*(rxRange[1]-rxRange[0]);
       const ry=ryRange[0]+rnd()*(ryRange[1]-ryRange[0]);
       const rotation=-55+rnd()*110;
@@ -265,7 +265,7 @@ function makeRivers(rnd:()=>number,theme:ScenarioTheme){
   const count=theme==="desert"?Math.floor(rnd()*2):theme==="urban"?2+Math.floor(rnd()*2):theme==="mountain"||theme==="forest"?4+Math.floor(rnd()*2):3+Math.floor(rnd()*2);
   const routes:Array<Array<{x:number;y:number}>>=[];
   for(let r=0;r<count;r++){
-    const base=1100+r*(4200/Math.max(1,count))+(rnd()-.5)*360;
+    const base=WORLD_W*.16+r*(WORLD_W*.68/Math.max(1,count))+(rnd()-.5)*WORLD_W*.055;
     const pts:Array<{x:number;y:number}>=[];
     for(let y=80;y<=WORLD_H;y+=260)pts.push({x:base+160*Math.sin(y*.0024+r)+(rnd()-.5)*150,y});
     routes.push(pts);
@@ -353,7 +353,7 @@ function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>numbe
   const owned=cities.filter(c=>c.owner===side);
   const hostile=cities.filter(c=>c.owner!==side);
   for(let tries=0;tries<100;tries++){
-    const anchor=owned[Math.floor(rnd()*owned.length)]??{x:side==="blue"?1300:4900,y:WORLD_H*.5};
+    const anchor=owned[Math.floor(rnd()*owned.length)]??{x:side==="blue"?WORLD_W*.2:WORLD_W*.8,y:WORLD_H*.5};
     const connected=scenario.roadRoutes.filter(route=>Math.hypot(route[0].x-anchor.x,route[0].y-anchor.y)<5||Math.hypot(route[route.length-1].x-anchor.x,route[route.length-1].y-anchor.y)<5);
     const route=connected[Math.floor(rnd()*connected.length)];
     let base:{x:number;y:number}=anchor;
@@ -378,7 +378,7 @@ function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>numbe
     const da=Math.min(...hostile.map(c=>Math.hypot(c.x-a.x,c.y-a.y)),Infinity);
     const db=Math.min(...hostile.map(c=>Math.hypot(c.x-b.x,c.y-b.y)),Infinity);
     return db-da;
-  })[0]??{x:side==="blue"?1300:4900,y:WORLD_H*.5};
+  })[0]??{x:side==="blue"?WORLD_W*.2:WORLD_W*.8,y:WORLD_H*.5};
   return{x:anchor.x,y:anchor.y};
 }
 
