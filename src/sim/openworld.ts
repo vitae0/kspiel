@@ -1,6 +1,7 @@
+import {WORLD_H,WORLD_W} from "./game";
 import type {CityState,Formation,Scenario,Side,UnitKind} from "./types";
 
-export type OpenWorldBuildKind="infantry_barracks"|"mobile_barracks"|"support_barracks"|"road"|"wall"|"fort";
+export type OpenWorldBuildKind="infantry_barracks"|"mobile_barracks"|"support_barracks"|"road"|"wall"|"fort"|"city";
 export type OpenWorldStructure={id:string;kind:OpenWorldBuildKind;side:Side;x:number;y:number;x2?:number;y2?:number;strength:number};
 export type Recruitment={id:string;side:Side;kind:UnitKind;barracksId:string;hoursLeft:number};
 export type TerritoryCell={id:string;x:number;y:number;owner:Side|null;resource:"manpower"|"materials"|"fuel";value:number;urban:number};
@@ -28,7 +29,7 @@ export const UNIT_COST:Partial<Record<UnitKind,{family:"infantry_barracks"|"mobi
 };
 
 const SIDES:Side[]=["blue","red","green"];
-const WORLD_FALLBACK_X=3100, WORLD_FALLBACK_Y=2100;
+const WORLD_FALLBACK_X=WORLD_W*.5, WORLD_FALLBACK_Y=WORLD_H*.5;
 
 function mkUnit(kind:UnitKind,side:Side,x:number,y:number,id:string):Formation{
   const base={
@@ -57,10 +58,11 @@ export function createOpenWorldState(scenario:Scenario,units:Formation[],cities:
   const green=red.slice(0,8).map((u,i)=>({...u,id:"g"+i,name:"Green "+u.name,side:"green" as Side,x:greenAnchor.x+(i%4)*35,y:greenAnchor.y+Math.floor(i/4)*35}));
   const territory:TerritoryCell[]=[];
   let n=0;
-  for(let y=240;y<4200;y+=420)for(let x=520;x<6200;x+=420){
+  const sampleStep=560;
+  for(let y=sampleStep*.55;y<WORLD_H;y+=sampleStep)for(let x=sampleStep*.7;x<WORLD_W;x+=sampleStep){
     const nearest=nextCities.map(c=>({c,d:Math.hypot(c.x-x,c.y-y)})).sort((a,b)=>a.d-b.d)[0];
-    const owner=nearest&&nearest.d<900?nearest.c.owner:null;
-    const r=(n*37+Math.floor(x/420)*11+Math.floor(y/420)*17)%3;
+    const owner=nearest&&nearest.d<1050?nearest.c.owner:null;
+    const r=(n*37+Math.floor(x/sampleStep)*11+Math.floor(y/sampleStep)*17)%3;
     territory.push({id:"cell-"+n++,x,y,owner,resource:r===0?"manpower":r===1?"materials":"fuel",value:1+((n*13)%4),urban:0});
   }
   const structures:OpenWorldStructure[]=[];
@@ -84,13 +86,22 @@ export function queueRecruitment(state:OpenWorldState,side:Side,kind:UnitKind,ba
 }
 
 export function addStrategicStructure(state:OpenWorldState,side:Side,kind:OpenWorldBuildKind,x:number,y:number,x2?:number,y2?:number):OpenWorldState{
-  const price=kind==="road"?35:kind==="wall"?55:kind==="fort"?90:kind.includes("barracks")?120:60;
+  if(kind==="city")return state;
+  const length=x2!==undefined&&y2!==undefined?Math.hypot(x2-x,y2-y):0;
+  const price=kind==="road"?35+length*.035:kind==="wall"?55+length*.055:kind==="fort"?90:kind.includes("barracks")?120:60;
   const r=state.resources[side];if(r.materials<price)return state;
-  return{...state,resources:{...state.resources,[side]:{...r,materials:r.materials-price}},structures:[...state.structures,{id:"ow-"+state.serial,kind,side,x,y,x2,y2,strength:100}],serial:state.serial+1};
+  const strength=kind==="wall"?160:kind==="fort"?140:100;
+  return{...state,resources:{...state.resources,[side]:{...r,materials:r.materials-price}},structures:[...state.structures,{id:"ow-"+state.serial,kind,side,x,y,x2,y2,strength}],serial:state.serial+1};
+}
+
+export function buildStrategicCity(state:OpenWorldState,side:Side):{state:OpenWorldState;built:boolean}{
+  const r=state.resources[side],materials=240,manpower=80;
+  if(r.materials<materials||r.manpower<manpower)return{state,built:false};
+  return{built:true,state:{...state,resources:{...state.resources,[side]:{...r,materials:r.materials-materials,manpower:r.manpower-manpower}},serial:state.serial+1}};
 }
 
 export function advanceOpenWorld(state:OpenWorldState,units:Formation[],cities:CityState[],hours:number){
-  const structures=state.structures;
+  const structures=state.structures.filter(s=>s.strength>0);
   const territory=state.territory.map(cell=>{
     const influences:Record<Side,number>={blue:0,red:0,green:0};
     for(const side of SIDES){
@@ -125,5 +136,5 @@ export function advanceOpenWorld(state:OpenWorldState,units:Formation[],cities:C
     newCities.push({name:"Settlement "+cell.id.split("-")[1],x:cell.x,y:cell.y,owner:cell.owner,capture:0});
     cell.urban=15;
   }
-  return{state:{...state,resources,territory,recruitment,serial},spawned,newCities};
+  return{state:{...state,resources,structures,territory,recruitment,serial},spawned,newCities};
 }
