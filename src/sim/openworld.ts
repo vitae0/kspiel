@@ -4,12 +4,12 @@ import type {CityState,Formation,Scenario,Side,UnitKind} from "./types";
 export type OpenWorldBuildKind="infantry_barracks"|"mobile_barracks"|"support_barracks"|"road"|"wall"|"fort"|"city";
 export type OpenWorldStructure={id:string;kind:OpenWorldBuildKind;side:Side;x:number;y:number;x2?:number;y2?:number;strength:number};
 export type Recruitment={id:string;side:Side;kind:UnitKind;barracksId:string;hoursLeft:number};
-export type TerritoryCell={id:string;x:number;y:number;owner:Side|null;resource:"manpower"|"materials"|"fuel";value:number;urban:number};
+export type ResourceNode={id:string;x:number;y:number;owner:Side|null;resource:"manpower"|"materials"|"fuel";value:number;urban:number};
 export type OpenWorldState={
   resources:Record<Side,{manpower:number;materials:number;fuel:number}>;
   structures:OpenWorldStructure[];
   recruitment:Recruitment[];
-  territory:TerritoryCell[];
+  resourceNodes:ResourceNode[];
   serial:number;
 };
 
@@ -56,14 +56,14 @@ export function createOpenWorldState(scenario:Scenario,units:Formation[],cities:
   const red=units.filter(u=>u.side==="red").slice(0,10);
   const greenAnchor=scenario.cities[Math.floor(scenario.cities.length/2)]??{x:WORLD_FALLBACK_X,y:WORLD_FALLBACK_Y};
   const green=red.slice(0,8).map((u,i)=>({...u,id:"g"+i,name:"Green "+u.name,side:"green" as Side,x:greenAnchor.x+(i%4)*35,y:greenAnchor.y+Math.floor(i/4)*35}));
-  const territory:TerritoryCell[]=[];
+  const resourceNodes:ResourceNode[]=[];
   let n=0;
   const sampleStep=560;
   for(let y=sampleStep*.55;y<WORLD_H;y+=sampleStep)for(let x=sampleStep*.7;x<WORLD_W;x+=sampleStep){
     const nearest=nextCities.map(c=>({c,d:Math.hypot(c.x-x,c.y-y)})).sort((a,b)=>a.d-b.d)[0];
     const owner=nearest&&nearest.d<1050?nearest.c.owner:null;
     const r=(n*37+Math.floor(x/sampleStep)*11+Math.floor(y/sampleStep)*17)%3;
-    territory.push({id:"cell-"+n++,x,y,owner,resource:r===0?"manpower":r===1?"materials":"fuel",value:1+((n*13)%4),urban:0});
+    resourceNodes.push({id:"resource-"+n++,x,y,owner,resource:r===0?"manpower":r===1?"materials":"fuel",value:1+((n*13)%4),urban:0});
   }
   const structures:OpenWorldStructure[]=[];
   for(const side of SIDES){
@@ -74,7 +74,7 @@ export function createOpenWorldState(scenario:Scenario,units:Formation[],cities:
   }
   return{state:{resources:{
     blue:{manpower:650,materials:500,fuel:280},red:{manpower:650,materials:500,fuel:280},green:{manpower:650,materials:500,fuel:280}
-  },structures,recruitment:[],territory,serial:100},units:[...blue,...red,...green],cities:nextCities};
+  },structures,recruitment:[],resourceNodes,serial:100},units:[...blue,...red,...green],cities:nextCities};
 }
 
 export function queueRecruitment(state:OpenWorldState,side:Side,kind:UnitKind,barracksId:string):OpenWorldState{
@@ -102,7 +102,7 @@ export function buildStrategicCity(state:OpenWorldState,side:Side):{state:OpenWo
 
 export function advanceOpenWorld(state:OpenWorldState,units:Formation[],cities:CityState[],hours:number){
   const structures=state.structures.filter(s=>s.strength>0);
-  const territory=state.territory.map(cell=>{
+  const resourceNodes=state.resourceNodes.map(cell=>{
     const influences:Record<Side,number>={blue:0,red:0,green:0};
     for(const side of SIDES){
       const cityInf=cities.filter(c=>c.owner===side).reduce((s,c)=>s+Math.max(0,1-Math.hypot(c.x-cell.x,c.y-cell.y)/900)*2.4,0);
@@ -117,7 +117,7 @@ export function advanceOpenWorld(state:OpenWorldState,units:Formation[],cities:C
   });
   const resources={...state.resources};
   for(const side of SIDES){
-    const owned=territory.filter(c=>c.owner===side);
+    const owned=resourceNodes.filter(c=>c.owner===side);
     resources[side]={...resources[side],
       manpower:resources[side].manpower+hours*owned.filter(c=>c.resource==="manpower").reduce((s,c)=>s+c.value*.15,0),
       materials:resources[side].materials+hours*owned.filter(c=>c.resource==="materials").reduce((s,c)=>s+c.value*.12,0),
@@ -132,9 +132,9 @@ export function advanceOpenWorld(state:OpenWorldState,units:Formation[],cities:C
     const b=structures.find(s=>s.id===q.barracksId);if(b)spawned.push(mkUnit(q.kind,q.side,b.x+28,b.y+28,"owu-"+serial++));
   }
   const newCities:CityState[]=[];
-  for(const cell of territory)if(cell.owner&&cell.urban>=100&&!cities.some(c=>Math.hypot(c.x-cell.x,c.y-cell.y)<260)){
+  for(const cell of resourceNodes)if(cell.owner&&cell.urban>=100&&!cities.some(c=>Math.hypot(c.x-cell.x,c.y-cell.y)<260)){
     newCities.push({name:"Settlement "+cell.id.split("-")[1],x:cell.x,y:cell.y,owner:cell.owner,capture:0});
     cell.urban=15;
   }
-  return{state:{...state,resources,structures,territory,recruitment,serial},spawned,newCities};
+  return{state:{...state,resources,structures,resourceNodes,recruitment,serial},spawned,newCities};
 }
