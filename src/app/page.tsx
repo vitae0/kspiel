@@ -3,7 +3,7 @@
 import {useEffect,useRef,useState,type MouseEvent as ReactMouseEvent,type PointerEvent as ReactPointerEvent,type WheelEvent as ReactWheelEvent} from "react";
 import {generateScenario,polylinePath,SCENARIO_PRESETS,terrainAt,TERRAIN_RULES,UNIT_LABEL,WORLD_H,WORLD_W} from "@/sim/game";
 import {botControlledSides,createMatchConfig,defaultArmyGroups,localControlledSides} from "@/sim/session";
-import {addStrategicStructure,advanceOpenWorld,createOpenWorldState,queueRecruitment,UNIT_COST,type OpenWorldBuildKind,type OpenWorldState} from "@/sim/openworld";
+import {addStrategicStructure,advanceOpenWorld,buildStrategicCity,createOpenWorldState,queueRecruitment,UNIT_COST,type OpenWorldBuildKind,type OpenWorldState} from "@/sim/openworld";
 import type {AttackPlan,CityState,ConstructionProject,Emplacement,EmplacementKind,FlagStyle,Formation,FormationShape,OrderType,OverlayMode,Scenario,Side,TerrainSample} from "@/sim/types";
 
 const SPEED_MULTIPLIER=[0,1,2.5,6];
@@ -34,6 +34,16 @@ function segmentContact(ax:number,ay:number,bx:number,by:number,px:number,py:num
   if(!len)return{distance:Math.hypot(px-ax,py-ay),t:0};
   const t=clamp(((px-ax)*dx+(py-ay)*dy)/len,0,1);
   return{distance:Math.hypot(px-(ax+t*dx),py-(ay+t*dy)),t};
+}
+
+function segmentsIntersect(ax:number,ay:number,bx:number,by:number,cx:number,cy:number,dx:number,dy:number){
+  const orient=(px:number,py:number,qx:number,qy:number,rx:number,ry:number)=>(qx-px)*(ry-py)-(qy-py)*(rx-px);
+  const o1=orient(ax,ay,bx,by,cx,cy),o2=orient(ax,ay,bx,by,dx,dy),o3=orient(cx,cy,dx,dy,ax,ay),o4=orient(cx,cy,dx,dy,bx,by);
+  return ((o1>0&&o2<0)||(o1<0&&o2>0))&&((o3>0&&o4<0)||(o3<0&&o4>0));
+}
+
+function structureSegmentDistance(s:{x:number;y:number;x2?:number;y2?:number},x:number,y:number){
+  return s.x2===undefined||s.y2===undefined?Math.hypot(s.x-x,s.y-y):segmentContact(s.x,s.y,s.x2,s.y2,x,y).distance;
 }
 
 function isInCombat(u:Formation,units:Formation[]){
@@ -534,7 +544,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
         n.order=nextWaypoint?{type:"move",targetX:nextWaypoint.x,targetY:nextWaypoint.y,waypoints:remaining}:{type:"defend"};
       }else if(dist>0){
         const posture=n.order.type==="retreat"?1.55:n.order.type==="relieve"?1.12:n.order.type==="assault"?.58:n.order.type==="probe"?.74:1;
-        const builtRoad=openWorld?.structures.some(s=>s.kind==="road"&&s.side===u.side&&Math.hypot(s.x-u.x,s.y-u.y)<190);
+        const builtRoad=openWorld?.structures.some(s=>s.kind==="road"&&s.side===u.side&&s.strength>0&&structureSegmentDistance(s,u.x,u.y)<34);
         const roadBonus=(sample.road||builtRoad)
           ?ARTILLERY_KINDS.has(u.kind)?2.5
           :u.kind==="logistics"?2.05
@@ -557,6 +567,16 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
           }
         }
 
+        const blockingWall=openWorld?.structures.find(s=>s.kind==="wall"&&s.side!==u.side&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined&&segmentsIntersect(u.x,u.y,nx,ny,s.x,s.y,s.x2,s.y2));
+        if(blockingWall){
+          if(n.order.type==="assault"||n.order.type==="probe"){
+            const breachPower=(n.softAttack*.055+n.hardAttack*.08)*(n.organization/100)*Math.max(.25,n.supply/100);
+            blockingWall.strength=Math.max(0,blockingWall.strength-hours*breachPower);
+            n.organization=clamp(n.organization-hours*.42,0,100);
+            n.supply=clamp(n.supply-hours*.22,0,100);
+          }
+          if(blockingWall.strength>0){nx=u.x;ny=u.y}
+        }
         const nextTerrain=terrainAt(scenario,nx,ny).terrain;
         const passable=nextTerrain!=="water"&&(nextTerrain!=="highmountain"||u.kind==="mountaineer");
         if(passable){
@@ -724,6 +744,7 @@ export default function Home(){
   const [selectedGameMode,setSelectedGameMode]=useState<"scenario"|"openworld">("scenario");
   const [openWorld,setOpenWorld]=useState<OpenWorldState|null>(null);
   const [pendingStrategicBuild,setPendingStrategicBuild]=useState<OpenWorldBuildKind|null>(null);
+  const [strategicBuildAnchor,setStrategicBuildAnchor]=useState<{x:number;y:number}|null>(null);
   const [setupCategory,setSetupCategory]=useState<"all"|"fictional"|"historical">("all");
   const [playerSide,setPlayerSide]=useState<Side>("blue");
   const [emplacements,setEmplacements]=useState<Emplacement[]>([]);
@@ -886,7 +907,7 @@ export default function Home(){
     const seed=typeof crypto!=="undefined"&&"getRandomValues" in crypto?crypto.getRandomValues(new Uint32Array(1))[0]:Date.now()>>>0;
     let generated=generateScenario(seed,selectedPresetId);
     if(selectedGameMode==="openworld")generated={...generated,presetId:"open-world",title:"Open World Dominion",historical:false,sideNames:{blue:"Blue Dominion",red:"Red Dominion",green:"Green Dominion"},sideFlags:{blue:"generic-blue",red:"generic-red",green:"generic-blue"}};
-    warResultRef.current=null;setWarResult(null);setAttackPlans([]);setPendingPlan(false);setPendingOrder(null);setPendingBuild(null);
+    warResultRef.current=null;setWarResult(null);setAttackPlans([]);setPendingPlan(false);setPendingOrder(null);setPendingBuild(null);setStrategicBuildAnchor(null);
     setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setMobilePanel("none");
     if(selectedGameMode==="openworld"){
       const ow=createOpenWorldState(generated,generated.formations,generated.cities);openWorldRef.current=ow.state;setOpenWorld(ow.state);
@@ -902,7 +923,7 @@ export default function Home(){
   function returnToSetup(){
     setRunning(false);setScenario(null);setUnits([]);unitsRef.current=[];setCities([]);citiesRef.current=[];
     setSelected([]);setAttackPlans([]);setWarResult(null);warResultRef.current=null;setPendingBuild(null);
-    setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setOpenWorld(null);openWorldRef.current=null;setPendingStrategicBuild(null);
+    setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setOpenWorld(null);openWorldRef.current=null;setPendingStrategicBuild(null);setStrategicBuildAnchor(null);
   }
 
   if(!scenario){
@@ -924,7 +945,7 @@ export default function Home(){
           </section>
           <aside className="setup-side">
             <div className="section-title">{selectedGameMode==="openworld"?"WORLD RULESET":"SELECTED THEATER"}</div><h2>{selectedGameMode==="openworld"?"Open World Dominion":selectedPreset.title}</h2><p>{selectedGameMode==="openworld"?"Procedural continental theater · three factions":selectedPreset.location+(selectedPreset.year?" · "+selectedPreset.year:"")}</p>
-            <div className="setup-facts"><span><small>THEME</small><b>{selectedPreset.theme.toUpperCase()}</b></span><span><small>ERA</small><b>{selectedPreset.era.replace("_"," ").toUpperCase()}</b></span><span><small>MAP</small><b>6200 × 4200</b></span><span><small>FOG</small><b>ENABLED</b></span></div>
+            <div className="setup-facts"><span><small>THEME</small><b>{selectedPreset.theme.toUpperCase()}</b></span><span><small>ERA</small><b>{selectedPreset.era.replace("_"," ").toUpperCase()}</b></span><span><small>MAP</small><b>{WORLD_W} × {WORLD_H}</b></span><span><small>FOG</small><b>ENABLED</b></span></div>
             <div className="section-title">PLAY AS</div><div className="side-choice">
               {(["blue","red"] as Side[]).map(side=><button key={side} className={playerSide===side?"active":""} onClick={()=>setPlayerSide(side)}><Flag styleName={selectedPreset.sideFlags[side]??"generic-blue"}/><span><b>{selectedPreset.sideNames[side]}</b><small>{side==="blue"?"LEFT / BLUE DEPLOYMENT":"RIGHT / RED DEPLOYMENT"}</small></span></button>)}
             </div>
@@ -1056,7 +1077,24 @@ export default function Home(){
     if((pendingOrder==="assault"||pendingOrder==="relieve")&&!pendingStrategicBuild)return;
     const point=mapPoint(clientX,clientY);if(!point)return;
     const tx=clamp(point.x,1,WORLD_W-1),ty=clamp(point.y,1,WORLD_H-1);if(terrainAt(activeScenario,tx,ty).terrain==="water")return;
-    if(pendingStrategicBuild&&openWorldRef.current){const next=addStrategicStructure(openWorldRef.current,playerSide,pendingStrategicBuild,tx,ty);openWorldRef.current=next;setOpenWorld(next);setPendingStrategicBuild(null);return}
+    if(pendingStrategicBuild&&openWorldRef.current){
+      if(pendingStrategicBuild==="city"){
+        if(citiesRef.current.some(c=>Math.hypot(c.x-tx,c.y-ty)<360))return;
+        const built=buildStrategicCity(openWorldRef.current,playerSide);
+        if(!built.built)return;
+        const city:CityState={name:"Founded "+built.state.serial,x:tx,y:ty,owner:playerSide,capture:0};
+        openWorldRef.current=built.state;setOpenWorld(built.state);citiesRef.current=[...citiesRef.current,city];setCities(citiesRef.current);
+        setPendingStrategicBuild(null);setStrategicBuildAnchor(null);return;
+      }
+      if(pendingStrategicBuild==="road"||pendingStrategicBuild==="wall"){
+        if(!strategicBuildAnchor){setStrategicBuildAnchor({x:tx,y:ty});return}
+        if(Math.hypot(tx-strategicBuildAnchor.x,ty-strategicBuildAnchor.y)<60)return;
+        const next=addStrategicStructure(openWorldRef.current,playerSide,pendingStrategicBuild,strategicBuildAnchor.x,strategicBuildAnchor.y,tx,ty);
+        openWorldRef.current=next;setOpenWorld(next);setPendingStrategicBuild(null);setStrategicBuildAnchor(null);return;
+      }
+      const next=addStrategicStructure(openWorldRef.current,playerSide,pendingStrategicBuild,tx,ty);
+      openWorldRef.current=next;setOpenWorld(next);setPendingStrategicBuild(null);setStrategicBuildAnchor(null);return
+    }
     if(pendingBuild){createConstruction(tx,ty);return}
     if(pendingPlan){createAttackPlan(tx,ty);return}
     const requested=pendingOrder;
@@ -1244,7 +1282,7 @@ export default function Home(){
       <section><div className="section-title">MAP LAYERS</div><div className="segmented">{(["terrain","supply","intel"] as OverlayMode[]).map(m=><button key={m} onClick={()=>setOverlay(m)} className={overlay===m?"active":""}>{m.toUpperCase()}</button>)}</div></section>
       <section><div className="section-title">ARMY GROUPS · CTRL+1…6 ASSIGN</div><div className="army-group-grid">{armyGroups.map(g=><button key={g.id} onClick={()=>selectGroup(g.id)}><b>{g.hotkey}</b><span>{g.name}<small>{blue.filter(u=>u.groupId===g.id).length} formations</small></span></button>)}</div></section>
       <section><div className="section-title">ATTACK PLANS · B THEN RMB</div><div className="plan-list">{attackPlans.length?attackPlans.map(p=><div className={"plan-row "+p.status} key={p.id}><button onClick={()=>setSelected(p.formationIds)}><b>{p.name}</b><small>{p.formationIds.length} formations · {p.status}</small></button>{p.status==="draft"&&<button onClick={()=>executePlan(p.id)}>GO</button>}<button onClick={()=>cancelPlan(p.id)}>×</button></div>):<small className="muted-line">No plans drafted.</small>}</div></section>
-      {openWorld&&<section className="openworld-panel"><div className="section-title">DOMINION</div><div className="resource-strip"><b>MP {Math.floor(openWorld.resources[playerSide].manpower)}</b><b>MAT {Math.floor(openWorld.resources[playerSide].materials)}</b><b>FUEL {Math.floor(openWorld.resources[playerSide].fuel)}</b></div><div className="section-title">RAISE FORMATIONS</div><div className="recruit-grid">{(["infantry","mountaineer","special_forces","engineer","cavalry","recon","mechanized","tank","mortar","artillery","heavy_artillery","logistics"] as Formation["kind"][]).map(kind=>{const cost=UNIT_COST[kind];const barracks=openWorld.structures.find(b=>b.side===playerSide&&b.kind===cost?.family);return <button key={kind} disabled={!cost||!barracks} onClick={()=>{if(!cost||!barracks)return;const next=queueRecruitment(openWorldRef.current!,playerSide,kind,barracks.id);openWorldRef.current=next;setOpenWorld(next)}}><b>{UNIT_LABEL[kind]}</b><small>{cost?cost.manpower+" MP · "+cost.materials+" MAT · "+cost.fuel+" F":"—"}</small></button>})}</div><div className="section-title">BUILD</div><div className="strategic-build-grid">{(["infantry_barracks","mobile_barracks","support_barracks","fort","wall","road"] as OpenWorldBuildKind[]).map(kind=><button key={kind} className={pendingStrategicBuild===kind?"active":""} onClick={()=>{setPendingStrategicBuild(kind);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null)}}>{kind.replaceAll("_"," ").toUpperCase()}</button>)}</div><small className="muted-line">Owned territory yields resources automatically. Concentrated armies urbanize empty territory into new cities.</small></section>}
+      {openWorld&&<section className="openworld-panel"><div className="section-title">DOMINION</div><div className="resource-strip"><b>MP {Math.floor(openWorld.resources[playerSide].manpower)}</b><b>MAT {Math.floor(openWorld.resources[playerSide].materials)}</b><b>FUEL {Math.floor(openWorld.resources[playerSide].fuel)}</b></div><div className="section-title">RAISE FORMATIONS</div><div className="recruit-grid">{(["infantry","mountaineer","special_forces","engineer","cavalry","recon","mechanized","tank","mortar","artillery","heavy_artillery","logistics"] as Formation["kind"][]).map(kind=>{const cost=UNIT_COST[kind];const barracks=openWorld.structures.find(b=>b.side===playerSide&&b.kind===cost?.family);return <button key={kind} disabled={!cost||!barracks} onClick={()=>{if(!cost||!barracks)return;const next=queueRecruitment(openWorldRef.current!,playerSide,kind,barracks.id);openWorldRef.current=next;setOpenWorld(next)}}><b>{UNIT_LABEL[kind]}</b><small>{cost?cost.manpower+" MP · "+cost.materials+" MAT · "+cost.fuel+" F":"—"}</small></button>})}</div><div className="section-title">BUILD</div><div className="strategic-build-grid">{(["infantry_barracks","mobile_barracks","support_barracks","city","fort","wall","road"] as OpenWorldBuildKind[]).map(kind=><button key={kind} className={pendingStrategicBuild===kind?"active":""} onClick={()=>{setPendingStrategicBuild(kind);setStrategicBuildAnchor(null);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null)}}>{kind.replaceAll("_"," ").toUpperCase()}</button>)}</div><small className="muted-line">Owned territory yields resources automatically. Concentrated armies urbanize empty territory into new cities.</small></section>}
       <section><div className="section-title">ENGINEER WORKS</div><div className="construction-list">{constructionProjects.length?constructionProjects.filter(p=>localSides.has(p.side)).map(project=><div className="construction-row" key={project.id}><b>{project.kind==="observatory"?"OBSERVATORY":project.kind==="fixed_artillery"?"FIXED ARTILLERY":project.kind==="field_fortification"?"FIELD FORTIFICATION":"SUPPLY DEPOT"}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span><i><em style={{width:Math.min(100,project.progress/project.requiredHours*100)+"%"}}/></i></div>):<small className="muted-line">No active construction.</small>}</div></section>
       <section><div className="section-title">ORDER OF BATTLE</div><div className="oob-list">{blue.map(u=><button key={u.id} onClick={()=>{setSelected([u.id]);if(isMobile)setMobilePanel("unit")}} className={selected.includes(u.id)?"selected":""}><span className="oob-code">{UNIT_LABEL[u.kind]}</span><span><b>{u.name}</b><small>{pct(u.strength)} STR · {pct(u.organization)} ORG</small></span></button>)}</div></section>
     </aside>
@@ -1252,12 +1290,20 @@ export default function Home(){
     <div ref={viewport} className={pendingOrder||pendingPlan||pendingBuild||pendingStrategicBuild?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenuCapture={suppressNativeContextMenu} onContextMenu={issueTarget}>
       <div className="world" style={{width:WORLD_W,height:WORLD_H,transform:"translate("+pan.x+"px,"+pan.y+"px) scale("+zoom+")"}}>
         <svg className="terrain" width={WORLD_W} height={WORLD_H} viewBox={"0 0 "+WORLD_W+" "+WORLD_H}>
-          <defs><linearGradient id="sea" x1="0" x2="1"><stop offset="0" stopColor="#1c313c"/><stop offset="1" stopColor="#29424b"/></linearGradient><linearGradient id="intelShade" x1="0" x2="1"><stop offset="0" stopColor="#71846a" stopOpacity=".08"/><stop offset=".55" stopColor="#151b18" stopOpacity=".22"/><stop offset="1" stopColor="#050806" stopOpacity=".68"/></linearGradient><mask id="fogMask" maskUnits="userSpaceOnUse"><rect width={WORLD_W} height={WORLD_H} fill="white"/>{blue.map(u=><circle key={"fog-u-"+u.id} cx={u.x} cy={u.y} r={visionRange(u)} fill="black"/>)}{cities.filter(c=>localSides.has(c.owner)).map(c=><circle key={"fog-c-"+c.name} cx={c.x} cy={c.y} r="270" fill="black"/>)}{emplacements.filter(e=>localSides.has(e.side)&&e.kind==="observatory").map(e=><circle key={"fog-e-"+e.id} cx={e.x} cy={e.y} r={e.range} fill="black"/>)}</mask></defs>
+          <defs><linearGradient id="sea" x1="0" x2="1"><stop offset="0" stopColor="#1c313c"/><stop offset="1" stopColor="#29424b"/></linearGradient><linearGradient id="intelShade" x1="0" x2="1"><stop offset="0" stopColor="#71846a" stopOpacity=".08"/><stop offset=".55" stopColor="#151b18" stopOpacity=".22"/><stop offset="1" stopColor="#050806" stopOpacity=".68"/></linearGradient><clipPath id="landClip"><path d={activeScenario.landPath}/></clipPath><filter id="territoryBlend" x="-20%" y="-20%" width="140%" height="140%" colorInterpolationFilters="sRGB"><feGaussianBlur stdDeviation="54" result="blur"/><feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="merged"/><feGaussianBlur in="merged" stdDeviation="10"/></filter><mask id="fogMask" maskUnits="userSpaceOnUse"><rect width={WORLD_W} height={WORLD_H} fill="white"/>{blue.map(u=><circle key={"fog-u-"+u.id} cx={u.x} cy={u.y} r={visionRange(u)} fill="black"/>)}{cities.filter(c=>localSides.has(c.owner)).map(c=><circle key={"fog-c-"+c.name} cx={c.x} cy={c.y} r="270" fill="black"/>)}{emplacements.filter(e=>localSides.has(e.side)&&e.kind==="observatory").map(e=><circle key={"fog-e-"+e.id} cx={e.x} cy={e.y} r={e.range} fill="black"/>)}</mask></defs>
           <rect width={WORLD_W} height={WORLD_H} fill="url(#sea)"/><path d={activeScenario.landPath} className="land-base"/>
-          {openWorld&&<g className="territory-layer">{openWorld.territory.filter(c=>c.owner).map(c=><rect key={c.id} x={c.x-205} y={c.y-205} width="410" height="410" rx="46" className={"territory-cell "+c.owner} opacity={.12+Math.min(.16,c.urban/600)}/>)}</g>}
           {activeScenario.terrainFeatures.map(f=><path key={f.id} d={f.path} className={"terrain-region "+f.terrain}/>)}
+          <g className="territory-layer" clipPath="url(#landClip)">
+            {(["blue","red","green"] as Side[]).map(side=><g key={"territory-"+side} className={"territory-mass "+side} filter="url(#territoryBlend)">
+              {cities.filter(c=>c.owner===side).map(c=><circle key={"tc-"+c.name} cx={c.x} cy={c.y} r={openWorld?610:520}/>)}
+              {units.filter(u=>u.side===side&&u.strength>12).map(u=><circle key={"tu-"+u.id} cx={u.x} cy={u.y} r={180+Math.min(150,u.strength*1.45)}/>)}
+              {openWorld?.structures.filter(s=>s.side===side&&s.strength>0&&s.kind!=="road"&&s.kind!=="wall").map(s=><circle key={"ts-"+s.id} cx={s.x} cy={s.y} r={s.kind==="fort"?410:300}/>)}
+            </g>)}
+          </g>
           {activeScenario.riverRoutes.map((route,i)=><path key={"river"+i} d={polylinePath(route)} className="river"/>)}
           {activeScenario.roadRoutes.map((route,i)=><path key={"road"+i} d={polylinePath(route)} className="road"/>)}{activeScenario.roadNodes.map(node=><circle key={node.id} cx={node.x} cy={node.y} r="7" className="road-node"/>)}
+          {openWorld?.structures.filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined).map(s=><path key={s.id} d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2} className={"built-road "+s.side}/>)}
+          {openWorld?.structures.filter(s=>s.kind==="wall"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined).map(s=><g key={s.id} className={"built-wall "+s.side} opacity={.45+.55*s.strength/160}><path d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2}/><path className="wall-cap" d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2}/></g>)}
           {cities.map(s=><g key={s.name} className={"site-label "+s.owner+(overlay==="supply"?(localSides.has(s.owner)?" supply-city friendly-supply-city":" supply-city hostile-supply-city"):"")}><circle cx={s.x} cy={s.y} r="6" className="site-core"/><circle cx={s.x} cy={s.y} r="25" className="site-ring"/>{s.capture>0&&<circle cx={s.x} cy={s.y} r="30" className="capture-ring" pathLength="100" strokeDasharray={s.capture+" "+(100-s.capture)} transform={"rotate(-90 "+s.x+" "+s.y+")"}/>}<text x={s.x+11} y={s.y-11}>{s.name.toUpperCase()} · {s.owner==="blue"?"B":s.owner==="red"?"R":"G"}</text></g>)}
           {<g className="city-supply-ranges">{cities.map(s=><circle key={"range-"+s.name} cx={s.x} cy={s.y} r={currentLogisticsGraph.cityRange} className={"city-supply-range "+s.owner}/>)}</g>}
           {overlay==="supply"&&<g className="supply-overlay"><rect width={WORLD_W} height={WORLD_H} className="supply-map-wash"/>{activeScenario.roadRoutes.map((route,i)=>{const a=nearestCityTo(route[0],cities),b=nearestCityTo(route[route.length-1],cities);const friendly=Boolean(a&&b&&localSides.has(a.owner)&&localSides.has(b.owner));const hostile=Boolean(a&&b&&!localSides.has(a.owner)&&!localSides.has(b.owner));const cut=routeCutForSide(route,playerSide,units);return <path key={i} d={polylinePath(route)} className={"supply-route "+(cut?"cut":friendly?"friendly":hostile?"hostile":"contested")}/>})}{cities.map(s=><g key={s.name} className={localSides.has(s.owner)?"supply-city-node friendly":"supply-city-node hostile"}><circle cx={s.x} cy={s.y} r={localSides.has(s.owner)?88:70} className={"supply-node "+s.owner}/>{localSides.has(s.owner)&&<text x={s.x+30} y={s.y+34} className="supply-capacity">×{currentSupplyNetwork.get(s.name)??1}</text>}</g>)}{currentLogisticsGraph.hubLinks.filter(link=>emplacements.some(e=>e.id===link.hubId&&localSides.has(e.side))).map(link=><line key={"hub-link-"+link.hubId} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className={"hub-link "+(link.active?"active":"cut")}/>)}{currentLogisticsGraph.links.filter(link=>units.find(u=>u.id===link.unitId&&localSides.has(u.side))).map(link=><line key={"log-link-"+link.unitId} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className={"logistics-link depth-"+Math.min(3,link.depth)}/>)}{units.filter(u=>u.kind==="logistics"&&localSides.has(u.side)).map(u=><circle key={u.id} cx={u.x} cy={u.y} r={currentLogisticsGraph.relayRange} className={"logistics-range "+u.side}/>)}</g>}
@@ -1271,7 +1317,7 @@ export default function Home(){
           if(!visible)return null;
           return <button key={u.id} className={"unit-counter "+u.side+" kind-"+u.kind+" "+(selected.includes(u.id)?"selected ":"")+(u.organization<30?"shaken ":"")+(u.order?.type==="retreat"?"retreating":"")} style={{left:u.x-16,top:u.y-16}} onPointerDown={e=>{if(e.button===2)e.preventDefault();e.stopPropagation()}} onClick={e=>selectUnit(e,u)} onContextMenuCapture={e=>e.preventDefault()} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{localSides.has(u.side)?"Ⅰ":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
         })}
-        {openWorld?.structures.map(s=><div key={s.id} className={"ow-structure "+s.kind+" "+s.side} style={{left:s.x-16,top:s.y-16}} title={s.kind}><b>{s.kind==="infantry_barracks"?"INF":s.kind==="mobile_barracks"?"MOB":s.kind==="support_barracks"?"SUP":s.kind==="road"?"RD":s.kind==="wall"?"WALL":"FORT"}</b></div>)}
+        {openWorld?.structures.filter(s=>s.kind!=="road"&&s.kind!=="wall").map(s=><div key={s.id} className={"ow-structure "+s.kind+" "+s.side} style={{left:s.x-16,top:s.y-16}} title={s.kind}><b>{s.kind==="infantry_barracks"?"INF":s.kind==="mobile_barracks"?"MOB":s.kind==="support_barracks"?"SUP":"FORT"}</b></div>)}
         {emplacements.map(e=>{
           return <div key={e.id} className={"emplacement "+e.kind+" "+e.side} style={{left:e.x-18,top:e.y-18}} title={e.kind==="observatory"?"Observatory tower":e.kind==="fixed_artillery"?"Stationary artillery battery":e.kind==="field_fortification"?"Field fortification":"Supply depot"}><b>{e.kind==="observatory"?"OBS":e.kind==="fixed_artillery"?"BAT":e.kind==="field_fortification"?"FORT":"DEP"}</b><small>{Math.round(e.strength)}</small></div>
         })}
@@ -1282,9 +1328,9 @@ export default function Home(){
 
       {selectionBox&&<div className="selection-box" style={{left:Math.min(selectionBox.x1,selectionBox.x2),top:Math.min(selectionBox.y1,selectionBox.y2),width:Math.abs(selectionBox.x2-selectionBox.x1),height:Math.abs(selectionBox.y2-selectionBox.y1)}}/>}
       {frontPreview&&<svg className="front-preview"><line x1={frontPreview.x1} y1={frontPreview.y1} x2={frontPreview.x2} y2={frontPreview.y2}/></svg>}
-      {openWorld&&<div className="minimap"><svg viewBox={"0 0 "+WORLD_W+" "+WORLD_H}>{openWorld.territory.filter(c=>c.owner).map(c=><rect key={c.id} x={c.x-200} y={c.y-200} width="400" height="400" className={c.owner??""}/>)}{units.map(u=><circle key={u.id} cx={u.x} cy={u.y} r="32" className={u.side}/>)}</svg></div>}
+      {openWorld&&<div className="minimap"><svg viewBox={"0 0 "+WORLD_W+" "+WORLD_H}>{cities.map(c=><circle key={"mc-"+c.name} cx={c.x} cy={c.y} r="500" className={"territory-mini "+c.owner}/>) }{units.filter(u=>u.strength>12).map(u=><circle key={"mu-"+u.id} cx={u.x} cy={u.y} r="170" className={"territory-mini "+u.side}/>) }{units.map(u=><circle key={u.id} cx={u.x} cy={u.y} r="32" className={u.side}/>)}</svg></div>}
       <div className="map-hud"><div><span className="dot friendly"/>FRIENDLY {blue.length}</div><div><span className="dot hostile"/>CONTACTS {enemy.length}</div><div>CITIES {blueCities}/{cities.length}</div><div>{hovered?TERRAIN_RULES[hovered.terrain].label.toUpperCase()+" · "+(hovered.road?"SUPPLY ROAD":"OFF ROAD"):activeScenario.location.toUpperCase()}</div><div>ZOOM {Math.round(zoom*100)}%</div></div>
-      {pendingStrategicBuild&&<div className="target-banner">BUILD {pendingStrategicBuild.replaceAll("_"," ").toUpperCase()} · {isMobile?"TAP":"RMB"} LOCATION <button onClick={()=>setPendingStrategicBuild(null)}>CANCEL</button></div>}
+      {pendingStrategicBuild&&<div className="target-banner">BUILD {pendingStrategicBuild.replaceAll("_"," ").toUpperCase()} · {(pendingStrategicBuild==="road"||pendingStrategicBuild==="wall")?(strategicBuildAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP":"RMB")+" LOCATION"} <button onClick={()=>{setPendingStrategicBuild(null);setStrategicBuildAnchor(null)}}>CANCEL</button></div>}
       {pendingBuild&&<div className="target-banner">{pendingBuild==="observatory"?"OBSERVATORY TOWER":pendingBuild==="fixed_artillery"?"FIXED ARTILLERY":pendingBuild==="field_fortification"?"FIELD FORTIFICATION":"SUPPLY DEPOT"} · {isMobile?"TAP CONSTRUCTION SITE":"RMB CONSTRUCTION SITE"} <button onClick={()=>setPendingBuild(null)}>CANCEL</button></div>}
       {pendingPlan&&<div className="target-banner">ATTACK PLAN · {isMobile?"TAP OBJECTIVE":"RMB OBJECTIVE"} <button onClick={()=>setPendingPlan(false)}>CANCEL</button></div>}
       {pendingOrder&&<div className="target-banner">{pendingOrder==="relieve"?"RELIEVE ARMED · "+(isMobile?"TAP FRIENDLY":"RMB FRIENDLY FRONTLINE"):pendingOrder==="fire"&&selectedUnits.some(u=>u.kind==="mortar")?"MORTAR FIRE · "+(isMobile?"TAP IMPACT AREA":"RMB IMPACT AREA"):pendingOrder==="assault"||pendingOrder==="fire"?pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP ENEMY":"RMB ENEMY FORMATION"):pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP TARGET":"RMB TARGET")} <button onClick={()=>setPendingOrder(null)}>CANCEL</button></div>}
@@ -1293,7 +1339,7 @@ export default function Home(){
 
     <aside className={"right-panel "+(mobilePanel==="unit"?"mobile-open":"")}>
       <button className="mobile-panel-close" onClick={()=>setMobilePanel("none")}>CLOSE</button>
-      {openWorld&&!primary?<div className="openworld-inspector"><div className="section-title">OPEN WORLD</div><b>{openWorld.territory.filter(c=>c.owner===playerSide).length} TERRITORY CELLS</b><span>{openWorld.recruitment.filter(q=>q.side===playerSide).length} formations recruiting</span><span>Keep forces concentrated on empty land to urbanize it into a permanent city.</span></div>:primary?<div className="inspector">
+      {openWorld&&!primary?<div className="openworld-inspector"><div className="section-title">OPEN WORLD</div><b>{cities.filter(c=>c.owner===playerSide).length} CONTROLLED CITIES</b><span>{openWorld.recruitment.filter(q=>q.side===playerSide).length} formations recruiting</span><span>Keep forces concentrated on empty land to urbanize it into a permanent city.</span></div>:primary?<div className="inspector">
         <div className="unit-heading"><div className="big-counter">{UNIT_LABEL[primary.kind]}</div><div><small>{primary.kind.toUpperCase()} FORMATION</small><h2>{primary.name}</h2><span>{orderLabel(primary)}</span></div></div>
         <div className="stat-grid"><Stat label="Strength" value={primary.strength}/><Stat label="Organization" value={primary.organization}/><Stat label="Supply" value={primary.supply}/><Stat label="Fuel" value={primary.fuel}/><Stat label="Entrenchment" value={primary.entrenchment}/><Stat label="Readiness" value={primary.readiness}/></div>
         <div className="section-title">COMBAT MODEL</div><div className="numbers"><Row k="Manpower" v={primary.manpower.toLocaleString()}/><Row k="Soft attack" v={String(primary.softAttack)}/><Row k="Hard attack" v={String(primary.hardAttack)}/><Row k="Defense" v={String(primary.defense)}/><Row k="Breakthrough" v={String(primary.breakthrough)}/><Row k="Recon" v={String(primary.recon)}/><Row k="Speed" v={primary.speed+" km/h"}/></div>
