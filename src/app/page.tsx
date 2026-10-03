@@ -57,18 +57,6 @@ function retreatDestination(u:Formation,units:Formation[],cities:CityState[]){
   return log?{x:log.x,y:log.y}:{x:u.x,y:u.y};
 }
 
-type SupplyNetwork=Map<string,number>;
-
-function routeDistance(route:{x:number;y:number}[],x:number,y:number){
-  let best=Infinity;
-  for(let i=0;i<route.length-1;i++)best=Math.min(best,segmentContact(route[i].x,route[i].y,route[i+1].x,route[i+1].y,x,y).distance);
-  return best;
-}
-
-function routeCutForSide(route:{x:number;y:number}[],side:Side,units:Formation[]){
-  return units.some(u=>u.side!==side&&DIRECT_COMBAT_KINDS.has(u.kind)&&u.strength>15&&u.organization>18&&routeDistance(route,u.x,u.y)<48);
-}
-
 function visionRange(u:Formation){
   return u.kind==="recon"?650+u.recon*4.6:300+u.recon*2.5;
 }
