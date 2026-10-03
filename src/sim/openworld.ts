@@ -10,6 +10,7 @@ export type OpenWorldState={
   structures:OpenWorldStructure[];
   recruitment:Recruitment[];
   resourceNodes:ResourceNode[];
+  territoryClock:number;
   serial:number;
 };
 
@@ -29,6 +30,7 @@ export const UNIT_COST:Partial<Record<UnitKind,{family:"infantry_barracks"|"mobi
 };
 
 const SIDES:Side[]=["blue","red","green"];
+const TERRITORY_RECALC_HOURS=1.25;
 const WORLD_FALLBACK_X=WORLD_W*.5, WORLD_FALLBACK_Y=WORLD_H*.5;
 
 function mkUnit(kind:UnitKind,side:Side,x:number,y:number,id:string):Formation{
@@ -74,7 +76,7 @@ export function createOpenWorldState(scenario:Scenario,units:Formation[],cities:
   }
   return{state:{resources:{
     blue:{manpower:650,materials:500,fuel:280},red:{manpower:650,materials:500,fuel:280},green:{manpower:650,materials:500,fuel:280}
-  },structures,recruitment:[],resourceNodes,serial:100},units:[...blue,...red,...green],cities:nextCities};
+  },structures,recruitment:[],resourceNodes,territoryClock:0,serial:100},units:[...blue,...red,...green],cities:nextCities};
 }
 
 export function queueRecruitment(state:OpenWorldState,side:Side,kind:UnitKind,barracksId:string):OpenWorldState{
@@ -102,28 +104,73 @@ export function buildStrategicCity(state:OpenWorldState,side:Side):{state:OpenWo
 
 export function advanceOpenWorld(state:OpenWorldState,units:Formation[],cities:CityState[],hours:number){
   const structures=state.structures.filter(s=>s.strength>0);
-  const resourceNodes=state.resourceNodes.map(cell=>{
-    const influences:Record<Side,number>={blue:0,red:0,green:0};
-    for(const side of SIDES){
-      const cityInf=cities.filter(c=>c.owner===side).reduce((s,c)=>s+Math.max(0,1-Math.hypot(c.x-cell.x,c.y-cell.y)/900)*2.4,0);
-      const unitInf=units.filter(u=>u.side===side&&u.strength>10).reduce((s,u)=>s+Math.max(0,1-Math.hypot(u.x-cell.x,u.y-cell.y)/520)*(u.strength/100),0);
-      const fortInf=structures.filter(b=>b.side===side&&(b.kind==="fort"||b.kind.includes("barracks"))).reduce((s,b)=>s+Math.max(0,1-Math.hypot(b.x-cell.x,b.y-cell.y)/680)*1.5,0);
-      influences[side]=cityInf+unitInf+fortInf;
-    }
-    const ranked=SIDES.map(side=>({side,v:influences[side]})).sort((a,b)=>b.v-a.v);
-    const owner=ranked[0].v>.22&&ranked[0].v>ranked[1].v*1.12?ranked[0].side:cell.owner;
-    const nearby=owner?units.filter(u=>u.side===owner&&Math.hypot(u.x-cell.x,u.y-cell.y)<150).length:0;
-    return{...cell,owner,urban:Math.min(100,cell.urban+hours*(nearby>=6?.42:nearby>=4?.18:-.02))};
-  });
-  const resources={...state.resources};
-  for(const side of SIDES){
-    const owned=resourceNodes.filter(c=>c.owner===side);
-    resources[side]={...resources[side],
-      manpower:resources[side].manpower+hours*owned.filter(c=>c.resource==="manpower").reduce((s,c)=>s+c.value*.15,0),
-      materials:resources[side].materials+hours*owned.filter(c=>c.resource==="materials").reduce((s,c)=>s+c.value*.12,0),
-      fuel:resources[side].fuel+hours*owned.filter(c=>c.resource==="fuel").reduce((s,c)=>s+c.value*.09,0)
-    };
+  let resourceNodes=state.resourceNodes;
+  let territoryClock=state.territoryClock+hours;
+
+  // Territory is strategic state, not a 10 Hz particle effect. Recompute it at a
+  // slower simulation cadence and keep the previous node objects between passes.
+  if(territoryClock>=TERRITORY_RECALC_HOURS){
+    const elapsed=territoryClock;
+    territoryClock%=TERRITORY_RECALC_HOURS;
+    const citiesBySide:Record<Side,CityState[]>={blue:[],red:[],green:[]};
+    const unitsBySide:Record<Side,Formation[]>={blue:[],red:[],green:[]};
+    const structuresBySide:Record<Side,OpenWorldStructure[]>={blue:[],red:[],green:[]};
+    for(const city of cities)citiesBySide[city.owner].push(city);
+    for(const unit of units)if(unit.strength>10)unitsBySide[unit.side].push(unit);
+    for(const structure of structures)if(structure.kind==="fort"||structure.kind.includes("barracks"))structuresBySide[structure.side].push(structure);
+
+    resourceNodes=state.resourceNodes.map(cell=>{
+      const influences:Record<Side,number>={blue:0,red:0,green:0};
+      for(const side of SIDES){
+        let score=0;
+        for(const city of citiesBySide[side]){
+          const dx=city.x-cell.x,dy=city.y-cell.y,d2=dx*dx+dy*dy;
+          if(d2<810000)score+=(1-Math.sqrt(d2)/900)*2.4;
+        }
+        for(const unit of unitsBySide[side]){
+          const dx=unit.x-cell.x,dy=unit.y-cell.y,d2=dx*dx+dy*dy;
+          if(d2<270400)score+=(1-Math.sqrt(d2)/520)*(unit.strength/100);
+        }
+        for(const structure of structuresBySide[side]){
+          const dx=structure.x-cell.x,dy=structure.y-cell.y,d2=dx*dx+dy*dy;
+          if(d2<462400)score+=(1-Math.sqrt(d2)/680)*1.5;
+        }
+        influences[side]=score;
+      }
+
+      const ranked=SIDES.map(side=>({side,v:influences[side]})).sort((a,b)=>b.v-a.v);
+      const leader=ranked[0],runnerUp=ranked[1];
+      let owner=cell.owner;
+      if(!owner){
+        if(leader.v>.24&&leader.v>runnerUp.v*1.16)owner=leader.side;
+      }else if(leader.side!==owner){
+        const incumbent=influences[owner];
+        if(leader.v>.30&&leader.v>incumbent*1.24&&leader.v>runnerUp.v*1.12)owner=leader.side;
+      }
+
+      let nearby=0;
+      if(owner){
+        for(const unit of unitsBySide[owner]){
+          const dx=unit.x-cell.x,dy=unit.y-cell.y;
+          if(dx*dx+dy*dy<22500)nearby++;
+        }
+      }
+      const urban=Math.max(0,Math.min(100,cell.urban+elapsed*(nearby>=6?.42:nearby>=4?.18:-.02)));
+      return owner===cell.owner&&urban===cell.urban?cell:{...cell,owner,urban};
+    });
   }
+
+  const income:Record<Side,{manpower:number;materials:number;fuel:number}>={
+    blue:{manpower:0,materials:0,fuel:0},red:{manpower:0,materials:0,fuel:0},green:{manpower:0,materials:0,fuel:0}
+  };
+  for(const cell of resourceNodes)if(cell.owner)income[cell.owner][cell.resource]+=cell.value;
+  const resources={...state.resources};
+  for(const side of SIDES)resources[side]={...resources[side],
+    manpower:resources[side].manpower+hours*income[side].manpower*.15,
+    materials:resources[side].materials+hours*income[side].materials*.12,
+    fuel:resources[side].fuel+hours*income[side].fuel*.09
+  };
+
   const spawned:Formation[]=[];const recruitment:Recruitment[]=[];
   let serial=state.serial;
   for(const q of state.recruitment){
@@ -136,5 +183,5 @@ export function advanceOpenWorld(state:OpenWorldState,units:Formation[],cities:C
     newCities.push({name:"Settlement "+cell.id.split("-")[1],x:cell.x,y:cell.y,owner:cell.owner,capture:0});
     cell.urban=15;
   }
-  return{state:{...state,resources,structures,resourceNodes,recruitment,serial},spawned,newCities};
+  return{state:{...state,resources,structures,resourceNodes,territoryClock,recruitment,serial},spawned,newCities};
 }
