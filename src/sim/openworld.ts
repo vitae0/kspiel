@@ -4,7 +4,7 @@ import type {CityState,Formation,Scenario,Side,UnitKind} from "./types";
 export type OpenWorldBuildKind="infantry_barracks"|"mobile_barracks"|"support_barracks"|"road"|"wall"|"fort"|"city";
 export type OpenWorldStructure={id:string;kind:OpenWorldBuildKind;side:Side;x:number;y:number;x2?:number;y2?:number;strength:number};
 export type Recruitment={id:string;side:Side;kind:UnitKind;barracksId:string;hoursLeft:number};
-export type ResourceNode={id:string;x:number;y:number;owner:Side|null;resource:"manpower"|"materials"|"fuel";value:number;urban:number};
+export type ResourceNode={id:string;x:number;y:number;owner:Side|null;resource:"manpower"|"materials"|"fuel";value:number;urban:number;control:number;contested:number};
 export type OpenWorldState={
   resources:Record<Side,{manpower:number;materials:number;fuel:number}>;
   structures:OpenWorldStructure[];
@@ -30,7 +30,7 @@ export const UNIT_COST:Partial<Record<UnitKind,{family:"infantry_barracks"|"mobi
 };
 
 const SIDES:Side[]=["blue","red","green"];
-const TERRITORY_RECALC_HOURS=1.25;
+const TERRITORY_RECALC_HOURS=1.6;
 const WORLD_FALLBACK_X=WORLD_W*.5, WORLD_FALLBACK_Y=WORLD_H*.5;
 
 function mkUnit(kind:UnitKind,side:Side,x:number,y:number,id:string):Formation{
@@ -65,7 +65,7 @@ export function createOpenWorldState(scenario:Scenario,units:Formation[],cities:
     const nearest=nextCities.map(c=>({c,d:Math.hypot(c.x-x,c.y-y)})).sort((a,b)=>a.d-b.d)[0];
     const owner=nearest&&nearest.d<1050?nearest.c.owner:null;
     const r=(n*37+Math.floor(x/sampleStep)*11+Math.floor(y/sampleStep)*17)%3;
-    resourceNodes.push({id:"resource-"+n++,x,y,owner,resource:r===0?"manpower":r===1?"materials":"fuel",value:1+((n*13)%4),urban:0});
+    resourceNodes.push({id:"resource-"+n++,x,y,owner,resource:r===0?"manpower":r===1?"materials":"fuel",value:1+((n*13)%4),urban:0,control:owner?.62:0,contested:0});
   }
   const structures:OpenWorldStructure[]=[];
   for(const side of SIDES){
@@ -107,8 +107,6 @@ export function advanceOpenWorld(state:OpenWorldState,units:Formation[],cities:C
   let resourceNodes=state.resourceNodes;
   let territoryClock=state.territoryClock+hours;
 
-  // Territory is strategic state, not a 10 Hz particle effect. Recompute it at a
-  // slower simulation cadence and keep the previous node objects between passes.
   if(territoryClock>=TERRITORY_RECALC_HOURS){
     const elapsed=territoryClock;
     territoryClock%=TERRITORY_RECALC_HOURS;
@@ -116,54 +114,131 @@ export function advanceOpenWorld(state:OpenWorldState,units:Formation[],cities:C
     const unitsBySide:Record<Side,Formation[]>={blue:[],red:[],green:[]};
     const structuresBySide:Record<Side,OpenWorldStructure[]>={blue:[],red:[],green:[]};
     for(const city of cities)citiesBySide[city.owner].push(city);
-    for(const unit of units)if(unit.strength>10)unitsBySide[unit.side].push(unit);
+    for(const unit of units)if(unit.strength>8)unitsBySide[unit.side].push(unit);
     for(const structure of structures)if(structure.kind==="fort"||structure.kind.includes("barracks"))structuresBySide[structure.side].push(structure);
 
-    resourceNodes=state.resourceNodes.map(cell=>{
-      const influences:Record<Side,number>={blue:0,red:0,green:0};
+    const unitRole=(kind:UnitKind)=>kind==="tank"||kind==="armor"||kind==="mechanized"?1.22
+      :kind==="infantry"||kind==="mountaineer"||kind==="special_forces"||kind==="engineer"?1
+      :kind==="cavalry"?.9:kind==="recon"?.72:kind==="mortar"||kind==="artillery"||kind==="heavy_artillery"?.42:.18;
+    const unitRadius=(kind:UnitKind)=>kind==="recon"?700:kind==="tank"||kind==="armor"||kind==="mechanized"||kind==="cavalry"?620:kind==="mortar"||kind==="artillery"||kind==="heavy_artillery"?430:kind==="logistics"?300:560;
+    const pointSegmentDistance=(ax:number,ay:number,bx:number,by:number,px:number,py:number)=>{
+      const dx=bx-ax,dy=by-ay,len=dx*dx+dy*dy;
+      if(!len)return Math.hypot(px-ax,py-ay);
+      const t=Math.max(0,Math.min(1,((px-ax)*dx+(py-ay)*dy)/len));
+      return Math.hypot(px-(ax+t*dx),py-(ay+t*dy));
+    };
+    const routeDistance=(route:Array<{x:number;y:number}>,x:number,y:number)=>{
+      let best=Infinity;
+      for(let i=0;i<route.length-1;i++)best=Math.min(best,pointSegmentDistance(route[i].x,route[i].y,route[i+1].x,route[i+1].y,x,y));
+      return best;
+    };
+    const nearestCity=(point:{x:number;y:number})=>{
+      let best:CityState|undefined,bestD=Infinity;
+      for(const city of cities){const d=Math.hypot(city.x-point.x,city.y-point.y);if(d<bestD){best=city;bestD=d}}
+      return best;
+    };
+    const roadOwners=scenario.roadRoutes.map(route=>{
+      const a=nearestCity(route[0]),b=nearestCity(route[route.length-1]);
+      return a&&b&&a.owner===b.owner?a.owner:null;
+    });
+
+    const scores=state.resourceNodes.map(cell=>{
+      const out:Record<Side,number>={blue:0,red:0,green:0};
       for(const side of SIDES){
         let score=0;
-        for(const city of citiesBySide[side]){
-          const dx=city.x-cell.x,dy=city.y-cell.y,d2=dx*dx+dy*dy;
-          if(d2<810000)score+=(1-Math.sqrt(d2)/900)*2.4;
-        }
-        for(const unit of unitsBySide[side]){
-          const dx=unit.x-cell.x,dy=unit.y-cell.y,d2=dx*dx+dy*dy;
-          if(d2<270400)score+=(1-Math.sqrt(d2)/520)*(unit.strength/100);
-        }
-        for(const structure of structuresBySide[side]){
-          const dx=structure.x-cell.x,dy=structure.y-cell.y,d2=dx*dx+dy*dy;
-          if(d2<462400)score+=(1-Math.sqrt(d2)/680)*1.5;
-        }
-        influences[side]=score;
-      }
 
+        for(const city of citiesBySide[side]){
+          const d=Math.hypot(city.x-cell.x,city.y-cell.y),radius=1250;
+          if(d<radius){
+            const falloff=1-d/radius;
+            score+=3.25*falloff*falloff*(1-Math.min(.55,city.capture/180));
+          }
+        }
+
+        for(const unit of unitsBySide[side]){
+          const radius=unitRadius(unit.kind),d=Math.hypot(unit.x-cell.x,unit.y-cell.y);
+          if(d>=radius)continue;
+          const falloff=1-d/radius;
+          const combatState=(unit.strength/100)*(.3+.7*unit.organization/100)*(.45+.55*unit.supply/100)*(.55+.45*unit.readiness/100);
+          const entrenchment=1+Math.min(.22,unit.entrenchment/360);
+          score+=unitRole(unit.kind)*combatState*entrenchment*1.55*falloff*falloff;
+        }
+
+        for(const structure of structuresBySide[side]){
+          const fort=structure.kind==="fort",radius=fort?920:690,d=Math.hypot(structure.x-cell.x,structure.y-cell.y);
+          if(d<radius){const falloff=1-d/radius;score+=(fort?2.35:1.25)*(structure.strength/100)*falloff*falloff}
+        }
+
+        for(let i=0;i<scenario.roadRoutes.length;i++){
+          if(roadOwners[i]!==side)continue;
+          const d=routeDistance(scenario.roadRoutes[i],cell.x,cell.y);
+          if(d<170)score+=(1-d/170)*.42;
+        }
+
+        for(const neighbor of state.resourceNodes){
+          if(neighbor.id===cell.id||neighbor.owner!==side||neighbor.control<=.08)continue;
+          const d=Math.hypot(neighbor.x-cell.x,neighbor.y-cell.y);
+          if(d<850)score+=(1-d/850)*neighbor.control*.34;
+        }
+
+        out[side]=score;
+      }
+      return out;
+    });
+
+    resourceNodes=state.resourceNodes.map((cell,index)=>{
+      const influences=scores[index];
       const ranked=SIDES.map(side=>({side,v:influences[side]})).sort((a,b)=>b.v-a.v);
       const leader=ranked[0],runnerUp=ranked[1];
+      const total=leader.v+runnerUp.v+.08;
+      const margin=(leader.v-runnerUp.v)/total;
+      const pressure=Math.min(1,leader.v/2.8);
+      const contested=Math.max(0,Math.min(1,1-Math.max(0,margin)*1.35));
+
       let owner=cell.owner;
+      let control=cell.control;
       if(!owner){
-        if(leader.v>.24&&leader.v>runnerUp.v*1.16)owner=leader.side;
-      }else if(leader.side!==owner){
+        if(leader.v>.34&&margin>.1){
+          owner=leader.side;
+          control=Math.min(.42,.18+pressure*.22);
+        }else control=Math.max(0,control-elapsed*.025);
+      }else if(leader.side===owner){
+        const target=Math.max(.28,Math.min(1,.38+margin*.62+pressure*.18));
+        control+= (target-control)*Math.min(1,elapsed*.16);
+      }else{
         const incumbent=influences[owner];
-        if(leader.v>.30&&leader.v>incumbent*1.24&&leader.v>runnerUp.v*1.12)owner=leader.side;
+        const superiority=(leader.v-incumbent)/(leader.v+incumbent+.08);
+        if(leader.v>.38&&superiority>.06){
+          control-=elapsed*(.055+.16*Math.min(1,superiority))*Math.max(.35,pressure);
+          if(control<=.12){owner=leader.side;control=.22+Math.min(.14,pressure*.12)}
+        }else{
+          const target=Math.max(.18,.42-contested*.16);
+          control+=(target-control)*Math.min(1,elapsed*.08);
+        }
       }
+      control=Math.max(0,Math.min(1,control));
 
       let nearby=0;
       if(owner){
         for(const unit of unitsBySide[owner]){
           const dx=unit.x-cell.x,dy=unit.y-cell.y;
-          if(dx*dx+dy*dy<22500)nearby++;
+          if(dx*dx+dy*dy<22500&&unit.organization>22&&unit.supply>12)nearby++;
         }
       }
-      const urban=Math.max(0,Math.min(100,cell.urban+elapsed*(nearby>=6?.42:nearby>=4?.18:-.02)));
-      return owner===cell.owner&&urban===cell.urban?cell:{...cell,owner,urban};
+      const urban=Math.max(0,Math.min(100,cell.urban+elapsed*(control>.45&&nearby>=6?.42:control>.38&&nearby>=4?.18:-.02)));
+      const nextContested=Math.max(0,Math.min(1,contested*(.35+.65*pressure)));
+      return owner===cell.owner&&Math.abs(control-cell.control)<.002&&Math.abs(nextContested-cell.contested)<.002&&Math.abs(urban-cell.urban)<.002
+        ?cell:{...cell,owner,control,contested:nextContested,urban};
     });
   }
 
   const income:Record<Side,{manpower:number;materials:number;fuel:number}>={
     blue:{manpower:0,materials:0,fuel:0},red:{manpower:0,materials:0,fuel:0},green:{manpower:0,materials:0,fuel:0}
   };
-  for(const cell of resourceNodes)if(cell.owner)income[cell.owner][cell.resource]+=cell.value;
+  for(const cell of resourceNodes)if(cell.owner){
+    const effective=.35+.65*cell.control;
+    income[cell.owner][cell.resource]+=cell.value*effective;
+  }
   const resources={...state.resources};
   for(const side of SIDES)resources[side]={...resources[side],
     manpower:resources[side].manpower+hours*income[side].manpower*.15,
@@ -179,7 +254,7 @@ export function advanceOpenWorld(state:OpenWorldState,units:Formation[],cities:C
     const b=structures.find(s=>s.id===q.barracksId);if(b)spawned.push(mkUnit(q.kind,q.side,b.x+28,b.y+28,"owu-"+serial++));
   }
   const newCities:CityState[]=[];
-  for(const cell of resourceNodes)if(cell.owner&&cell.urban>=100&&!cities.some(c=>Math.hypot(c.x-cell.x,c.y-cell.y)<260)){
+  for(const cell of resourceNodes)if(cell.owner&&cell.control>.55&&cell.urban>=100&&!cities.some(c=>Math.hypot(c.x-cell.x,c.y-cell.y)<260)){
     newCities.push({name:"Settlement "+cell.id.split("-")[1],x:cell.x,y:cell.y,owner:cell.owner,capture:0});
     cell.urban=15;
   }
