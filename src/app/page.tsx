@@ -112,10 +112,79 @@ function nearestCityTo(point:{x:number;y:number},cities:CityState[]){
   return cities.map(c=>({c,d:Math.hypot(c.x-point.x,c.y-point.y)})).sort((a,b)=>a.d-b.d)[0]?.c;
 }
 
-function roadRoutePlan(scenario:Scenario,cities:CityState[],from:{x:number;y:number},to:{x:number;y:number}){
-  const start=nearestCityTo(from,cities),goal=nearestCityTo(to,cities);
-  if(!start||!goal||start.name===goal.name)return[{x:to.x,y:to.y}];
+function cityAtPoint(cities:CityState[],x:number,y:number,radius=105){
+  return cities.map(c=>({c,d:Math.hypot(c.x-x,c.y-y)})).filter(v=>v.d<=radius).sort((a,b)=>a.d-b.d)[0]?.c;
+}
 
+type RoutePosition={distance:number;point:{x:number;y:number};segment:number;t:number;along:number;total:number};
+
+function routePosition(route:{x:number;y:number}[],x:number,y:number):RoutePosition{
+  let best:RoutePosition={distance:Infinity,point:{x,y},segment:0,t:0,along:0,total:0};
+  let walked=0,total=0;
+  const lengths:number[]=[];
+  for(let i=0;i<route.length-1;i++){
+    const len=Math.hypot(route[i+1].x-route[i].x,route[i+1].y-route[i].y);
+    lengths.push(len);total+=len;
+  }
+  for(let i=0;i<route.length-1;i++){
+    const hit=segmentContact(route[i].x,route[i].y,route[i+1].x,route[i+1].y,x,y);
+    if(hit.distance<best.distance){
+      best={distance:hit.distance,point:{x:route[i].x+(route[i+1].x-route[i].x)*hit.t,y:route[i].y+(route[i+1].y-route[i].y)*hit.t},segment:i,t:hit.t,along:walked+lengths[i]*hit.t,total};
+    }
+    walked+=lengths[i];
+  }
+  return best;
+}
+
+function routeDistance(route:{x:number;y:number}[],x:number,y:number){
+  return routePosition(route,x,y).distance;
+}
+
+function dedupeRoutePoints(points:Array<{x:number;y:number}>){
+  const out:Array<{x:number;y:number}>=[];
+  for(const point of points){
+    const last=out[out.length-1];
+    if(!last||Math.hypot(last.x-point.x,last.y-point.y)>2)out.push(point);
+  }
+  return out;
+}
+
+function roadControlPower(u:Formation){
+  const role=u.kind==="tank"||u.kind==="armor"||u.kind==="mechanized"?1.2
+    :u.kind==="infantry"||u.kind==="mountaineer"||u.kind==="special_forces"||u.kind==="engineer"?1
+    :u.kind==="cavalry"||u.kind==="recon"?.82:.45;
+  return role*(u.strength/100)*(u.organization/100)*(.45+u.readiness/180)*(.5+u.supply/200);
+}
+
+type RoadCutPoint={x:number;y:number;along:number;pressure:number};
+
+function routeInterdictionPoints(route:{x:number;y:number}[],side:Side,units:Formation[]):RoadCutPoint[]{
+  const cuts:RoadCutPoint[]=[];
+  for(const hostile of units){
+    if(hostile.side===side||!DIRECT_COMBAT_KINDS.has(hostile.kind)||hostile.strength<=18||hostile.organization<=20)continue;
+    const pos=routePosition(route,hostile.x,hostile.y);
+    if(pos.distance>58)continue;
+    let hostilePower=0,friendlyPower=0;
+    for(const unit of units){
+      if(!DIRECT_COMBAT_KINDS.has(unit.kind)||unit.strength<=8||Math.hypot(unit.x-hostile.x,unit.y-hostile.y)>125)continue;
+      if(unit.side===side)friendlyPower+=roadControlPower(unit);
+      else hostilePower+=roadControlPower(unit);
+    }
+    const pressure=hostilePower-Math.max(.15,friendlyPower*1.08);
+    if(pressure<=.05)continue;
+    const existing=cuts.find(c=>Math.abs(c.along-pos.along)<135);
+    if(existing){if(pressure>existing.pressure){existing.x=pos.point.x;existing.y=pos.point.y;existing.along=pos.along;existing.pressure=pressure}}
+    else cuts.push({x:pos.point.x,y:pos.point.y,along:pos.along,pressure});
+  }
+  return cuts.sort((a,b)=>a.along-b.along);
+}
+
+function routeCutForSide(route:{x:number;y:number}[],side:Side,units:Formation[]){
+  return routeInterdictionPoints(route,side,units).length>0;
+}
+
+function roadPathBetweenCities(scenario:Scenario,cities:CityState[],start:CityState,goal:CityState){
+  if(start.name===goal.name)return{points:[] as Array<{x:number;y:number}>,cost:0};
   type Edge={to:string;route:Array<{x:number;y:number}>;cost:number};
   const graph=new Map<string,Edge[]>();
   for(const city of cities)graph.set(city.name,[]);
@@ -142,40 +211,83 @@ function roadRoutePlan(scenario:Scenario,cities:CityState[],from:{x:number;y:num
     for(const edge of graph.get(current)??[]){
       if(!unvisited.has(edge.to))continue;
       const next=best+edge.cost;
-      if(next<(dist.get(edge.to)??Infinity)){
-        dist.set(edge.to,next);
-        prev.set(edge.to,{city:current,route:edge.route});
-      }
+      if(next<(dist.get(edge.to)??Infinity)){dist.set(edge.to,next);prev.set(edge.to,{city:current,route:edge.route})}
     }
   }
-
-  if(!prev.has(goal.name))return[{x:to.x,y:to.y}];
+  if(!prev.has(goal.name))return null;
   const segments:Array<Array<{x:number;y:number}>>=[];
   let cursor=goal.name;
   while(cursor!==start.name){
-    const step=prev.get(cursor);if(!step)break;
+    const step=prev.get(cursor);if(!step)return null;
     segments.push(step.route);cursor=step.city;
   }
   segments.reverse();
-
   const points:Array<{x:number;y:number}>=[];
-  if(Math.hypot(from.x-start.x,from.y-start.y)>45)points.push({x:start.x,y:start.y});
-  for(const route of segments){
-    for(const point of route.slice(1))points.push({x:point.x,y:point.y});
-  }
-  if(!points.length||Math.hypot(points[points.length-1].x-to.x,points[points.length-1].y-to.y)>8)points.push({x:to.x,y:to.y});
-  return points;
+  for(const route of segments)for(const point of route.slice(1))points.push(point);
+  return{points:dedupeRoutePoints(points),cost:dist.get(goal.name)??Infinity};
 }
+
+function cityRoadRoutePlan(scenario:Scenario,cities:CityState[],from:{x:number;y:number},goal:CityState){
+  let best:{cost:number;points:Array<{x:number;y:number}>}|null=null;
+  for(const route of scenario.roadRoutes){
+    if(route.length<2)continue;
+    const pos=routePosition(route,from.x,from.y);
+    const a=nearestCityTo(route[0],cities),b=nearestCityTo(route[route.length-1],cities);
+    if(!a||!b||a.name===b.name)continue;
+
+    const towardStart=dedupeRoutePoints([pos.point,...route.slice(0,pos.segment+1).reverse()]);
+    const towardEnd=dedupeRoutePoints([pos.point,...route.slice(pos.segment+1)]);
+    const candidates=[
+      {entry:a,local:towardStart,roadCost:pos.along},
+      {entry:b,local:towardEnd,roadCost:pos.total-pos.along}
+    ];
+    for(const candidate of candidates){
+      const onward=roadPathBetweenCities(scenario,cities,candidate.entry,goal);
+      if(!onward)continue;
+      const points=dedupeRoutePoints([...(pos.distance>6?[pos.point]:[]),...candidate.local.slice(1),...onward.points]);
+      const cost=pos.distance+candidate.roadCost+onward.cost;
+      if(!best||cost<best.cost)best={cost,points};
+    }
+  }
+  const result=best?.points.length?best.points:[{x:goal.x,y:goal.y}];
+  const last=result[result.length-1];
+  if(Math.hypot(last.x-goal.x,last.y-goal.y)>4)result.push({x:goal.x,y:goal.y});
+  return dedupeRoutePoints(result);
+}
+
+function movementRoutePlan(scenario:Scenario,cities:CityState[],from:{x:number;y:number},to:{x:number;y:number}){
+  const city=cityAtPoint(cities,to.x,to.y);
+  return city?cityRoadRoutePlan(scenario,cities,from,city):[{x:to.x,y:to.y}];
+}
+
+type RoadSupplyRoute={
+  index:number;
+  route:Array<{x:number;y:number}>;
+  a:CityState;
+  b:CityState;
+  cuts:Record<Side,RoadCutPoint[]>;
+};
+type SupplyNetwork={capacity:Map<string,number>;roads:RoadSupplyRoute[]};
 
 function computeSupplyNetwork(scenario:Scenario,units:Formation[],cities:CityState[]):SupplyNetwork{
   const adjacency=new Map<string,Set<string>>();
   for(const city of cities)adjacency.set(city.name,new Set());
-  for(const route of scenario.roadRoutes){
-    const start=nearestCityTo(route[0],cities),end=nearestCityTo(route[route.length-1],cities);
-    if(!start||!end||start.name===end.name||start.owner!==end.owner||routeCutForSide(route,start.owner,units))continue;
-    adjacency.get(start.name)?.add(end.name);adjacency.get(end.name)?.add(start.name);
+  const roads:RoadSupplyRoute[]=[];
+  for(let index=0;index<scenario.roadRoutes.length;index++){
+    const route=scenario.roadRoutes[index];if(route.length<2)continue;
+    const a=nearestCityTo(route[0],cities),b=nearestCityTo(route[route.length-1],cities);
+    if(!a||!b||a.name===b.name)continue;
+    const cuts:Record<Side,RoadCutPoint[]>={
+      blue:routeInterdictionPoints(route,"blue",units),
+      red:routeInterdictionPoints(route,"red",units),
+      green:routeInterdictionPoints(route,"green",units)
+    };
+    roads.push({index,route,a,b,cuts});
+    if(a.owner===b.owner&&cuts[a.owner].length===0){
+      adjacency.get(a.name)?.add(b.name);adjacency.get(b.name)?.add(a.name);
+    }
   }
-  const out:SupplyNetwork=new Map(),seen=new Set<string>();
+  const capacity=new Map<string,number>(),seen=new Set<string>();
   for(const city of cities){
     if(seen.has(city.name))continue;
     const stack=[city.name],component:string[]=[];
@@ -185,10 +297,31 @@ function computeSupplyNetwork(scenario:Scenario,units:Formation[],cities:CitySta
       seen.add(name);component.push(name);
       for(const next of adjacency.get(name)??[])if(!seen.has(next))stack.push(next);
     }
-    const capacity=Math.max(1,component.length);
-    for(const name of component)out.set(name,capacity);
+    const size=Math.max(1,component.length);
+    for(const name of component)capacity.set(name,size);
   }
-  return out;
+  return{capacity,roads};
+}
+
+function roadSupplyAccess(u:Formation,network:SupplyNetwork){
+  let best:{capacity:number;source:CityState;distance:number}|null=null;
+  for(const road of network.roads){
+    const pos=routePosition(road.route,u.x,u.y);
+    if(pos.distance>68)continue;
+    const endpoints=[
+      {city:road.a,along:0},
+      {city:road.b,along:pos.total}
+    ];
+    for(const endpoint of endpoints){
+      if(endpoint.city.owner!==u.side)continue;
+      const lo=Math.min(pos.along,endpoint.along),hi=Math.max(pos.along,endpoint.along);
+      if(road.cuts[u.side].some(c=>c.along>=lo-4&&c.along<=hi+4))continue;
+      const capacity=network.capacity.get(endpoint.city.name)??1;
+      const distance=pos.distance+Math.abs(pos.along-endpoint.along);
+      if(!best||capacity>best.capacity||(capacity===best.capacity&&distance<best.distance))best={capacity,source:endpoint.city,distance};
+    }
+  }
+  return best;
 }
 
 type LogisticsLink={from:{x:number;y:number;id:string};to:{x:number;y:number;id:string};unitId:string;depth:number};
@@ -205,14 +338,14 @@ function computeLogisticsLinks(scenario:Scenario,units:Formation[],cities:CitySt
   for(const hub of emplacements.filter(e=>e.kind==="supply_depot"&&e.strength>0)){
     const nearest=cities.filter(c=>c.owner===hub.side).map(c=>({c,d:Math.hypot(c.x-hub.x,c.y-hub.y)})).sort((a,b)=>a.d-b.d)[0];
     if(!nearest)continue;
-    const active=nearest.d<=hubCityRange&&(network.get(nearest.c.name)??0)>0;
+    const active=nearest.d<=hubCityRange&&(network.capacity.get(nearest.c.name)??0)>0;
     hubLinks.push({from:{x:nearest.c.x,y:nearest.c.y,id:"city:"+nearest.c.name},to:{x:hub.x,y:hub.y,id:hub.id},hubId:hub.id,active});
     if(active)activeHubs.add(hub.id);
   }
 
   for(const u of logistics){
     const city=cities
-      .filter(c=>c.owner===u.side&&(network.get(c.name)??0)>0)
+      .filter(c=>c.owner===u.side&&(network.capacity.get(c.name)??0)>0)
       .map(c=>({c,d:Math.hypot(c.x-u.x,c.y-u.y)}))
       .filter(x=>x.d<=cityRange)
       .sort((a,b)=>a.d-b.d)[0];
@@ -253,9 +386,7 @@ function computeLogisticsLinks(scenario:Scenario,units:Formation[],cities:CitySt
 function supplyAccess(scenario:Scenario,u:Formation,units:Formation[],cities:CityState[],network=computeSupplyNetwork(scenario,units,cities),emplacements:Emplacement[]=[],logisticsGraph=computeLogisticsLinks(scenario,units,cities,network,emplacements)){
   const sample=terrainAt(scenario,u.x,u.y);
   const city=sample.objective?cities.find(c=>c.name===sample.objective):undefined;
-  const ownedCities=cities.filter(c=>c.owner===u.side);
-  const nearest=ownedCities.map(c=>({c,d:Math.hypot(c.x-u.x,c.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
-  const roadAlive=sample.road&&scenario.roadRoutes.some(route=>routeDistance(route,u.x,u.y)<36&&!routeCutForSide(route,u.side,units));
+  const roadLink=roadSupplyAccess(u,network);
   const depot=emplacements
     .filter(e=>e.side===u.side&&e.kind==="supply_depot"&&e.strength>0&&logisticsGraph.activeHubs.has(e.id))
     .map(e=>({e,d:Math.hypot(e.x-u.x,e.y-u.y)}))
@@ -271,14 +402,13 @@ function supplyAccess(scenario:Scenario,u:Formation,units:Formation[],cities:Cit
   if(selfRelay)return{level:Math.max(1,3-Math.min(2,selfRelay.depth)),label:selfRelay.depth===0?"LOGISTICS LINK":"LOGISTICS CHAIN ×"+(selfRelay.depth+1),supplyPerHour:Math.max(.38,1.12-selfRelay.depth*.16),fuelPerHour:Math.max(.26,.78-selfRelay.depth*.12),range:logisticsGraph.relayRange};
   if(depot)return{level:2,label:"FIELD SUPPLY DEPOT",supplyPerHour:1.05,fuelPerHour:.72,range:depot.e.range};
   if(city?.owner===u.side){
-    const capacity=network.get(city.name)??1;
+    const capacity=network.capacity.get(city.name)??1;
     const throughput=1+Math.log2(capacity);
     return{level:capacity,label:capacity===1?"ISOLATED CITY SUPPLY":"CITY NETWORK ×"+capacity,supplyPerHour:.62+throughput*.56,fuelPerHour:.38+throughput*.4,range:0};
   }
-  if(roadAlive&&nearest&&nearest.d<1500){
-    const capacity=network.get(nearest.c.name)??1;
-    const throughput=1+Math.log2(capacity);
-    return{level:Math.max(1,capacity),label:capacity===1?"LOCAL ROAD SUPPLY":"CONNECTED ROAD NETWORK ×"+capacity,supplyPerHour:.3+throughput*.36,fuelPerHour:.2+throughput*.25,range:0};
+  if(roadLink){
+    const throughput=1+Math.log2(roadLink.capacity);
+    return{level:Math.max(1,roadLink.capacity),label:(roadLink.capacity===1?"LOCAL ROAD":"CONNECTED ROAD ×"+roadLink.capacity)+" · "+roadLink.source.name,supplyPerHour:.34+throughput*.38,fuelPerHour:.22+throughput*.27,range:68};
   }
   if(relay)return{level:1,label:"MOBILE LOGISTICS RELAY",supplyPerHour:.34,fuelPerHour:.22,range:relay.range};
   return{level:0,label:city?"HOSTILE SUPPLY NODE":"SUPPLY LINE CUT",supplyPerHour:0,fuelPerHour:0,range:0};
@@ -543,7 +673,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
         const [nextWaypoint,...remaining]=n.order.waypoints??[];
         n.order=nextWaypoint?{type:"move",targetX:nextWaypoint.x,targetY:nextWaypoint.y,waypoints:remaining}:{type:"defend"};
       }else if(dist>0){
-        const posture=n.order.type==="retreat"?1.55:n.order.type==="relieve"?1.12:n.order.type==="assault"?.58:n.order.type==="probe"?.74:1;
+        const posture=n.order.type==="retreat"?1.9:n.order.type==="relieve"?1.12:n.order.type==="assault"?.58:n.order.type==="probe"?.74:1;
         const builtRoad=openWorld?.structures.some(s=>s.kind==="road"&&s.side===u.side&&s.strength>0&&structureSegmentDistance(s,u.x,u.y)<34);
         const roadBonus=(sample.road||builtRoad)
           ?ARTILLERY_KINDS.has(u.kind)?2.5
@@ -556,7 +686,8 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
           :(u.kind==="mountaineer"&&(sample.terrain==="mountain"||sample.terrain==="hills"))?terrain.move*1.45
           :(u.kind==="cavalry"&&(sample.terrain==="plains"||sample.terrain==="desert"))?terrain.move*1.28
           :terrain.move;
-        const travel=Math.min(dist,u.speed*terrainMove*roadBonus*posture*movementSupplyFactor(n)*hours*MOVEMENT_SCALE);
+        const supplyMove=n.order.type==="retreat"?Math.max(.72,movementSupplyFactor(n)):movementSupplyFactor(n);
+        const travel=Math.min(dist,u.speed*terrainMove*roadBonus*posture*supplyMove*hours*MOVEMENT_SCALE);
         let nx=clamp(u.x+dx/dist*travel,1,WORLD_W-1),ny=clamp(u.y+dy/dist*travel,1,WORLD_H-1);
 
         if(DIRECT_COMBAT_KINDS.has(u.kind)&&n.order.type!=="retreat"){
@@ -1102,7 +1233,7 @@ export default function Home(){
       if(!selected.includes(u.id))return u;
       if(append&&u.order?.targetX!==undefined&&u.order?.targetY!==undefined&&!u.order.targetUnitId){
         const tail=u.order.waypoints?.length?u.order.waypoints[u.order.waypoints.length-1]:{x:u.order.targetX,y:u.order.targetY};
-        const leg=roadRoutePlan(activeScenario,cities,tail,{x:tx,y:ty});
+        const leg=movementRoutePlan(activeScenario,cities,tail,{x:tx,y:ty});
         return{...u,order:{...u.order,waypoints:[...(u.order.waypoints??[]),...leg]}};
       }
       if(requested==="fire"){
@@ -1112,7 +1243,7 @@ export default function Home(){
         return{...u,order:{type:"fire",targetX:tx,targetY:ty}};
       }
       if(requested==="probe"&&DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:"probe",targetX:tx,targetY:ty}};
-      const route=roadRoutePlan(activeScenario,cities,{x:u.x,y:u.y},{x:tx,y:ty});
+      const route=movementRoutePlan(activeScenario,cities,{x:u.x,y:u.y},{x:tx,y:ty});
       const [first,...rest]=route;
       return first?{...u,order:{type:"move",targetX:first.x,targetY:first.y,waypoints:rest}}:{...u,order:{type:"move",targetX:tx,targetY:ty}};
     }));
@@ -1309,7 +1440,7 @@ export default function Home(){
           {openWorld?.structures.filter(s=>s.kind==="wall"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined).map(s=><g key={s.id} className={"built-wall "+s.side} opacity={.45+.55*s.strength/160}><path d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2}/><path className="wall-cap" d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2}/></g>)}
           {cities.map(s=><g key={s.name} className={"site-label "+s.owner+(overlay==="supply"?(localSides.has(s.owner)?" supply-city friendly-supply-city":" supply-city hostile-supply-city"):"")}><circle cx={s.x} cy={s.y} r="6" className="site-core"/><circle cx={s.x} cy={s.y} r="25" className="site-ring"/>{s.capture>0&&<circle cx={s.x} cy={s.y} r="30" className="capture-ring" pathLength="100" strokeDasharray={s.capture+" "+(100-s.capture)} transform={"rotate(-90 "+s.x+" "+s.y+")"}/>}<text x={s.x+11} y={s.y-11}>{s.name.toUpperCase()} · {s.owner==="blue"?"B":s.owner==="red"?"R":"G"}</text></g>)}
           {<g className="city-supply-ranges">{cities.map(s=><circle key={"range-"+s.name} cx={s.x} cy={s.y} r={currentLogisticsGraph.cityRange} className={"city-supply-range "+s.owner}/>)}</g>}
-          {overlay==="supply"&&<g className="supply-overlay"><rect width={WORLD_W} height={WORLD_H} className="supply-map-wash"/>{activeScenario.roadRoutes.map((route,i)=>{const a=nearestCityTo(route[0],cities),b=nearestCityTo(route[route.length-1],cities);const friendly=Boolean(a&&b&&localSides.has(a.owner)&&localSides.has(b.owner));const hostile=Boolean(a&&b&&!localSides.has(a.owner)&&!localSides.has(b.owner));const cut=routeCutForSide(route,playerSide,units);return <path key={i} d={polylinePath(route)} className={"supply-route "+(cut?"cut":friendly?"friendly":hostile?"hostile":"contested")}/>})}{cities.map(s=><g key={s.name} className={localSides.has(s.owner)?"supply-city-node friendly":"supply-city-node hostile"}><circle cx={s.x} cy={s.y} r={localSides.has(s.owner)?88:70} className={"supply-node "+s.owner}/>{localSides.has(s.owner)&&<text x={s.x+30} y={s.y+34} className="supply-capacity">×{currentSupplyNetwork.get(s.name)??1}</text>}</g>)}{currentLogisticsGraph.hubLinks.filter(link=>emplacements.some(e=>e.id===link.hubId&&localSides.has(e.side))).map(link=><line key={"hub-link-"+link.hubId} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className={"hub-link "+(link.active?"active":"cut")}/>)}{currentLogisticsGraph.links.filter(link=>units.find(u=>u.id===link.unitId&&localSides.has(u.side))).map(link=><line key={"log-link-"+link.unitId} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className={"logistics-link depth-"+Math.min(3,link.depth)}/>)}{units.filter(u=>u.kind==="logistics"&&localSides.has(u.side)).map(u=><circle key={u.id} cx={u.x} cy={u.y} r={currentLogisticsGraph.relayRange} className={"logistics-range "+u.side}/>)}</g>}
+          {overlay==="supply"&&<g className="supply-overlay"><rect width={WORLD_W} height={WORLD_H} className="supply-map-wash"/>{activeScenario.roadRoutes.map((route,i)=>{const a=nearestCityTo(route[0],cities),b=nearestCityTo(route[route.length-1],cities);const friendly=Boolean(a&&b&&localSides.has(a.owner)&&localSides.has(b.owner));const hostile=Boolean(a&&b&&!localSides.has(a.owner)&&!localSides.has(b.owner));const cut=routeCutForSide(route,playerSide,units);return <path key={i} d={polylinePath(route)} className={"supply-route "+(cut?"cut":friendly?"friendly":hostile?"hostile":"contested")}/>})}{cities.map(s=><g key={s.name} className={localSides.has(s.owner)?"supply-city-node friendly":"supply-city-node hostile"}><circle cx={s.x} cy={s.y} r={localSides.has(s.owner)?88:70} className={"supply-node "+s.owner}/>{localSides.has(s.owner)&&<text x={s.x+30} y={s.y+34} className="supply-capacity">×{currentSupplyNetwork.capacity.get(s.name)??1}</text>}</g>)}{currentLogisticsGraph.hubLinks.filter(link=>emplacements.some(e=>e.id===link.hubId&&localSides.has(e.side))).map(link=><line key={"hub-link-"+link.hubId} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className={"hub-link "+(link.active?"active":"cut")}/>)}{currentLogisticsGraph.links.filter(link=>units.find(u=>u.id===link.unitId&&localSides.has(u.side))).map(link=><line key={"log-link-"+link.unitId} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className={"logistics-link depth-"+Math.min(3,link.depth)}/>)}{units.filter(u=>u.kind==="logistics"&&localSides.has(u.side)).map(u=><circle key={u.id} cx={u.x} cy={u.y} r={currentLogisticsGraph.relayRange} className={"logistics-range "+u.side}/>)}</g>}
           {overlay==="intel"&&<path d={activeScenario.landPath} fill="url(#intelShade)" className="intel-overlay"/>}<rect width={WORLD_W} height={WORLD_H} className="fog-dark" mask="url(#fogMask)"/><rect x="1" y="1" width={WORLD_W-2} height={WORLD_H-2} className="world-boundary"/>
         </svg>
 
