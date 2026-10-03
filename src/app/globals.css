@@ -337,8 +337,8 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .recruit-grid button b{font-size:10px}.recruit-grid button small{font-size:8px;opacity:.64}
 .strategic-build-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:8px}
 .strategic-build-grid button{font-size:9px;padding:7px 5px}
-.territory-layer{pointer-events:none;mix-blend-mode:multiply;opacity:.64}
-.territory-mass circle{opacity:.34}.territory-mass.blue circle{fill:#5888ff}.territory-mass.red circle{fill:#e25c5c}.territory-mass.green circle{fill:#58b879}
+.territory-layer{pointer-events:none;mix-blend-mode:multiply;opacity:.72}
+.territory-mass{opacity:.3}.territory-mass circle{opacity:1}.territory-mass.blue circle{fill:#5888ff}.territory-mass.red circle{fill:#e25c5c}.territory-mass.green circle{fill:#58b879}
 .built-road{fill:none;stroke-width:13;stroke-linecap:round;stroke-linejoin:round;opacity:.9;pointer-events:none}.built-road.blue{stroke:#8aa8d8}.built-road.red{stroke:#d08b82}.built-road.green{stroke:#86b98f}
 .built-wall{fill:none;pointer-events:none}.built-wall>path:first-child{stroke:#1c1e1a;stroke-width:25;stroke-linecap:square}.built-wall .wall-cap{stroke:#c8c2a4;stroke-width:14;stroke-dasharray:18 8;stroke-linecap:butt}.built-wall.blue .wall-cap{stroke:#91a8c9}.built-wall.red .wall-cap{stroke:#c78c85}.built-wall.green .wall-cap{stroke:#8fba97}
 .ow-structure{position:absolute;width:32px;height:32px;border:1px solid rgba(255,255,255,.55);display:grid;place-items:center;font-size:8px;font-weight:800;z-index:12;pointer-events:none;box-shadow:0 2px 8px #0008}
