@@ -226,7 +226,7 @@ function polylineTravelCost(scenario:Scenario,u:Formation,units:Formation[],poin
   return cost;
 }
 
-function routeSliceBetween(route:{x:number;y:number}[],from:RoutePosition,to:RoutePosition){
+function routeSliceBetween(route:{x:number;y:number}[],from:RoutePosition,to:RoutePosition):Array<{x:number;y:number}>{
   if(from.along>to.along)return routeSliceBetween(route,to,from).reverse();
   const points=[from.point];
   for(let i=from.segment+1;i<=to.segment;i++)points.push(route[i]);
@@ -378,7 +378,8 @@ function movementRoutePlan(
     consider(entry.cost+network.cost+exit.cost,[...entry.points,...network.points,...exit.points]);
   }
 
-  const result=best?.points?.length?[...best.points]:[{x:to.x,y:to.y}];
+  const chosen=best as {cost:number;points:Array<{x:number;y:number}>}|null;
+  const result=chosen&&chosen.points.length?[...chosen.points]:[{x:to.x,y:to.y}];
   while(result.length>1&&Math.hypot(result[0].x-from.x,result[0].y-from.y)<4)result.shift();
   const last=result[result.length-1];
   if(!last||Math.hypot(last.x-to.x,last.y-to.y)>4)result.push({x:to.x,y:to.y});
