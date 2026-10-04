@@ -4,7 +4,7 @@ export type PoliticalVector={stateControl:number;centralization:number;militaryI
 export type TerrainKind="water"|"plains"|"forest"|"hills"|"mountain"|"highmountain"|"marsh"|"urban"|"desert";
 export type ScenarioTheme="mixed"|"mountain"|"forest"|"desert"|"winter"|"steppe"|"urban";
 export type Era="medieval"|"early_modern"|"napoleonic"|"industrial"|"modern";
-export type FlagStyle="generic-blue"|"generic-red"|"ussr"|"germany-ww2"|"ottoman"|"crusader"|"sweden"|"imperial"|"france"|"austria"|"russia"|"german-empire"|"britain"|"axis"|"usa";
+export type FlagStyle="generic-blue"|"generic-red"|"ussr"|"germany-ww2"|"ottoman"|"crusader"|"sweden"|"imperial"|"france"|"austria"|"russia"|"german-empire"|"britain"|"axis"|"usa"|"spain-republic"|"spain-nationalist";
 export type UnitKind="infantry"|"mechanized"|"armor"|"tank"|"cavalry"|"mountaineer"|"special_forces"|"mortar"|"artillery"|"heavy_artillery"|"recon"|"engineer"|"logistics";
 export type Side="blue"|"red"|"green";
 export type OrderType="move"|"defend"|"assault"|"probe"|"fire"|"resupply"|"dig"|"relieve"|"retreat";
@@ -30,6 +30,7 @@ export type ScenarioPreset={
   sideNames:{blue:string;red:string;green?:string};
   sideFlags:{blue:FlagStyle;red:FlagStyle;green?:FlagStyle};
   cityNames:string[];
+  mapScale?:number;
 };
 
 export type CityState={name:string;x:number;y:number;owner:Side;capture:number};
@@ -52,6 +53,9 @@ export type Scenario={
   location:string;
   sideNames:{blue:string;red:string;green?:string};
   sideFlags:{blue:FlagStyle;red:FlagStyle;green?:FlagStyle};
+  worldWidth:number;
+  worldHeight:number;
+  landPolygon?:Array<{x:number;y:number}>;
   landPath:string;
   terrainFeatures:TerrainFeature[];
   roadNodes:RoadNode[];

@@ -50,6 +50,11 @@ export const SCENARIO_PRESETS:ScenarioPreset[]=[
     cityNames:["Verdun","Douaumont","Vaux","Mort-Homme","Côte 304","Fleury","Thiaumont","Souville","Haudromont","Forges","Avocourt","Cumières","Damloup","Bras","Bezonvaux"]
   },
   {
+    id:"spain-1937",title:"Spain 1937",subtitle:"Massive four-times-area civil-war theater with several simultaneous fronts, isolated pockets and long supply corridors",theme:"mixed",era:"modern",historical:true,year:1937,mapScale:2,
+    location:"Spain",sideNames:{blue:"Spanish Republic",red:"Nationalist Spain"},sideFlags:{blue:"spain-republic",red:"spain-nationalist"},
+    cityNames:["A Coruña","Vigo","Santiago","Lugo","Ourense","Pontevedra","Oviedo","Gijón","León","Santander","Bilbao","San Sebastián","Pamplona","Logroño","Burgos","Palencia","Valladolid","Zamora","Salamanca","Segovia","Ávila","Soria","Madrid","Toledo","Guadalajara","Cuenca","Ciudad Real","Cáceres","Badajoz","Mérida","Huelva","Sevilla","Cádiz","Córdoba","Jaén","Granada","Málaga","Almería","Murcia","Cartagena","Albacete","Alicante","Valencia","Castellón","Teruel","Zaragoza","Huesca","Lleida","Tarragona","Barcelona","Girona"]
+  },
+  {
     id:"stalingrad-1942",title:"Stalingrad 1942",subtitle:"Urban attritional warfare along the Volga with dense objectives and brutal logistics",theme:"urban",era:"modern",historical:true,year:1942,
     location:"Stalingrad, Soviet Union",sideNames:{blue:"Soviet 62nd Army",red:"German Sixth Army"},sideFlags:{blue:"ussr",red:"germany-ww2"},
     cityNames:["Mamayev Kurgan","Central Station","Grain Elevator","Red October","Barrikady","Tractor Factory","Spartakovka","Rynok","Orlovka","Gumrak","Tsaritsa","Volga Landing","Kuporosnoye","Beketovka","Krasny Oktyabr"]
@@ -96,6 +101,16 @@ function coastX(s:Scenario["coast"],y:number){
   return s.base+s.amp1*Math.sin(y*s.f1+s.p1)+s.amp2*Math.sin(y*s.f2+s.p2)+s.amp3*Math.cos(y*s.f3);
 }
 
+function pointInPolygon(x:number,y:number,polygon:Array<{x:number;y:number}>){
+  let inside=false;
+  for(let i=0,j=polygon.length-1;i<polygon.length;j=i++){
+    const a=polygon[i],b=polygon[j];
+    const crosses=((a.y>y)!==(b.y>y))&&(x<(b.x-a.x)*(y-a.y)/(b.y-a.y||1e-9)+a.x);
+    if(crosses)inside=!inside;
+  }
+  return inside;
+}
+
 export function polylinePath(points:{x:number;y:number}[]){
   return points.map((p,i)=>(i?"L ":"M ")+p.x+" "+p.y).join(" ");
 }
@@ -132,7 +147,10 @@ function pointSegmentDistance(x:number,y:number,a:{x:number;y:number},b:{x:numbe
 }
 
 export function isLand(scenario:Scenario,x:number,y:number){
-  return x>=coastX(scenario.coast,y)&&x<=WORLD_W&&y>=0&&y<=WORLD_H;
+  const worldWidth=scenario.worldWidth??WORLD_W,worldHeight=scenario.worldHeight??WORLD_H;
+  if(x<0||x>worldWidth||y<0||y>worldHeight)return false;
+  if(scenario.landPolygon?.length)return pointInPolygon(x,y,scenario.landPolygon);
+  return x>=coastX(scenario.coast,y);
 }
 
 export function terrainAt(scenario:Scenario,x:number,y:number):TerrainSample{
@@ -311,6 +329,10 @@ function unit(id:string,name:string,side:Side,kind:UnitKind,x:number,y:number,rn
 function repeated(kind:UnitKind,count:number){return Array.from({length:count},()=>kind)}
 
 function rosterForScenario(scenario:Scenario):UnitKind[]{
+  if(scenario.presetId==="spain-1937")return[
+    ...repeated("infantry",42),...repeated("mountaineer",8),...repeated("cavalry",6),...repeated("armor",3),
+    ...repeated("mortar",8),...repeated("artillery",9),...repeated("heavy_artillery",2),...repeated("recon",4),...repeated("engineer",5),...repeated("logistics",6)
+  ];
   if(scenario.era==="medieval")return[
     ...repeated("infantry",26),...repeated("cavalry",14),...repeated("artillery",4),...repeated("engineer",2),...repeated("logistics",2)
   ];
@@ -350,10 +372,11 @@ function rosterForScenario(scenario:Scenario):UnitKind[]{
   ];
 }
 function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>number,kind:UnitKind){
+  const worldWidth=scenario.worldWidth??WORLD_W,worldHeight=scenario.worldHeight??WORLD_H;
   const owned=cities.filter(c=>c.owner===side);
   const hostile=cities.filter(c=>c.owner!==side);
   for(let tries=0;tries<100;tries++){
-    const anchor=owned[Math.floor(rnd()*owned.length)]??{x:side==="blue"?WORLD_W*.2:WORLD_W*.8,y:WORLD_H*.5};
+    const anchor=owned[Math.floor(rnd()*owned.length)]??{x:side==="blue"?worldWidth*.2:worldWidth*.8,y:worldHeight*.5};
     const connected=scenario.roadRoutes.filter(route=>Math.hypot(route[0].x-anchor.x,route[0].y-anchor.y)<5||Math.hypot(route[route.length-1].x-anchor.x,route[route.length-1].y-anchor.y)<5);
     const route=connected[Math.floor(rnd()*connected.length)];
     let base:{x:number;y:number}=anchor;
@@ -368,8 +391,8 @@ function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>numbe
       }
     }
     const angle=rnd()*Math.PI*2,radius=rnd()*34;
-    const x=Math.max(330,Math.min(WORLD_W-90,base.x+Math.cos(angle)*radius));
-    const y=Math.max(90,Math.min(WORLD_H-90,base.y+Math.sin(angle)*radius));
+    const x=Math.max(330,Math.min(worldWidth-90,base.x+Math.cos(angle)*radius));
+    const y=Math.max(90,Math.min(worldHeight-90,base.y+Math.sin(angle)*radius));
     const terrain=terrainAt(scenario,x,y).terrain;
     const nearHostileCity=hostile.some(c=>Math.hypot(c.x-x,c.y-y)<180);
     if(!nearHostileCity&&terrain!=="water"&&(terrain!=="highmountain"||kind==="mountaineer"||kind==="special_forces"))return{x,y};
@@ -378,7 +401,7 @@ function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>numbe
     const da=Math.min(...hostile.map(c=>Math.hypot(c.x-a.x,c.y-a.y)),Infinity);
     const db=Math.min(...hostile.map(c=>Math.hypot(c.x-b.x,c.y-b.y)),Infinity);
     return db-da;
-  })[0]??{x:side==="blue"?WORLD_W*.2:WORLD_W*.8,y:WORLD_H*.5};
+  })[0]??{x:side==="blue"?worldWidth*.2:worldWidth*.8,y:worldHeight*.5};
   return{x:anchor.x,y:anchor.y};
 }
 
@@ -411,9 +434,119 @@ function coastForTheme(theme:ScenarioTheme,rnd:()=>number){
   };
 }
 
+
+type SpainCitySeed=[name:string,lon:number,lat:number,owner:Side];
+const SPAIN_CITY_SEEDS:SpainCitySeed[]=[
+  ["A Coruña",-8.41,43.36,"red"],["Vigo",-8.72,42.24,"red"],["Santiago",-8.54,42.88,"red"],["Lugo",-7.56,43.01,"red"],["Ourense",-7.86,42.34,"red"],["Pontevedra",-8.64,42.43,"red"],
+  ["Oviedo",-5.85,43.36,"blue"],["Gijón",-5.66,43.54,"blue"],["León",-5.57,42.60,"red"],["Santander",-3.81,43.46,"blue"],["Bilbao",-2.94,43.26,"blue"],["San Sebastián",-1.98,43.32,"blue"],
+  ["Pamplona",-1.64,42.82,"red"],["Logroño",-2.45,42.47,"red"],["Burgos",-3.70,42.34,"red"],["Palencia",-4.53,42.01,"red"],["Valladolid",-4.72,41.65,"red"],["Zamora",-5.74,41.50,"red"],
+  ["Salamanca",-5.66,40.97,"red"],["Segovia",-4.12,40.95,"red"],["Ávila",-4.70,40.66,"red"],["Soria",-2.47,41.76,"red"],["Madrid",-3.70,40.42,"blue"],["Toledo",-4.03,39.86,"red"],
+  ["Guadalajara",-3.17,40.63,"blue"],["Cuenca",-2.14,40.07,"blue"],["Ciudad Real",-3.93,38.99,"blue"],["Cáceres",-6.37,39.48,"red"],["Badajoz",-6.97,38.88,"red"],["Mérida",-6.34,38.92,"red"],
+  ["Huelva",-6.94,37.26,"red"],["Sevilla",-5.99,37.39,"red"],["Cádiz",-6.29,36.53,"red"],["Córdoba",-4.78,37.89,"red"],["Jaén",-3.79,37.78,"blue"],["Granada",-3.60,37.18,"red"],
+  ["Málaga",-4.42,36.72,"red"],["Almería",-2.46,36.84,"blue"],["Murcia",-1.13,37.99,"blue"],["Cartagena",-0.98,37.61,"blue"],["Albacete",-1.86,38.99,"blue"],["Alicante",-0.49,38.35,"blue"],
+  ["Valencia",-0.38,39.47,"blue"],["Castellón",-0.05,39.99,"blue"],["Teruel",-1.11,40.34,"red"],["Zaragoza",-0.89,41.65,"red"],["Huesca",-0.41,42.14,"red"],["Lleida",0.62,41.62,"blue"],
+  ["Tarragona",1.25,41.12,"blue"],["Barcelona",2.17,41.39,"blue"],["Girona",2.82,41.98,"blue"]
+];
+
+function spainPoint(lon:number,lat:number,worldWidth:number,worldHeight:number){
+  const minLon=-9.55,maxLon=3.45,minLat=35.65,maxLat=43.85;
+  const marginX=520,marginY=360;
+  return{
+    x:marginX+(lon-minLon)/(maxLon-minLon)*(worldWidth-marginX*2),
+    y:marginY+(maxLat-lat)/(maxLat-minLat)*(worldHeight-marginY*2)
+  };
+}
+
+function makeSpainLandPolygon(worldWidth:number,worldHeight:number){
+  const outline:Array<[number,number]>=[
+    [-8.95,43.34],[-7.65,43.66],[-5.80,43.58],[-3.75,43.48],[-1.82,43.38],[-1.35,43.02],[-0.25,42.88],[1.05,42.80],[2.55,42.50],[3.20,42.02],
+    [3.00,41.42],[2.20,40.90],[1.15,40.48],[0.08,39.98],[-0.42,39.28],[-0.72,38.55],[-1.25,37.82],[-2.45,36.78],[-3.85,36.18],[-5.20,36.00],
+    [-6.28,36.30],[-6.90,37.05],[-7.25,37.45],[-7.42,38.25],[-7.02,39.05],[-6.98,40.02],[-6.88,41.02],[-7.10,41.82],[-8.10,42.02],[-8.92,42.32]
+  ];
+  return outline.map(([lon,lat])=>spainPoint(lon,lat,worldWidth,worldHeight));
+}
+
+function makeSpainCities(worldWidth:number,worldHeight:number):CityState[]{
+  return SPAIN_CITY_SEEDS.map(([name,lon,lat,owner])=>({...spainPoint(lon,lat,worldWidth,worldHeight),name,owner,capture:0}));
+}
+
+function makeSpainRoadNetwork(cities:CityState[],rnd:()=>number){
+  const edges=new Set<string>(),routes:Array<Array<{x:number;y:number}>>=[];
+  const connect=(a:CityState,b:CityState)=>{
+    if(a===b)return;
+    const ia=cities.indexOf(a),ib=cities.indexOf(b),key=ia<ib?ia+"-"+ib:ib+"-"+ia;
+    if(edges.has(key))return;
+    edges.add(key);routes.push(routeBetween(a,b,rnd));
+  };
+  for(const city of cities){
+    const nearest=cities.filter(c=>c!==city).sort((a,b)=>Math.hypot(a.x-city.x,a.y-city.y)-Math.hypot(b.x-city.x,b.y-city.y));
+    for(const other of nearest.slice(0,4))connect(city,other);
+  }
+  const byName=new Map(cities.map(city=>[city.name,city]));
+  const trunks=[
+    ["A Coruña","León"],["León","Madrid"],["Madrid","Valencia"],["Madrid","Zaragoza"],["Zaragoza","Barcelona"],["Bilbao","Burgos"],["Burgos","Madrid"],
+    ["Salamanca","Madrid"],["Madrid","Córdoba"],["Córdoba","Sevilla"],["Sevilla","Cádiz"],["Córdoba","Granada"],["Granada","Almería"],["Albacete","Alicante"],["Valencia","Barcelona"]
+  ];
+  for(const [a,b] of trunks){const ca=byName.get(a),cb=byName.get(b);if(ca&&cb)connect(ca,cb)}
+  return{nodes:cities.map((city,i)=>({id:"road-"+i,x:city.x,y:city.y,cityName:city.name})),routes};
+}
+
+function makeSpainFeatures(worldWidth:number,worldHeight:number,rnd:()=>number){
+  const out:TerrainFeature[]=[];let id=0;
+  const add=(terrain:TerrainFeature["terrain"],lon:number,lat:number,rx:number,ry:number,rotation:number)=>{
+    const p=spainPoint(lon,lat,worldWidth,worldHeight),seed=Math.floor(rnd()*100000);
+    out.push({id:"spain-t"+id++,terrain,cx:p.x,cy:p.y,rx,ry,rotation,seed,path:blobPath(p.x,p.y,rx,ry,rotation,seed)});
+  };
+  [
+    [-1.40,42.85,900,500,8],[0.10,42.72,1050,520,4],[1.55,42.55,950,480,-5],[2.45,42.38,720,430,-10]
+  ].forEach(v=>add("highmountain",v[0],v[1],v[2],v[3],v[4]));
+  [
+    [-7.15,43.05,900,480,-8],[-5.35,43.12,1100,520,-3],[-3.45,43.08,1050,500,4],[-1.85,42.95,900,460,9],
+    [-5.40,40.55,1050,420,-8],[-3.75,40.65,1050,420,3],[-2.10,41.05,980,430,22],[-0.85,40.65,900,420,28],
+    [-5.10,38.20,1150,420,-4],[-3.65,37.25,950,420,-10],[-2.30,37.05,800,460,-16]
+  ].forEach(v=>add("mountain",v[0],v[1],v[2],v[3],v[4]));
+  [
+    [-8.10,42.55,900,650,-12],[-6.20,42.45,950,650,5],[-4.45,41.80,1000,700,8],[-2.55,39.55,1000,720,12],[-0.50,39.55,900,650,18],
+    [-6.00,39.40,900,650,-4],[-4.30,38.70,1050,650,5],[-1.80,38.25,850,600,-8]
+  ].forEach(v=>add("hills",v[0],v[1],v[2],v[3],v[4]));
+  [
+    [-8.15,43.05,780,520,-10],[-6.25,43.10,900,500,2],[-3.95,43.05,880,500,5],[-1.80,42.70,650,500,8],[-6.00,40.20,650,520,-6],[-0.15,41.80,650,500,15]
+  ].forEach(v=>add("forest",v[0],v[1],v[2],v[3],v[4]));
+  return out;
+}
+
+function makeSpainRivers(worldWidth:number,worldHeight:number){
+  const river=(points:Array<[number,number]>)=>points.map(([lon,lat])=>spainPoint(lon,lat,worldWidth,worldHeight));
+  return[
+    river([[-3.60,42.75],[-2.55,42.45],[-1.35,42.10],[-0.15,41.72],[0.85,41.35],[1.10,40.80]]),
+    river([[-2.60,42.05],[-3.90,41.80],[-5.10,41.65],[-6.35,41.30],[-6.85,41.05]]),
+    river([[-1.55,40.45],[-2.90,40.15],[-4.20,39.95],[-5.55,39.70],[-6.85,39.25]]),
+    river([[-3.10,39.10],[-4.25,38.95],[-5.35,38.60],[-6.55,38.10],[-7.00,37.85]]),
+    river([[-2.85,37.95],[-4.05,37.75],[-5.15,37.55],[-6.15,37.25]])
+  ];
+}
+
+function generateSpainScenario(seed:number,preset:ScenarioPreset,rnd:()=>number):Scenario{
+  const worldWidth=WORLD_W*(preset.mapScale??2),worldHeight=WORLD_H*(preset.mapScale??2);
+  const cities=makeSpainCities(worldWidth,worldHeight);
+  const roadNetwork=makeSpainRoadNetwork(cities,rnd);
+  const landPolygon=makeSpainLandPolygon(worldWidth,worldHeight);
+  const shell:Scenario={
+    seed,presetId:preset.id,title:preset.title,theme:preset.theme,era:preset.era,historical:preset.historical,year:preset.year,
+    location:preset.location,sideNames:preset.sideNames,sideFlags:preset.sideFlags,worldWidth,worldHeight,landPolygon,
+    coast:{base:-999,amp1:0,amp2:0,amp3:0,f1:0,f2:0,f3:0,p1:0,p2:0},
+    cities,terrainFeatures:makeSpainFeatures(worldWidth,worldHeight,rnd),roadNodes:roadNetwork.nodes,roadRoutes:roadNetwork.routes,
+    riverRoutes:makeSpainRivers(worldWidth,worldHeight),formations:[],landPath:""
+  };
+  shell.landPath="M "+landPolygon.map(p=>p.x.toFixed(1)+" "+p.y.toFixed(1)).join(" L ")+" Z";
+  shell.formations=[...makeFormations("blue",shell,rnd),...makeFormations("red",shell,rnd)];
+  return shell;
+}
+
 export function generateScenario(seed:number,presetId="frontier"):Scenario{
   const preset=SCENARIO_PRESETS.find(p=>p.id===presetId)??SCENARIO_PRESETS[0];
   const rnd=mulberry32(seed||1);
+  if(preset.id==="spain-1937")return generateSpainScenario(seed,preset,rnd);
   const coast=coastForTheme(preset.theme,rnd);
   const cities=makeCities(rnd,preset);
   const terrainFeatures=makeFeatures(rnd,preset.theme);
@@ -422,7 +555,7 @@ export function generateScenario(seed:number,presetId="frontier"):Scenario{
   const riverRoutes=makeRivers(rnd,preset.theme);
   const shell:Scenario={
     seed,presetId:preset.id,title:preset.title,theme:preset.theme,era:preset.era,historical:preset.historical,year:preset.year,
-    location:preset.location,sideNames:preset.sideNames,sideFlags:preset.sideFlags,coast,cities,terrainFeatures,roadNodes:roadNetwork.nodes,roadRoutes,riverRoutes,formations:[],landPath:""
+    location:preset.location,sideNames:preset.sideNames,sideFlags:preset.sideFlags,worldWidth:WORLD_W,worldHeight:WORLD_H,coast,cities,terrainFeatures,roadNodes:roadNetwork.nodes,roadRoutes,riverRoutes,formations:[],landPath:""
   };
 
   const pts:Array<{x:number;y:number}>=[];

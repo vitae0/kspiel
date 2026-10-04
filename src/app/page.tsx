@@ -624,7 +624,7 @@ function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],side:Sid
         const enemy=current??nearestHostile.v;
         const dx=anchor.x-enemy.x,dy=anchor.y-enemy.y,len=Math.hypot(dx,dy)||1;
         const standoff=u.kind==="mortar"?340:245;
-        const tx=clamp(anchor.x+dx/len*standoff,20,WORLD_W-20),ty=clamp(anchor.y+dy/len*standoff,20,WORLD_H-20);
+        const tx=clamp(anchor.x+dx/len*standoff,20,scenario.worldWidth-20),ty=clamp(anchor.y+dy/len*standoff,20,scenario.worldHeight-20);
         if(safeDestination(u,{x:tx,y:ty})){
           if(u.order?.type==="move"&&u.order.targetX!==undefined&&u.order.targetY!==undefined&&Math.hypot(u.order.targetX-tx,u.order.targetY-ty)<130)return u;
           return{...u,order:{type:"move",targetX:tx,targetY:ty}};
@@ -641,7 +641,7 @@ function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],side:Sid
       if(!anchor)return u.order?.type==="resupply"?u:{...u,order:{type:"resupply"}};
       const enemy=hostile.map(v=>({v,d:Math.hypot(v.x-anchor.x,v.y-anchor.y)})).sort((a,b)=>a.d-b.d)[0]?.v??nearestHostile.v;
       const dx=anchor.x-enemy.x,dy=anchor.y-enemy.y,len=Math.hypot(dx,dy)||1;
-      const tx=clamp(anchor.x+dx/len*390,20,WORLD_W-20),ty=clamp(anchor.y+dy/len*390,20,WORLD_H-20);
+      const tx=clamp(anchor.x+dx/len*390,20,scenario.worldWidth-20),ty=clamp(anchor.y+dy/len*390,20,scenario.worldHeight-20);
       if(Math.hypot(tx-u.x,ty-u.y)>145&&terrainAt(scenario,tx,ty).terrain!=="water"){
         if(u.order?.type==="move"&&u.order.targetX!==undefined&&u.order.targetY!==undefined&&Math.hypot(u.order.targetX-tx,u.order.targetY-ty)<170)return u;
         return{...u,order:{type:"move",targetX:tx,targetY:ty}};
@@ -813,13 +813,13 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
           :terrain.move;
         const supplyMove=n.order.type==="retreat"?Math.max(.72,movementSupplyFactor(n)):movementSupplyFactor(n);
         const travel=Math.min(dist,u.speed*terrainMove*roadBonus*posture*supplyMove*hours*MOVEMENT_SCALE);
-        let nx=clamp(u.x+dx/dist*travel,1,WORLD_W-1),ny=clamp(u.y+dy/dist*travel,1,WORLD_H-1);
+        let nx=clamp(u.x+dx/dist*travel,1,scenario.worldWidth-1),ny=clamp(u.y+dy/dist*travel,1,scenario.worldHeight-1);
 
         if(DIRECT_COMBAT_KINDS.has(u.kind)&&n.order.type!=="retreat"){
           const contact=units.filter(v=>v.side!==u.side).map(v=>({v,...segmentContact(u.x,u.y,nx,ny,v.x,v.y)})).filter(c=>c.distance<44).sort((a,b)=>a.t-b.t)[0];
           if(contact){
             const stopDistance=Math.max(0,travel*contact.t-36);
-            nx=clamp(u.x+dx/dist*stopDistance,1,WORLD_W-1);ny=clamp(u.y+dy/dist*stopDistance,1,WORLD_H-1);
+            nx=clamp(u.x+dx/dist*stopDistance,1,scenario.worldWidth-1);ny=clamp(u.y+dy/dist*stopDistance,1,scenario.worldHeight-1);
           }
         }
 
@@ -897,7 +897,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       const profile=mortarTerrainProfile(targetTerrain);
       const dispersion=mortarDispersion(scenario,tx,ty,range/maxRange);
       const angle=Math.random()*Math.PI*2,radius=Math.sqrt(Math.random())*dispersion;
-      const impactX=clamp(tx+Math.cos(angle)*radius,1,WORLD_W-1),impactY=clamp(ty+Math.sin(angle)*radius,1,WORLD_H-1);
+      const impactX=clamp(tx+Math.cos(angle)*radius,1,scenario.worldWidth-1),impactY=clamp(ty+Math.sin(angle)*radius,1,scenario.worldHeight-1);
       const rangeFactor=clamp(1-range/maxRange*.42,.58,1);
       for(const target of result){
         if(target.id===gun.id)continue;
@@ -1325,7 +1325,7 @@ export default function Home(){
       setCities(generated.cities);citiesRef.current=generated.cities;
     }
     const first=generated.formations.find(u=>u.side===activeSide);setSelected(first?[first.id]:[]);
-    setRunning(true);setSpeed(1);setHour(6);setDay(1);setPan({x:-260,y:-190});setZoom(isMobile ? .34 : .24);setMobilePanel("none");setMobileTool("pan");
+    const mapScale=generated.worldWidth/WORLD_W;setRunning(true);setSpeed(1);setHour(6);setDay(1);setPan({x:-260,y:-190});setZoom((isMobile ? .34 : .24)/mapScale);setMobilePanel("none");setMobileTool("pan");
   }
 
   function activateMultiplayer(session:MultiplayerSession){
@@ -1381,9 +1381,9 @@ export default function Home(){
           </section>
           <aside className="setup-side">
             <div className="section-title">{selectedGameMode==="openworld"?"WORLD RULESET":"SELECTED THEATER"}</div><h2>{selectedGameMode==="openworld"?"Open World Dominion":selectedPreset.title}</h2><p>{selectedGameMode==="openworld"?"Procedural continental theater · three factions":selectedPreset.location+(selectedPreset.year?" · "+selectedPreset.year:"")}</p>
-            <div className="setup-facts"><span><small>THEME</small><b>{selectedPreset.theme.toUpperCase()}</b></span><span><small>ERA</small><b>{selectedPreset.era.replace("_"," ").toUpperCase()}</b></span><span><small>MAP</small><b>{WORLD_W} × {WORLD_H}</b></span><span><small>FOG</small><b>ENABLED</b></span></div>
+            <div className="setup-facts"><span><small>THEME</small><b>{selectedPreset.theme.toUpperCase()}</b></span><span><small>ERA</small><b>{selectedPreset.era.replace("_"," ").toUpperCase()}</b></span><span><small>MAP</small><b>{Math.round(WORLD_W*(selectedPreset.mapScale??1))} × {Math.round(WORLD_H*(selectedPreset.mapScale??1))}</b></span><span><small>FOG</small><b>ENABLED</b></span></div>
             <div className="section-title">PLAY AS</div><div className="side-choice">
-              {(["blue","red"] as Side[]).map(side=><button key={side} disabled={Boolean(multiplayer)} className={playerSide===side?"active":""} onClick={()=>setPlayerSide(side)}><Flag styleName={selectedPreset.sideFlags[side]??"generic-blue"}/><span><b>{selectedPreset.sideNames[side]}</b><small>{side==="blue"?"LEFT / BLUE DEPLOYMENT":"RIGHT / RED DEPLOYMENT"}</small></span></button>)}
+              {(["blue","red"] as Side[]).map(side=><button key={side} disabled={Boolean(multiplayer)} className={playerSide===side?"active":""} onClick={()=>setPlayerSide(side)}><Flag styleName={selectedPreset.sideFlags[side]??"generic-blue"}/><span><b>{selectedPreset.sideNames[side]}</b><small>{selectedPreset.id==="spain-1937"?(side==="blue"?"REPUBLICAN COMMAND":"NATIONALIST COMMAND"):(side==="blue"?"LEFT / BLUE DEPLOYMENT":"RIGHT / RED DEPLOYMENT")}</small></span></button>)}
             </div>
             <div className="section-title">GAME MODE</div><div className="mode-list">
               <button disabled={Boolean(multiplayer)} className={!multiplayer?"active":""}><b>SINGLE PLAYER</b><small>You command {selectedPreset.sideNames[playerSide]}</small></button>
@@ -1400,6 +1400,7 @@ export default function Home(){
     </main>;
   }
   const activeScenario:Scenario=scenario;
+  const mapW=activeScenario.worldWidth,mapH=activeScenario.worldHeight;
   const currentSupplyNetwork=computeSupplyNetwork(activeScenario,units,cities);
 
   function mapPoint(clientX:number,clientY:number){
@@ -1413,14 +1414,14 @@ export default function Home(){
 
   function boundedPan(next:{x:number;y:number},z=zoom){
     const rect=viewport.current?.getBoundingClientRect();if(!rect)return next;
-    const worldW=WORLD_W*z,worldH=WORLD_H*z;
+    const worldW=mapW*z,worldH=mapH*z;
     return{x:worldW<=rect.width?(rect.width-worldW)/2:clamp(next.x,rect.width-worldW,0),y:worldH<=rect.height?(rect.height-worldH)/2:clamp(next.y,rect.height-worldH,0)};
   }
 
   function nearestLandPoint(x:number,y:number){
-    const cx=clamp(x,2,WORLD_W-2),cy=clamp(y,2,WORLD_H-2);if(terrainAt(activeScenario,cx,cy).terrain!=="water")return{x:cx,y:cy};
+    const cx=clamp(x,2,mapW-2),cy=clamp(y,2,mapH-2);if(terrainAt(activeScenario,cx,cy).terrain!=="water")return{x:cx,y:cy};
     for(let radius=18;radius<=270;radius+=18)for(let i=0;i<16;i++){
-      const a=i/16*Math.PI*2,nx=clamp(cx+Math.cos(a)*radius,2,WORLD_W-2),ny=clamp(cy+Math.sin(a)*radius,2,WORLD_H-2);
+      const a=i/16*Math.PI*2,nx=clamp(cx+Math.cos(a)*radius,2,mapW-2),ny=clamp(cy+Math.sin(a)*radius,2,mapH-2);
       if(terrainAt(activeScenario,nx,ny).terrain!=="water")return{x:nx,y:ny};
     }
     return{x:cx,y:cy};
@@ -1528,7 +1529,7 @@ export default function Home(){
     if(!selected.length&&!pendingStrategicBuild)return;
     if((pendingOrder==="assault"||pendingOrder==="relieve")&&!pendingStrategicBuild)return;
     const point=mapPoint(clientX,clientY);if(!point)return;
-    const tx=clamp(point.x,1,WORLD_W-1),ty=clamp(point.y,1,WORLD_H-1);if(terrainAt(activeScenario,tx,ty).terrain==="water")return;
+    const tx=clamp(point.x,1,mapW-1),ty=clamp(point.y,1,mapH-1);if(terrainAt(activeScenario,tx,ty).terrain==="water")return;
     if(pendingStrategicBuild&&openWorldRef.current){
       if(pendingStrategicBuild==="city"){
         if(citiesRef.current.some(c=>Math.hypot(c.x-tx,c.y-ty)<360))return;
@@ -1746,10 +1747,10 @@ export default function Home(){
     </aside>
 
     <div ref={viewport} className={pendingOrder||pendingPlan||pendingBuild||pendingStrategicBuild?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenuCapture={suppressNativeContextMenu} onContextMenu={issueTarget}>
-      <div className="world" style={{width:WORLD_W,height:WORLD_H,transform:"translate("+pan.x+"px,"+pan.y+"px) scale("+zoom+")"}}>
-        <svg className="terrain" width={WORLD_W} height={WORLD_H} viewBox={"0 0 "+WORLD_W+" "+WORLD_H}>
-          <defs><linearGradient id="sea" x1="0" x2="1"><stop offset="0" stopColor="#1c313c"/><stop offset="1" stopColor="#29424b"/></linearGradient><linearGradient id="intelShade" x1="0" x2="1"><stop offset="0" stopColor="#71846a" stopOpacity=".08"/><stop offset=".55" stopColor="#151b18" stopOpacity=".22"/><stop offset="1" stopColor="#050806" stopOpacity=".68"/></linearGradient><clipPath id="landClip"><path d={activeScenario.landPath}/></clipPath><mask id="fogMask" maskUnits="userSpaceOnUse"><rect width={WORLD_W} height={WORLD_H} fill="white"/>{blue.map(u=><circle key={"fog-u-"+u.id} cx={u.x} cy={u.y} r={visionRange(u)} fill="black"/>)}{cities.filter(c=>localSides.has(c.owner)).map(c=><circle key={"fog-c-"+c.name} cx={c.x} cy={c.y} r="270" fill="black"/>)}{emplacements.filter(e=>localSides.has(e.side)&&e.kind==="observatory").map(e=><circle key={"fog-e-"+e.id} cx={e.x} cy={e.y} r={e.range} fill="black"/>)}</mask></defs>
-          <rect width={WORLD_W} height={WORLD_H} fill="url(#sea)"/><path d={activeScenario.landPath} className="land-base"/>
+      <div className="world" style={{width:mapW,height:mapH,transform:"translate("+pan.x+"px,"+pan.y+"px) scale("+zoom+")"}}>
+        <svg className="terrain" width={mapW} height={mapH} viewBox={"0 0 "+mapW+" "+mapH}>
+          <defs><linearGradient id="sea" x1="0" x2="1"><stop offset="0" stopColor="#1c313c"/><stop offset="1" stopColor="#29424b"/></linearGradient><linearGradient id="intelShade" x1="0" x2="1"><stop offset="0" stopColor="#71846a" stopOpacity=".08"/><stop offset=".55" stopColor="#151b18" stopOpacity=".22"/><stop offset="1" stopColor="#050806" stopOpacity=".68"/></linearGradient><clipPath id="landClip"><path d={activeScenario.landPath}/></clipPath><mask id="fogMask" maskUnits="userSpaceOnUse"><rect width={mapW} height={mapH} fill="white"/>{blue.map(u=><circle key={"fog-u-"+u.id} cx={u.x} cy={u.y} r={visionRange(u)} fill="black"/>)}{cities.filter(c=>localSides.has(c.owner)).map(c=><circle key={"fog-c-"+c.name} cx={c.x} cy={c.y} r="270" fill="black"/>)}{emplacements.filter(e=>localSides.has(e.side)&&e.kind==="observatory").map(e=><circle key={"fog-e-"+e.id} cx={e.x} cy={e.y} r={e.range} fill="black"/>)}</mask></defs>
+          <rect width={mapW} height={mapH} fill="url(#sea)"/><path d={activeScenario.landPath} className="land-base"/>
           {activeScenario.terrainFeatures.map(f=><path key={f.id} d={f.path} className={"terrain-region "+f.terrain}/>)}
           <g className="territory-layer" clipPath="url(#landClip)">
             {openWorld
@@ -1768,7 +1769,7 @@ export default function Home(){
           {cities.map(s=><g key={s.name} className={"site-label "+s.owner+(overlay==="supply"?(localSides.has(s.owner)?" supply-city friendly-supply-city":" supply-city hostile-supply-city"):"")}><circle cx={s.x} cy={s.y} r="6" className="site-core"/><circle cx={s.x} cy={s.y} r="25" className="site-ring"/>{s.capture>0&&<circle cx={s.x} cy={s.y} r="30" className="capture-ring" pathLength="100" strokeDasharray={s.capture+" "+(100-s.capture)} transform={"rotate(-90 "+s.x+" "+s.y+")"}/>}<text x={s.x+11} y={s.y-11}>{s.name.toUpperCase()} · {s.owner==="blue"?"B":s.owner==="red"?"R":"G"}</text></g>)}
           {overlay==="supply"&&<g className="city-supply-ranges">{cities.map(s=><circle key={"range-"+s.name} cx={s.x} cy={s.y} r={currentLogisticsGraph.cityRange} className={"city-supply-range "+s.owner}/>)}</g>}
           {overlay==="supply"&&<g className="supply-overlay">
-            <rect width={WORLD_W} height={WORLD_H} className="supply-map-wash"/>
+            <rect width={mapW} height={mapH} className="supply-map-wash"/>
             {currentSupplyNetwork.roads.map(road=>{
               const friendlyA=localSides.has(road.a.owner),friendlyB=localSides.has(road.b.owner);
               const hostile=!friendlyA&&!friendlyB;
@@ -1799,11 +1800,11 @@ export default function Home(){
               {selected.includes(u.id)&&<text x={u.x+52} y={u.y+5}>{access.level<=0?"NO SUPPLY":access.label}</text>}
             </g>)}
           </g>}
-          {overlay==="intel"&&<path d={activeScenario.landPath} fill="url(#intelShade)" className="intel-overlay"/>}<rect width={WORLD_W} height={WORLD_H} className="fog-dark" mask="url(#fogMask)"/><rect x="1" y="1" width={WORLD_W-2} height={WORLD_H-2} className="world-boundary"/>
+          {overlay==="intel"&&<path d={activeScenario.landPath} fill="url(#intelShade)" className="intel-overlay"/>}<rect width={mapW} height={mapH} className="fog-dark" mask="url(#fogMask)"/><rect x="1" y="1" width={mapW-2} height={mapH-2} className="world-boundary"/>
         </svg>
 
-        {selectedUnits.some(u=>ARTILLERY_KINDS.has(u.kind))&&<svg className="artillery-ranges" width={WORLD_W} height={WORLD_H}>{selectedUnits.filter(u=>ARTILLERY_KINDS.has(u.kind)).map(u=>{const r=u.kind==="mortar"?mortarMaxRange(activeScenario,u):u.kind==="heavy_artillery"?820:540;return <g key={"range-"+u.id}><circle cx={u.x} cy={u.y} r={r}/><text x={u.x+10} y={u.y-r+22}>{Math.round(r)} RANGE</text></g>})}</svg>}
-        {pendingOrder==="fire"&&aimPoint&&selectedUnits.some(u=>u.kind==="mortar")&&<svg className="mortar-aim" width={WORLD_W} height={WORLD_H}><circle cx={aimPoint.x} cy={aimPoint.y} r={mortarDispersion(activeScenario,aimPoint.x,aimPoint.y,Math.min(1,Math.min(...selectedUnits.filter(u=>u.kind==="mortar").map(u=>Math.hypot(aimPoint.x-u.x,aimPoint.y-u.y)/mortarMaxRange(activeScenario,u)))))} /><circle className="mortar-aim-core" cx={aimPoint.x} cy={aimPoint.y} r="7"/></svg>}
+        {selectedUnits.some(u=>ARTILLERY_KINDS.has(u.kind))&&<svg className="artillery-ranges" width={mapW} height={mapH}>{selectedUnits.filter(u=>ARTILLERY_KINDS.has(u.kind)).map(u=>{const r=u.kind==="mortar"?mortarMaxRange(activeScenario,u):u.kind==="heavy_artillery"?820:540;return <g key={"range-"+u.id}><circle cx={u.x} cy={u.y} r={r}/><text x={u.x+10} y={u.y-r+22}>{Math.round(r)} RANGE</text></g>})}</svg>}
+        {pendingOrder==="fire"&&aimPoint&&selectedUnits.some(u=>u.kind==="mortar")&&<svg className="mortar-aim" width={mapW} height={mapH}><circle cx={aimPoint.x} cy={aimPoint.y} r={mortarDispersion(activeScenario,aimPoint.x,aimPoint.y,Math.min(1,Math.min(...selectedUnits.filter(u=>u.kind==="mortar").map(u=>Math.hypot(aimPoint.x-u.x,aimPoint.y-u.y)/mortarMaxRange(activeScenario,u)))))} /><circle className="mortar-aim-core" cx={aimPoint.x} cy={aimPoint.y} r="7"/></svg>}
         {units.map(u=>{
           const visible=localSides.has(u.side)||blue.some(b=>Math.hypot(b.x-u.x,b.y-u.y)<visionRange(b))||cities.some(c=>localSides.has(c.owner)&&Math.hypot(c.x-u.x,c.y-u.y)<270)||emplacements.some(e=>localSides.has(e.side)&&e.kind==="observatory"&&Math.hypot(e.x-u.x,e.y-u.y)<e.range);
           if(!visible)return null;
@@ -1814,14 +1815,14 @@ export default function Home(){
           return <div key={e.id} className={"emplacement "+e.kind+" "+e.side} style={{left:e.x-18,top:e.y-18}} title={e.kind==="observatory"?"Observatory tower":e.kind==="fixed_artillery"?"Stationary artillery battery":e.kind==="field_fortification"?"Field fortification":"Supply depot"}><b>{e.kind==="observatory"?"OBS":e.kind==="fixed_artillery"?"BAT":e.kind==="field_fortification"?"FORT":"DEP"}</b><small>{Math.round(e.strength)}</small></div>
         })}
         {constructionProjects.filter(project=>localSides.has(project.side)).map(project=><div key={project.id} className={"construction-site "+project.kind} style={{left:project.x-15,top:project.y-15}}><b>{project.kind==="observatory"?"OBS":project.kind==="fixed_artillery"?"BAT":project.kind==="field_fortification"?"FORT":"DEP"}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span></div>)}
-        {primary&&primaryTargetX!==undefined&&primaryTargetY!==undefined&&<svg className="order-line" width={WORLD_W} height={WORLD_H}><polyline points={[{x:primary.x,y:primary.y},{x:primaryTargetX,y:primaryTargetY},...(primary.order?.waypoints??[])].map(point=>point.x+","+point.y).join(" ")} /><circle cx={primaryTargetX} cy={primaryTargetY} r="10"/>{(primary.order?.waypoints??[]).map((point,i)=><circle key={i} cx={point.x} cy={point.y} r="8"/>)}</svg>}
-        {attackPlans.length>0&&<svg className="attack-plans" width={WORLD_W} height={WORLD_H}>{attackPlans.map(plan=>{const o=planOrigin(plan);return <g key={plan.id} className={plan.status}><line x1={o.x} y1={o.y} x2={plan.targetX} y2={plan.targetY}/><circle cx={plan.targetX} cy={plan.targetY} r="18"/><text x={plan.targetX+24} y={plan.targetY-18}>{plan.name}</text></g>})}</svg>}
+        {primary&&primaryTargetX!==undefined&&primaryTargetY!==undefined&&<svg className="order-line" width={mapW} height={mapH}><polyline points={[{x:primary.x,y:primary.y},{x:primaryTargetX,y:primaryTargetY},...(primary.order?.waypoints??[])].map(point=>point.x+","+point.y).join(" ")} /><circle cx={primaryTargetX} cy={primaryTargetY} r="10"/>{(primary.order?.waypoints??[]).map((point,i)=><circle key={i} cx={point.x} cy={point.y} r="8"/>)}</svg>}
+        {attackPlans.length>0&&<svg className="attack-plans" width={mapW} height={mapH}>{attackPlans.map(plan=>{const o=planOrigin(plan);return <g key={plan.id} className={plan.status}><line x1={o.x} y1={o.y} x2={plan.targetX} y2={plan.targetY}/><circle cx={plan.targetX} cy={plan.targetY} r="18"/><text x={plan.targetX+24} y={plan.targetY-18}>{plan.name}</text></g>})}</svg>}
       </div>
 
       {overlay==="supply"&&<div className="supply-legend"><b>SUPPLY CONTROL</b><span><i className="connected"/>CONNECTED ROAD</span><span><i className="local"/>LOCAL FEED</span><span><i className="cut"/>INTERDICTED / CUT</span><span><i className="unit"/>UNIT SUPPLIED</span></div>}
       {selectionBox&&<div className="selection-box" style={{left:Math.min(selectionBox.x1,selectionBox.x2),top:Math.min(selectionBox.y1,selectionBox.y2),width:Math.abs(selectionBox.x2-selectionBox.x1),height:Math.abs(selectionBox.y2-selectionBox.y1)}}/>}
       {frontPreview&&<svg className="front-preview"><line x1={frontPreview.x1} y1={frontPreview.y1} x2={frontPreview.x2} y2={frontPreview.y2}/></svg>}
-      {openWorld&&<div className="minimap"><svg viewBox={"0 0 "+WORLD_W+" "+WORLD_H}>{openWorld.resourceNodes.filter(cell=>cell.owner).map(cell=><circle key={"mt-"+cell.id} cx={cell.x} cy={cell.y} r="390" className={"territory-mini "+cell.owner}/>) }{units.map(u=><circle key={u.id} cx={u.x} cy={u.y} r="32" className={u.side}/>)}</svg></div>}
+      {(openWorld||mapW>WORLD_W)&&<div className="minimap"><svg viewBox={"0 0 "+mapW+" "+mapH}>{openWorld?.resourceNodes.filter(cell=>cell.owner).map(cell=><circle key={"mt-"+cell.id} cx={cell.x} cy={cell.y} r="390" className={"territory-mini "+cell.owner}/>) }{cities.map(city=><circle key={"mc-"+city.name} cx={city.x} cy={city.y} r="52" className={city.owner}/>) }{units.map(u=><circle key={u.id} cx={u.x} cy={u.y} r="32" className={u.side}/>)}</svg></div>}
       <div className="map-hud"><div><span className="dot friendly"/>FRIENDLY {blue.length}</div><div><span className="dot hostile"/>CONTACTS {enemy.length}</div><div>CITIES {blueCities}/{cities.length}</div><div>{hovered?TERRAIN_RULES[hovered.terrain].label.toUpperCase()+" · "+(hovered.road?"SUPPLY ROAD":"OFF ROAD"):activeScenario.location.toUpperCase()}</div><div>ZOOM {Math.round(zoom*100)}%</div></div>
       {pendingStrategicBuild&&<div className="target-banner">BUILD {pendingStrategicBuild.replaceAll("_"," ").toUpperCase()} · {(pendingStrategicBuild==="road"||pendingStrategicBuild==="wall")?(strategicBuildAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP":"RMB")+" LOCATION"} <button onClick={()=>{setPendingStrategicBuild(null);setStrategicBuildAnchor(null)}}>CANCEL</button></div>}
       {pendingBuild&&<div className="target-banner">{pendingBuild==="observatory"?"OBSERVATORY TOWER":pendingBuild==="fixed_artillery"?"FIXED ARTILLERY":pendingBuild==="field_fortification"?"FIELD FORTIFICATION":"SUPPLY DEPOT"} · {isMobile?"TAP CONSTRUCTION SITE":"RMB CONSTRUCTION SITE"} <button onClick={()=>setPendingBuild(null)}>CANCEL</button></div>}
