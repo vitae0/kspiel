@@ -990,7 +990,8 @@ export default function Home(){
           const next=prev.map(unit=>{
             const patch=byId.get(unit.id);
             if(!patch||unit.side!==multiplayer.opponentSide)return unit;
-            return{...unit,...("order" in patch?{order:patch.order}:{}),...("groupId" in patch?{groupId:patch.groupId}:{}),...("formationShape" in patch?{formationShape:patch.formationShape}:{})};
+            const safeSupply=typeof patch.supply==="number"?Math.min(unit.supply,Math.max(0,Math.min(100,patch.supply))):unit.supply;
+            return{...unit,supply:safeSupply,...("order" in patch?{order:patch.order}:{}),...("groupId" in patch?{groupId:patch.groupId}:{}),...("formationShape" in patch?{formationShape:patch.formationShape}:{})};
           });
           unitsRef.current=next;return next;
         });
@@ -1087,8 +1088,8 @@ export default function Home(){
           if(unit.side!==session.side)continue;
           const before=previous.get(unit.id);
           if(!before)continue;
-          if(JSON.stringify([before.order,before.groupId,before.formationShape])!==JSON.stringify([unit.order,unit.groupId,unit.formationShape])){
-            patches.push({id:unit.id,order:unit.order,groupId:unit.groupId,formationShape:unit.formationShape});
+          if(JSON.stringify([before.order,before.groupId,before.formationShape,before.supply])!==JSON.stringify([unit.order,unit.groupId,unit.formationShape,unit.supply])){
+            patches.push({id:unit.id,order:unit.order,groupId:unit.groupId,formationShape:unit.formationShape,supply:unit.supply});
           }
         }
         if(patches.length)sendNetwork("unit-patch",{patches});
