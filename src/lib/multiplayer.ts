@@ -28,6 +28,7 @@ export type UnitCommandPatch={
   order?:Formation["order"];
   groupId?:string;
   formationShape?:Formation["formationShape"];
+  supply?:number;
 };
 
 export type MultiplayerSnapshot={
