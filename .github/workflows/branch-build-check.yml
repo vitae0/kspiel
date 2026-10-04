@@ -1,4 +1,5 @@
 name: Branch build check
+# validates the Spain mega-map branch
 
 on:
   push:
