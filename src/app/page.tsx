@@ -172,7 +172,94 @@ function routeCutForSide(route:{x:number;y:number}[],side:Side,units:Formation[]
   return routeInterdictionPoints(route,side,units).length>0;
 }
 
-function roadPathBetweenCities(scenario:Scenario,cities:CityState[],start:CityState,goal:CityState){
+function roadMovementBonus(u:Formation){
+  if(ARTILLERY_KINDS.has(u.kind))return 2.5;
+  if(u.kind==="logistics")return 2.05;
+  if(u.kind==="armor"||u.kind==="tank"||u.kind==="mechanized"||u.kind==="recon")return 1.8;
+  if(u.kind==="cavalry")return 1.45;
+  return 1.55;
+}
+
+function movementTerrainFactor(u:Formation,terrain:TerrainSample["terrain"]){
+  const base=TERRAIN_RULES[terrain].move;
+  if(terrain==="highmountain"&&u.kind==="mountaineer")return .78;
+  if(u.kind==="mountaineer"&&(terrain==="mountain"||terrain==="hills"))return base*1.45;
+  if(u.kind==="cavalry"&&(terrain==="plains"||terrain==="desert"))return base*1.28;
+  return base;
+}
+
+function hostileTravelRiskMultiplier(u:Formation,units:Formation[],x:number,y:number){
+  let extra=0;
+  for(const hostile of units){
+    if(hostile.side===u.side||!DIRECT_COMBAT_KINDS.has(hostile.kind)||hostile.strength<=12||hostile.organization<=12)continue;
+    const d=Math.hypot(hostile.x-x,hostile.y-y);
+    if(d>=460)continue;
+    const power=clamp((hostile.strength*.42+hostile.organization*.38+hostile.readiness*.2)/100,.2,1.15);
+    extra+=(d<75?18:d<135?8:d<220?3.5:d<320?1.3:.35)*power;
+  }
+  return 1+Math.min(28,extra);
+}
+
+function segmentTravelCost(scenario:Scenario,u:Formation,units:Formation[],a:{x:number;y:number},b:{x:number;y:number},road:boolean){
+  const length=Math.hypot(b.x-a.x,b.y-a.y);
+  if(length<1)return 0;
+  const steps=Math.max(1,Math.ceil(length/72));
+  let cost=0;
+  for(let i=0;i<steps;i++){
+    const t=(i+.5)/steps;
+    const x=a.x+(b.x-a.x)*t,y=a.y+(b.y-a.y)*t;
+    const terrain=terrainAt(scenario,x,y).terrain;
+    if(terrain==="water")return Infinity;
+    const effectiveSpeed=Math.max(.04,u.speed*movementTerrainFactor(u,terrain)*movementSupplyFactor(u)*(road?roadMovementBonus(u):1));
+    cost+=(length/steps)/effectiveSpeed*hostileTravelRiskMultiplier(u,units,x,y);
+  }
+  return cost;
+}
+
+function polylineTravelCost(scenario:Scenario,u:Formation,units:Formation[],points:Array<{x:number;y:number}>,road:boolean){
+  let cost=0;
+  for(let i=0;i<points.length-1;i++){
+    const leg=segmentTravelCost(scenario,u,units,points[i],points[i+1],road);
+    if(!Number.isFinite(leg))return Infinity;
+    cost+=leg;
+  }
+  return cost;
+}
+
+function routeSliceBetween(route:{x:number;y:number}[],from:RoutePosition,to:RoutePosition){
+  if(from.along>to.along)return routeSliceBetween(route,to,from).reverse();
+  const points=[from.point];
+  for(let i=from.segment+1;i<=to.segment;i++)points.push(route[i]);
+  points.push(to.point);
+  return dedupeRoutePoints(points);
+}
+
+function directMovementCandidates(scenario:Scenario,u:Formation,units:Formation[],from:{x:number;y:number},to:{x:number;y:number}){
+  const candidates:Array<Array<{x:number;y:number}>>=[[to]];
+  const dx=to.x-from.x,dy=to.y-from.y,length=Math.hypot(dx,dy);
+  if(length<120)return candidates;
+  const dirX=dx/length,dirY=dy/length,nx=-dirY,ny=dirX;
+  const threats=units
+    .filter(v=>v.side!==u.side&&DIRECT_COMBAT_KINDS.has(v.kind)&&v.strength>12&&v.organization>12)
+    .map(v=>({v,hit:segmentContact(from.x,from.y,to.x,to.y,v.x,v.y)}))
+    .filter(({hit})=>hit.t>.08&&hit.t<.92&&hit.distance<285)
+    .sort((a,b)=>a.hit.distance-b.hit.distance)
+    .slice(0,3);
+
+  for(const {v,hit} of threats){
+    const cx=from.x+dx*hit.t,cy=from.y+dy*hit.t;
+    const clearance=330+Math.max(0,190-hit.distance)*.55;
+    for(const side of [-1,1]){
+      const before={x:clamp(cx-dirX*120+nx*clearance*side,2,WORLD_W-2),y:clamp(cy-dirY*120+ny*clearance*side,2,WORLD_H-2)};
+      const after={x:clamp(cx+dirX*120+nx*clearance*side,2,WORLD_W-2),y:clamp(cy+dirY*120+ny*clearance*side,2,WORLD_H-2)};
+      if(terrainAt(scenario,before.x,before.y).terrain==="water"||terrainAt(scenario,after.x,after.y).terrain==="water")continue;
+      candidates.push([before,after,to]);
+    }
+  }
+  return candidates;
+}
+
+function roadPathBetweenCities(scenario:Scenario,cities:CityState[],u:Formation,units:Formation[],start:CityState,goal:CityState){
   if(start.name===goal.name)return{points:[] as Array<{x:number;y:number}>,cost:0};
   type Edge={to:string;route:Array<{x:number;y:number}>;cost:number};
   const graph=new Map<string,Edge[]>();
@@ -181,8 +268,8 @@ function roadPathBetweenCities(scenario:Scenario,cities:CityState[],start:CitySt
     if(route.length<2)continue;
     const a=nearestCityTo(route[0],cities),b=nearestCityTo(route[route.length-1],cities);
     if(!a||!b||a.name===b.name)continue;
-    let cost=0;
-    for(let i=0;i<route.length-1;i++)cost+=Math.hypot(route[i+1].x-route[i].x,route[i+1].y-route[i].y);
+    const cost=polylineTravelCost(scenario,u,units,route,true);
+    if(!Number.isFinite(cost))continue;
     graph.get(a.name)?.push({to:b.name,route:[...route],cost});
     graph.get(b.name)?.push({to:a.name,route:[...route].reverse(),cost});
   }
@@ -216,37 +303,86 @@ function roadPathBetweenCities(scenario:Scenario,cities:CityState[],start:CitySt
   return{points:dedupeRoutePoints(points),cost:dist.get(goal.name)??Infinity};
 }
 
-function cityRoadRoutePlan(scenario:Scenario,cities:CityState[],from:{x:number;y:number},goal:CityState){
+function movementRoutePlan(
+  scenario:Scenario,
+  cities:CityState[],
+  u:Formation,
+  units:Formation[],
+  from:{x:number;y:number},
+  to:{x:number;y:number},
+  openWorld?:OpenWorldState|null
+){
   let best:{cost:number;points:Array<{x:number;y:number}>}|null=null;
+  const consider=(cost:number,points:Array<{x:number;y:number}>)=>{
+    if(!Number.isFinite(cost))return;
+    if(!best||cost<best.cost)best={cost,points:dedupeRoutePoints(points)};
+  };
+
+  for(const path of directMovementCandidates(scenario,u,units,from,to)){
+    consider(polylineTravelCost(scenario,u,units,[from,...path],false),path);
+  }
+
+  const builtRoads=(openWorld?.structures??[])
+    .filter(s=>s.kind==="road"&&s.side===u.side&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined)
+    .map(s=>[{x:s.x,y:s.y},{x:s.x2!,y:s.y2!}]);
+  const localRoads=[...scenario.roadRoutes,...builtRoads];
+
+  // A single road can beat both a direct march and a full city-to-city road route.
+  for(const route of localRoads){
+    if(route.length<2)continue;
+    const entry=routePosition(route,from.x,from.y),exit=routePosition(route,to.x,to.y);
+    const roadPath=routeSliceBetween(route,entry,exit);
+    const access=segmentTravelCost(scenario,u,units,from,entry.point,false);
+    const roadCost=polylineTravelCost(scenario,u,units,roadPath,true);
+    const egress=segmentTravelCost(scenario,u,units,exit.point,to,false);
+    consider(access+roadCost+egress,[...(entry.distance>5?[entry.point]:[]),...roadPath.slice(1),...(exit.distance>5?[to]:[])]);
+  }
+
+  type Access={city:CityState;cost:number;points:Array<{x:number;y:number}>};
+  const entries:Access[]=[];
+  const exits:Access[]=[];
   for(const route of scenario.roadRoutes){
     if(route.length<2)continue;
-    const pos=routePosition(route,from.x,from.y);
     const a=nearestCityTo(route[0],cities),b=nearestCityTo(route[route.length-1],cities);
     if(!a||!b||a.name===b.name)continue;
 
-    const towardStart=dedupeRoutePoints([pos.point,...route.slice(0,pos.segment+1).reverse()]);
-    const towardEnd=dedupeRoutePoints([pos.point,...route.slice(pos.segment+1)]);
-    const candidates=[
-      {entry:a,local:towardStart,roadCost:pos.along},
-      {entry:b,local:towardEnd,roadCost:pos.total-pos.along}
-    ];
-    for(const candidate of candidates){
-      const onward=roadPathBetweenCities(scenario,cities,candidate.entry,goal);
-      if(!onward)continue;
-      const points=dedupeRoutePoints([...(pos.distance>6?[pos.point]:[]),...candidate.local.slice(1),...onward.points]);
-      const cost=pos.distance+candidate.roadCost+onward.cost;
-      if(!best||cost<best.cost)best={cost,points};
+    const fromPos=routePosition(route,from.x,from.y);
+    const toPos=routePosition(route,to.x,to.y);
+    const startPos:RoutePosition={distance:0,point:route[0],segment:0,t:0,along:0,total:fromPos.total};
+    const endPos:RoutePosition={distance:0,point:route[route.length-1],segment:route.length-2,t:1,along:fromPos.total,total:fromPos.total};
+
+    for(const endpoint of [{city:a,pos:startPos},{city:b,pos:endPos}]){
+      const local=routeSliceBetween(route,fromPos,endpoint.pos);
+      const access=segmentTravelCost(scenario,u,units,from,fromPos.point,false);
+      const roadCost=polylineTravelCost(scenario,u,units,local,true);
+      entries.push({city:endpoint.city,cost:access+roadCost,points:[...(fromPos.distance>5?[fromPos.point]:[]),...local.slice(1)]});
+
+      const out=routeSliceBetween(route,endpoint.pos,toPos);
+      const outRoad=polylineTravelCost(scenario,u,units,out,true);
+      const egress=segmentTravelCost(scenario,u,units,toPos.point,to,false);
+      exits.push({city:endpoint.city,cost:outRoad+egress,points:[...out.slice(1),...(toPos.distance>5?[to]:[])]});
     }
   }
-  const result=best?.points.length?best.points:[{x:goal.x,y:goal.y}];
-  const last=result[result.length-1];
-  if(Math.hypot(last.x-goal.x,last.y-goal.y)>4)result.push({x:goal.x,y:goal.y});
-  return dedupeRoutePoints(result);
-}
 
-function movementRoutePlan(scenario:Scenario,cities:CityState[],from:{x:number;y:number},to:{x:number;y:number}){
-  const city=cityAtPoint(cities,to.x,to.y);
-  return city?cityRoadRoutePlan(scenario,cities,from,city):[{x:to.x,y:to.y}];
+  const entryShortlist=entries.filter(v=>Number.isFinite(v.cost)).sort((a,b)=>a.cost-b.cost).slice(0,8);
+  const exitShortlist=exits.filter(v=>Number.isFinite(v.cost)).sort((a,b)=>a.cost-b.cost).slice(0,8);
+  const networkCache=new Map<string,ReturnType<typeof roadPathBetweenCities>>();
+  for(const entry of entryShortlist)for(const exit of exitShortlist){
+    const key=entry.city.name+"\u0000"+exit.city.name;
+    let network=networkCache.get(key);
+    if(network===undefined){
+      network=roadPathBetweenCities(scenario,cities,u,units,entry.city,exit.city);
+      networkCache.set(key,network);
+    }
+    if(!network)continue;
+    consider(entry.cost+network.cost+exit.cost,[...entry.points,...network.points,...exit.points]);
+  }
+
+  const result=best?.points?.length?[...best.points]:[{x:to.x,y:to.y}];
+  while(result.length>1&&Math.hypot(result[0].x-from.x,result[0].y-from.y)<4)result.shift();
+  const last=result[result.length-1];
+  if(!last||Math.hypot(last.x-to.x,last.y-to.y)>4)result.push({x:to.x,y:to.y});
+  return dedupeRoutePoints(result);
 }
 
 type RoadSupplyRoute={
@@ -1458,7 +1594,7 @@ export default function Home(){
       if(!selected.includes(u.id))return u;
       if(append&&u.order?.targetX!==undefined&&u.order?.targetY!==undefined&&!u.order.targetUnitId){
         const tail=u.order.waypoints?.length?u.order.waypoints[u.order.waypoints.length-1]:{x:u.order.targetX,y:u.order.targetY};
-        const leg=movementRoutePlan(activeScenario,cities,tail,{x:tx,y:ty});
+        const leg=movementRoutePlan(activeScenario,cities,u,prev,tail,{x:tx,y:ty},openWorldRef.current);
         return{...u,order:{...u.order,waypoints:[...(u.order.waypoints??[]),...leg]}};
       }
       if(requested==="fire"){
@@ -1468,7 +1604,7 @@ export default function Home(){
         return{...u,order:{type:"fire",targetX:tx,targetY:ty}};
       }
       if(requested==="probe"&&DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:"probe",targetX:tx,targetY:ty}};
-      const route=movementRoutePlan(activeScenario,cities,{x:u.x,y:u.y},{x:tx,y:ty});
+      const route=movementRoutePlan(activeScenario,cities,u,prev,{x:u.x,y:u.y},{x:tx,y:ty},openWorldRef.current);
       const [first,...rest]=route;
       return first?{...u,order:{type:"move",targetX:first.x,targetY:first.y,waypoints:rest}}:{...u,order:{type:"move",targetX:tx,targetY:ty}};
     }));
