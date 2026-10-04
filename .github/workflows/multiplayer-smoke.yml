@@ -10,6 +10,7 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -71,4 +72,5 @@ jobs:
           await Promise.all([a.removeChannel(ca),b.removeChannel(cb)]);
           await matchmaking({action:"cancel_room",roomId:host.roomId,playerToken:host.playerToken});
           console.log("MULTIPLAYER_SMOKE_OK",host.code,host.roomId);
+          process.exit(0);
           NODE
