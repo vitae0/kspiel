@@ -385,3 +385,5 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
   .invite-link{grid-template-columns:1fr}
   .network-status-banner{top:calc(62px + env(safe-area-inset-top));width:max-content;max-width:92vw;text-align:center}
 }
+
+.field-line{fill:none;pointer-events:none}.field-line.trench path{stroke:#5e5541;stroke-width:18;stroke-dasharray:34 10;stroke-linecap:butt;filter:drop-shadow(0 2px 1px #1118)}.field-line.barricade path{stroke:#a69a78;stroke-width:14;stroke-dasharray:10 8;stroke-linecap:square;filter:drop-shadow(0 2px 1px #111b)}.field-line.blue path{opacity:.95}.field-line.red path{opacity:.9}.field-line.green path{opacity:.9}
