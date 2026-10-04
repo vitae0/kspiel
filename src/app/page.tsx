@@ -4,6 +4,7 @@ import {useEffect,useRef,useState,type MouseEvent as ReactMouseEvent,type Pointe
 import {generateScenario,polylinePath,SCENARIO_PRESETS,terrainAt,TERRAIN_RULES,UNIT_LABEL,WORLD_H,WORLD_W} from "@/sim/game";
 import {botControlledSides,createMatchConfig,defaultArmyGroups,localControlledSides} from "@/sim/session";
 import {addStrategicStructure,advanceOpenWorld,buildStrategicCity,createOpenWorldState,queueRecruitment,UNIT_COST,type OpenWorldBuildKind,type OpenWorldState} from "@/sim/openworld";
+import {closeMultiplayerRoom,createPrivateMatch,findQuickPlay,inviteUrl,joinPrivateMatch,supabase,type MultiplayerSession,type MultiplayerSnapshot,type UnitCommandPatch} from "@/lib/multiplayer";
 import type {AttackPlan,CityState,ConstructionProject,Emplacement,EmplacementKind,FlagStyle,Formation,FormationShape,OrderType,OverlayMode,Scenario,Side,TerrainSample} from "@/sim/types";
 
 const SPEED_MULTIPLIER=[0,1,2.5,6];
@@ -912,6 +913,10 @@ export default function Home(){
   const [isMobile,setIsMobile]=useState(false);
   const [mobilePanel,setMobilePanel]=useState<"none"|"forces"|"unit">("none");
   const [mobileTool,setMobileTool]=useState<"pan"|"select"|"front">("pan");
+  const [multiplayer,setMultiplayer]=useState<MultiplayerSession|null>(null);
+  const [networkPhase,setNetworkPhase]=useState<"idle"|"matching"|"waiting"|"connected"|"opponent-left"|"error">("idle");
+  const [networkError,setNetworkError]=useState("");
+  const [inviteLink,setInviteLink]=useState("");
 
   const drag=useRef<{mode:"pan"|"box"|"front"|"select"|"target";startClientX:number;startClientY:number;px:number;py:number;moved:boolean}|null>(null);
   const touchPoints=useRef<Map<number,{x:number;y:number}>>(new Map());
@@ -926,6 +931,112 @@ export default function Home(){
   const emplacementsRef=useRef<Emplacement[]>([]);
   const projectsRef=useRef<ConstructionProject[]>([]);
   const openWorldRef=useRef<OpenWorldState|null>(null);
+  const multiplayerRef=useRef<MultiplayerSession|null>(null);
+  const networkChannelRef=useRef<ReturnType<typeof supabase.channel>|null>(null);
+  const networkStartedRef=useRef(false);
+  const lastSnapshotSeqRef=useRef(0);
+  const snapshotSeqRef=useRef(0);
+  const latestSnapshotRef=useRef<MultiplayerSnapshot|null>(null);
+  latestSnapshotRef.current={seq:0,units,cities,attackPlans,emplacements,constructionProjects,hour,day,running,speed,warResult};
+
+  useEffect(()=>{
+    const code=new URLSearchParams(window.location.search).get("join")?.trim().toUpperCase();
+    if(!code)return;
+    let cancelled=false;
+    setNetworkPhase("matching");setNetworkError("");
+    joinPrivateMatch(code).then(session=>{
+      if(cancelled)return;
+      multiplayerRef.current=session;setMultiplayer(session);setPlayerSide(session.side);setSelectedPresetId(session.presetId);setSelectedGameMode("scenario");
+      setNetworkPhase("waiting");
+      window.history.replaceState(null,"",window.location.pathname+window.location.hash);
+    }).catch(error=>{
+      if(cancelled)return;
+      setNetworkError(error instanceof Error?error.message:"Could not join match");setNetworkPhase("error");
+    });
+    return()=>{cancelled=true};
+  },[]);
+
+  useEffect(()=>{
+    if(!multiplayer)return;
+    multiplayerRef.current=multiplayer;
+    networkStartedRef.current=false;
+    lastSnapshotSeqRef.current=0;
+    snapshotSeqRef.current=0;
+    const channel=supabase.channel("kspiel:"+multiplayer.roomId,{
+      config:{presence:{key:multiplayer.playerToken},broadcast:{ack:false,self:false}}
+    });
+    networkChannelRef.current=channel;
+
+    const applySnapshot=(snapshot:MultiplayerSnapshot)=>{
+      if(multiplayer.isHost||!snapshot||snapshot.seq<=lastSnapshotSeqRef.current)return;
+      lastSnapshotSeqRef.current=snapshot.seq;
+      unitsRef.current=snapshot.units;setUnits(snapshot.units);
+      citiesRef.current=snapshot.cities;setCities(snapshot.cities);
+      projectsRef.current=snapshot.constructionProjects;setConstructionProjects(snapshot.constructionProjects);
+      emplacementsRef.current=snapshot.emplacements;setEmplacements(snapshot.emplacements);
+      setAttackPlans(snapshot.attackPlans);
+      warResultRef.current=snapshot.warResult;setWarResult(snapshot.warResult);
+      setHour(snapshot.hour);setDay(snapshot.day);setRunning(snapshot.running);setSpeed(snapshot.speed);
+    };
+
+    channel
+      .on("broadcast",{event:"snapshot"},({payload})=>applySnapshot(payload as MultiplayerSnapshot))
+      .on("broadcast",{event:"unit-patch"},({payload})=>{
+        if(!multiplayer.isHost)return;
+        const patches=Array.isArray(payload?.patches)?payload.patches as UnitCommandPatch[]:[];
+        if(!patches.length)return;
+        const byId=new Map(patches.filter(p=>p&&typeof p.id==="string").map(p=>[p.id,p]));
+        setUnits(prev=>{
+          const next=prev.map(unit=>{
+            const patch=byId.get(unit.id);
+            if(!patch||unit.side!==multiplayer.opponentSide)return unit;
+            return{...unit,...("order" in patch?{order:patch.order}:{}),...("groupId" in patch?{groupId:patch.groupId}:{}),...("formationShape" in patch?{formationShape:patch.formationShape}:{})};
+          });
+          unitsRef.current=next;return next;
+        });
+      })
+      .on("broadcast",{event:"plan-upsert"},({payload})=>{
+        if(!multiplayer.isHost)return;
+        const plan=payload?.plan as AttackPlan|undefined;
+        if(!plan||plan.side!==multiplayer.opponentSide)return;
+        setAttackPlans(prev=>prev.some(p=>p.id===plan.id)?prev.map(p=>p.id===plan.id?plan:p):[...prev,plan]);
+      })
+      .on("broadcast",{event:"plan-delete"},({payload})=>{
+        if(!multiplayer.isHost||typeof payload?.id!=="string")return;
+        setAttackPlans(prev=>prev.filter(plan=>!(plan.id===payload.id&&plan.side===multiplayer.opponentSide)));
+      })
+      .on("broadcast",{event:"construction-create"},({payload})=>{
+        if(!multiplayer.isHost)return;
+        const project=payload?.project as ConstructionProject|undefined;
+        if(!project||project.side!==multiplayer.opponentSide)return;
+        if(projectsRef.current.some(p=>p.id===project.id))return;
+        const next=[...projectsRef.current,project];projectsRef.current=next;setConstructionProjects(next);
+      })
+      .on("presence",{event:"sync"},()=>{
+        const count=Object.values(channel.presenceState()).reduce((sum,entries)=>sum+entries.length,0);
+        if(count>=2){
+          setNetworkPhase("connected");
+          if(!networkStartedRef.current){
+            networkStartedRef.current=true;
+            startGame(multiplayer);
+          }
+        }else if(networkStartedRef.current){
+          setNetworkPhase("opponent-left");
+          if(multiplayer.isHost)setRunning(false);
+        }else setNetworkPhase("waiting");
+      })
+      .subscribe(async status=>{
+        if(status==="SUBSCRIBED")await channel.track({role:multiplayer.role,side:multiplayer.side,onlineAt:new Date().toISOString()});
+        else if(status==="CHANNEL_ERROR"||status==="TIMED_OUT"){
+          setNetworkError("Realtime connection failed");setNetworkPhase("error");
+        }
+      });
+
+    return()=>{
+      if(networkChannelRef.current===channel)networkChannelRef.current=null;
+      void supabase.removeChannel(channel);
+    };
+  },[multiplayer]);
 
   useEffect(()=>{
     const media=window.matchMedia("(max-width: 760px), (pointer: coarse)");
@@ -952,19 +1063,44 @@ export default function Home(){
       if(el?.tagName==="INPUT"||el?.tagName==="TEXTAREA"||el?.isContentEditable)return;
       if(e.code!=="Space")return;
       e.preventDefault();e.stopPropagation();
+      if(multiplayerRef.current&&!multiplayerRef.current.isHost)return;
       setRunning(v=>warResultRef.current?v:!v);
     };
     window.addEventListener("keydown",togglePause,true);
     return()=>window.removeEventListener("keydown",togglePause,true);
   },[]);
 
-  const commitUnits=(fn:(prev:Formation[])=>Formation[])=>{
-    setUnits(prev=>{const next=fn(prev);unitsRef.current=next;return next});
+  const sendNetwork=(event:string,payload:Record<string,unknown>)=>{
+    const channel=networkChannelRef.current;
+    if(!channel)return;
+    void channel.send({type:"broadcast",event,payload});
   };
 
-  const matchConfig=createMatchConfig("singleplayer","local",playerSide);
-  const localSides=new Set(localControlledSides(matchConfig,"local"));
-  const botSides=openWorld?(["blue","red","green"] as Side[]).filter(side=>!localSides.has(side)):botControlledSides(matchConfig);
+  const commitUnits=(fn:(prev:Formation[])=>Formation[])=>{
+    setUnits(prev=>{
+      const next=fn(prev);unitsRef.current=next;
+      const session=multiplayerRef.current;
+      if(session&&!session.isHost){
+        const previous=new Map(prev.map(unit=>[unit.id,unit]));
+        const patches:UnitCommandPatch[]=[];
+        for(const unit of next){
+          if(unit.side!==session.side)continue;
+          const before=previous.get(unit.id);
+          if(!before)continue;
+          if(JSON.stringify([before.order,before.groupId,before.formationShape])!==JSON.stringify([unit.order,unit.groupId,unit.formationShape])){
+            patches.push({id:unit.id,order:unit.order,groupId:unit.groupId,formationShape:unit.formationShape});
+          }
+        }
+        if(patches.length)sendNetwork("unit-patch",{patches});
+      }
+      return next;
+    });
+  };
+
+  const localPlayerId=multiplayer?.playerToken??"local";
+  const matchConfig=createMatchConfig(multiplayer?"pvp":"singleplayer",localPlayerId,playerSide);
+  const localSides=new Set(localControlledSides(matchConfig,localPlayerId));
+  const botSides=multiplayer?[]:openWorld?(["blue","red","green"] as Side[]).filter(side=>!localSides.has(side)):botControlledSides(matchConfig);
   const armyGroups=defaultArmyGroups(playerSide);
 
   const selectedUnits=units.filter(u=>selected.includes(u.id));
@@ -978,6 +1114,7 @@ export default function Home(){
 
   useEffect(()=>{
     if(!scenario||!running||speed===0||warResultRef.current)return;
+    if(multiplayerRef.current&&!multiplayerRef.current.isHost)return;
     let last=performance.now(),aiElapsed=AI_COMMAND_INTERVAL_SECONDS;
     const tick=()=>{
       const now=performance.now();
@@ -1010,6 +1147,17 @@ export default function Home(){
     const timer=window.setInterval(tick,SIM_TICK_MS);
     return()=>window.clearInterval(timer);
   },[scenario,running,speed]);
+
+  useEffect(()=>{
+    if(!scenario||!multiplayer?.isHost)return;
+    const publish=()=>{
+      const current=latestSnapshotRef.current;if(!current)return;
+      sendNetwork("snapshot",{...current,seq:++snapshotSeqRef.current});
+    };
+    publish();
+    const timer=window.setInterval(publish,300);
+    return()=>window.clearInterval(timer);
+  },[scenario,multiplayer?.roomId,multiplayer?.isHost]);
 
   function selectUnit(e:ReactMouseEvent,u:Formation){
     e.stopPropagation();
@@ -1062,24 +1210,56 @@ export default function Home(){
     window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey);
   },[selected,units,cities]);
 
-  function startGame(){
-    const seed=typeof crypto!=="undefined"&&"getRandomValues" in crypto?crypto.getRandomValues(new Uint32Array(1))[0]:Date.now()>>>0;
-    let generated=generateScenario(seed,selectedPresetId);
-    if(selectedGameMode==="openworld")generated={...generated,presetId:"open-world",title:"Open World Dominion",historical:false,sideNames:{blue:"Blue Dominion",red:"Red Dominion",green:"Green Dominion"},sideFlags:{blue:"generic-blue",red:"generic-red",green:"generic-blue"}};
+  function startGame(network?:MultiplayerSession){
+    const seed=network?.seed??(typeof crypto!=="undefined"&&"getRandomValues" in crypto?crypto.getRandomValues(new Uint32Array(1))[0]:Date.now()>>>0);
+    const presetId=network?.presetId??selectedPresetId;
+    const gameMode=network?"scenario":selectedGameMode;
+    const activeSide=network?.side??playerSide;
+    if(network){setPlayerSide(network.side);setSelectedPresetId(network.presetId);setSelectedGameMode("scenario")}
+    let generated=generateScenario(seed,presetId);
+    if(gameMode==="openworld")generated={...generated,presetId:"open-world",title:"Open World Dominion",historical:false,sideNames:{blue:"Blue Dominion",red:"Red Dominion",green:"Green Dominion"},sideFlags:{blue:"generic-blue",red:"generic-red",green:"generic-blue"}};
     warResultRef.current=null;setWarResult(null);setAttackPlans([]);setPendingPlan(false);setPendingOrder(null);setPendingBuild(null);setStrategicBuildAnchor(null);
     setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setMobilePanel("none");
-    if(selectedGameMode==="openworld"){
+    if(gameMode==="openworld"){
       const ow=createOpenWorldState(generated,generated.formations,generated.cities);openWorldRef.current=ow.state;setOpenWorld(ow.state);
       setScenario(generated);setUnits(ow.units);unitsRef.current=ow.units;setCities(ow.cities);citiesRef.current=ow.cities;
     }else{
       openWorldRef.current=null;setOpenWorld(null);setScenario(generated);setUnits(generated.formations);unitsRef.current=generated.formations;
       setCities(generated.cities);citiesRef.current=generated.cities;
     }
-    const first=generated.formations.find(u=>u.side===playerSide);setSelected(first?[first.id]:[]);
+    const first=generated.formations.find(u=>u.side===activeSide);setSelected(first?[first.id]:[]);
     setRunning(true);setSpeed(1);setHour(6);setDay(1);setPan({x:-260,y:-190});setZoom(isMobile ? .34 : .24);setMobilePanel("none");setMobileTool("pan");
   }
 
+  function activateMultiplayer(session:MultiplayerSession){
+    multiplayerRef.current=session;setMultiplayer(session);setPlayerSide(session.side);setSelectedPresetId(session.presetId);setSelectedGameMode("scenario");
+    setNetworkPhase("waiting");setNetworkError("");
+    setInviteLink(session.kind==="invite"&&session.isHost?inviteUrl(session.code):"");
+  }
+
+  async function beginQuickPlay(){
+    if(selectedGameMode!=="scenario"||networkPhase==="matching")return;
+    setNetworkPhase("matching");setNetworkError("");
+    try{activateMultiplayer(await findQuickPlay(selectedPresetId,playerSide))}
+    catch(error){setNetworkError(error instanceof Error?error.message:"Quick Play failed");setNetworkPhase("error")}
+  }
+
+  async function beginPrivateMatch(){
+    if(selectedGameMode!=="scenario"||networkPhase==="matching")return;
+    setNetworkPhase("matching");setNetworkError("");
+    try{activateMultiplayer(await createPrivateMatch(selectedPresetId,playerSide))}
+    catch(error){setNetworkError(error instanceof Error?error.message:"Could not create private match");setNetworkPhase("error")}
+  }
+
+  function cancelMultiplayer(){
+    const session=multiplayerRef.current;
+    if(session)void closeMultiplayerRoom(session);
+    multiplayerRef.current=null;setMultiplayer(null);networkStartedRef.current=false;setNetworkPhase("idle");setNetworkError("");setInviteLink("");
+    window.history.replaceState(null,"",window.location.pathname+window.location.hash);
+  }
+
   function returnToSetup(){
+    if(multiplayerRef.current)cancelMultiplayer();
     setRunning(false);setScenario(null);setUnits([]);unitsRef.current=[];setCities([]);citiesRef.current=[];
     setSelected([]);setAttackPlans([]);setWarResult(null);warResultRef.current=null;setPendingBuild(null);
     setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setOpenWorld(null);openWorldRef.current=null;setPendingStrategicBuild(null);setStrategicBuildAnchor(null);
@@ -1094,9 +1274,9 @@ export default function Home(){
         <div className="setup-grid">
           <section className="setup-main">
             <div className="setup-heading"><small>CREATE GAME</small><h1>{selectedGameMode==="openworld"?"Build a dominion":"Choose a theater"}</h1><p>{selectedGameMode==="openworld"?"Expand territory, exploit resources automatically, build infrastructure and raise new armies against multiple rivals.":"Terrain now changes the roster, mobility, visibility and logistics. Historical presets are stylized scenarios, not exact order-of-battle reconstructions."}</p></div>
-            <div className="setup-tabs"><button className={selectedGameMode==="scenario"?"active":""} onClick={()=>setSelectedGameMode("scenario")}>SCENARIO WAR</button><button className={selectedGameMode==="openworld"?"active":""} onClick={()=>{setSelectedGameMode("openworld");setSelectedPresetId("frontier")}}>OPEN WORLD</button></div>
+            <div className="setup-tabs"><button disabled={Boolean(multiplayer)} className={selectedGameMode==="scenario"?"active":""} onClick={()=>setSelectedGameMode("scenario")}>SCENARIO WAR</button><button disabled={Boolean(multiplayer)} className={selectedGameMode==="openworld"?"active":""} onClick={()=>{setSelectedGameMode("openworld");setSelectedPresetId("frontier")}}>OPEN WORLD</button></div>
             <div className="setup-tabs"><button className={setupCategory==="all"?"active":""} onClick={()=>setSetupCategory("all")}>ALL</button><button className={setupCategory==="fictional"?"active":""} onClick={()=>setSetupCategory("fictional")}>FICTIONAL</button><button className={setupCategory==="historical"?"active":""} onClick={()=>setSetupCategory("historical")}>HISTORICAL</button></div>
-            {selectedGameMode==="scenario"&&<div className="scenario-grid">{presets.map(preset=><button key={preset.id} className={"scenario-card theme-"+preset.theme+" "+(selectedPresetId===preset.id?"selected":"")} onClick={()=>{setSelectedPresetId(preset.id);setPlayerSide("blue")}}>
+            {selectedGameMode==="scenario"&&<div className="scenario-grid">{presets.map(preset=><button key={preset.id} disabled={Boolean(multiplayer)} className={"scenario-card theme-"+preset.theme+" "+(selectedPresetId===preset.id?"selected":"")} onClick={()=>{setSelectedPresetId(preset.id);setPlayerSide("blue")}}>
               <span className="scenario-theme">{preset.theme.toUpperCase()} · {preset.era.replace("_"," ").toUpperCase()}</span><b>{preset.title}</b><small>{preset.location}{preset.year?" · "+preset.year:""}</small><p>{preset.subtitle}</p>
               <span className="scenario-side-line"><span><Flag styleName={preset.sideFlags.blue}/>{preset.sideNames.blue}</span><i>VS</i><span><Flag styleName={preset.sideFlags.red}/>{preset.sideNames.red}</span></span>
             </button>)}</div>}
@@ -1106,10 +1286,17 @@ export default function Home(){
             <div className="section-title">{selectedGameMode==="openworld"?"WORLD RULESET":"SELECTED THEATER"}</div><h2>{selectedGameMode==="openworld"?"Open World Dominion":selectedPreset.title}</h2><p>{selectedGameMode==="openworld"?"Procedural continental theater · three factions":selectedPreset.location+(selectedPreset.year?" · "+selectedPreset.year:"")}</p>
             <div className="setup-facts"><span><small>THEME</small><b>{selectedPreset.theme.toUpperCase()}</b></span><span><small>ERA</small><b>{selectedPreset.era.replace("_"," ").toUpperCase()}</b></span><span><small>MAP</small><b>{WORLD_W} × {WORLD_H}</b></span><span><small>FOG</small><b>ENABLED</b></span></div>
             <div className="section-title">PLAY AS</div><div className="side-choice">
-              {(["blue","red"] as Side[]).map(side=><button key={side} className={playerSide===side?"active":""} onClick={()=>setPlayerSide(side)}><Flag styleName={selectedPreset.sideFlags[side]??"generic-blue"}/><span><b>{selectedPreset.sideNames[side]}</b><small>{side==="blue"?"LEFT / BLUE DEPLOYMENT":"RIGHT / RED DEPLOYMENT"}</small></span></button>)}
+              {(["blue","red"] as Side[]).map(side=><button key={side} disabled={Boolean(multiplayer)} className={playerSide===side?"active":""} onClick={()=>setPlayerSide(side)}><Flag styleName={selectedPreset.sideFlags[side]??"generic-blue"}/><span><b>{selectedPreset.sideNames[side]}</b><small>{side==="blue"?"LEFT / BLUE DEPLOYMENT":"RIGHT / RED DEPLOYMENT"}</small></span></button>)}
             </div>
-            <div className="section-title">GAME MODE</div><div className="mode-list"><button className="active"><b>SINGLE PLAYER</b><small>You command {selectedPreset.sideNames[playerSide]}</small></button><button disabled><b>CO-OP</b><small>architecture ready · networking later</small></button><button disabled><b>PVP / PVPVE</b><small>architecture ready · networking later</small></button></div>
-            <button className="launch-button" onClick={startGame}>{selectedGameMode==="openworld"?"FOUND DOMINION":"DEPLOY TO THEATER"}</button>
+            <div className="section-title">GAME MODE</div><div className="mode-list">
+              <button disabled={Boolean(multiplayer)} className={!multiplayer?"active":""}><b>SINGLE PLAYER</b><small>You command {selectedPreset.sideNames[playerSide]}</small></button>
+              <button disabled={selectedGameMode==="openworld"||Boolean(multiplayer)||networkPhase==="matching"} onClick={()=>void beginQuickPlay()}><b>QUICK PLAY · PVP</b><small>{selectedGameMode==="openworld"?"Scenario mode only":"Match with the next available commander"}</small></button>
+              <button disabled={selectedGameMode==="openworld"||Boolean(multiplayer)||networkPhase==="matching"} onClick={()=>void beginPrivateMatch()}><b>PRIVATE MATCH</b><small>{selectedGameMode==="openworld"?"Scenario mode only":"Create a room and share its link"}</small></button>
+            </div>
+            {multiplayer&&<div className={"network-lobby "+networkPhase}><div><b>{networkPhase==="connected"?"OPPONENT CONNECTED":networkPhase==="opponent-left"?"OPPONENT DISCONNECTED":multiplayer.kind==="quickplay"?"QUICK PLAY QUEUE":"PRIVATE ROOM"}</b><small>ROOM {multiplayer.code} · YOU ARE {multiplayer.side.toUpperCase()}</small></div>{inviteLink&&<div className="invite-link"><input aria-label="Invite link" readOnly value={inviteLink}/><button onClick={()=>void navigator.clipboard.writeText(inviteLink)}>COPY LINK</button></div>}<button className="cancel-network" onClick={cancelMultiplayer}>CANCEL</button></div>}
+            {networkPhase==="matching"&&<div className="network-lobby matching"><b>CONNECTING TO MATCHMAKING…</b><small>Preparing Supabase Realtime session.</small></div>}
+            {networkError&&<div className="network-error">{networkError}</div>}
+            <button className="launch-button" disabled={Boolean(multiplayer)||networkPhase==="matching"} onClick={()=>startGame()}>{selectedGameMode==="openworld"?"FOUND DOMINION":"DEPLOY TO THEATER"}</button>
           </aside>
         </div>
       </div>
@@ -1185,8 +1372,10 @@ export default function Home(){
 
   function createAttackPlan(tx:number,ty:number){
     const chosen=units.filter(u=>selected.includes(u.id));if(!chosen.length)return;
-    const side=chosen[0].side,id="plan-"+planCounter.current++;
-    setAttackPlans(prev=>[...prev,{id,name:"OP "+String(planCounter.current-1).padStart(2,"0"),side,formationIds:chosen.map(u=>u.id),targetX:tx,targetY:ty,status:"draft"}]);
+    const side=chosen[0].side,id="plan-"+side+"-"+planCounter.current++;
+    const plan:AttackPlan={id,name:"OP "+String(planCounter.current-1).padStart(2,"0"),side,formationIds:chosen.map(u=>u.id),targetX:tx,targetY:ty,status:"draft"};
+    setAttackPlans(prev=>[...prev,plan]);
+    if(multiplayerRef.current&&!multiplayerRef.current.isHost)sendNetwork("plan-upsert",{plan});
     setPendingPlan(false);setPendingBuild(null);
   }
 
@@ -1199,10 +1388,16 @@ export default function Home(){
       const t=nearestLandPoint(plan.targetX+Math.cos(angle)*r,plan.targetY+Math.sin(angle)*r);
       return{...u,order:{type:DIRECT_COMBAT_KINDS.has(u.kind)?"assault":"move",targetX:t.x,targetY:t.y}};
     }));
-    setAttackPlans(prev=>prev.map(p=>p.id===id?{...p,status:"executing"}:p));
+    const executing:AttackPlan={...plan,status:"executing"};
+    setAttackPlans(prev=>prev.map(p=>p.id===id?executing:p));
+    if(multiplayerRef.current&&!multiplayerRef.current.isHost)sendNetwork("plan-upsert",{plan:executing});
   }
 
-  function cancelPlan(id:string){setAttackPlans(prev=>prev.filter(p=>p.id!==id))}
+  function cancelPlan(id:string){
+    const plan=attackPlans.find(p=>p.id===id);
+    setAttackPlans(prev=>prev.filter(p=>p.id!==id));
+    if(plan&&multiplayerRef.current&&!multiplayerRef.current.isHost)sendNetwork("plan-delete",{id});
+  }
 
   function planOrigin(plan:AttackPlan){
     const force=units.filter(u=>plan.formationIds.includes(u.id));
@@ -1221,12 +1416,13 @@ export default function Home(){
     if(!engineers.length){setPendingBuild(null);return}
     const terrain=terrainAt(activeScenario,tx,ty).terrain;
     if(terrain==="water"||terrain==="highmountain")return;
-    const id="build-"+buildCounter.current++;
+    const id="build-"+playerSide+"-"+buildCounter.current++;
     const project:ConstructionProject={
       id,kind:pendingBuild,side:engineers[0].side,x:tx,y:ty,builderIds:engineers.map(u=>u.id),progress:0,
       requiredHours:pendingBuild==="observatory"?26:pendingBuild==="fixed_artillery"?50:pendingBuild==="field_fortification"?18:34
     };
     const next=[...projectsRef.current,project];projectsRef.current=next;setConstructionProjects(next);
+    if(multiplayerRef.current&&!multiplayerRef.current.isHost)sendNetwork("construction-create",{project});
     commitUnits(prev=>prev.map(u=>project.builderIds.includes(u.id)?{...u,order:{type:"move",targetX:tx,targetY:ty}}:u));
     setPendingBuild(null);
   }
@@ -1433,11 +1629,12 @@ export default function Home(){
   return <main className={"game-shell theme-"+activeScenario.theme}>
     <header className="topbar">
       <div className="brand"><span className="brand-mark">K</span><div><b>KSPIEL</b><small>{activeScenario.title.toUpperCase()} · #{activeScenario.seed.toString(16).toUpperCase()}</small></div></div>
-      <div className="theater-state"><span className="command-side"><Flag styleName={activeScenario.sideFlags[playerSide]??"generic-blue"}/>{activeScenario.sideNames[playerSide]}</span><span>DAY {day}</span><strong>{timeLabel(hour)}</strong><span className={running?"live":"paused"}>{running?"RUNNING":"PAUSED"}</span></div>
+      <div className="theater-state"><span className="command-side"><Flag styleName={activeScenario.sideFlags[playerSide]??"generic-blue"}/>{activeScenario.sideNames[playerSide]}</span><span>DAY {day}</span><strong>{timeLabel(hour)}</strong><span className={running?"live":"paused"}>{running?"RUNNING":"PAUSED"}</span>{multiplayer&&<span className={"network-badge "+networkPhase}>PVP · {multiplayer.code}</span>}</div>
       <div className="global-metrics"><div><small>SUPPLY</small><b>{pct(averageSupply)}%</b></div><div><small>ORG</small><b>{pct(averageOrg)}%</b></div><div><small>CITIES</small><b>{blueCities}/{cities.length}</b></div><div><small>CONTACTS</small><b>{enemy.length}</b></div></div>
-      <div className="time-controls"><button className="setup-return" onClick={returnToSetup}>SETUP</button><button onClick={()=>setRunning(v=>warResult?v:!v)} className="icon-btn">{running?"Ⅱ":"▶"}</button>{[1,2,3].map(s=><button key={s} onClick={()=>{if(!warResult){setSpeed(s);setRunning(true)}}} className={speed===s?"active":""}>×{s}</button>)}</div>
+      <div className="time-controls"><button className="setup-return" onClick={returnToSetup}>SETUP</button><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)} className="icon-btn">{running?"Ⅱ":"▶"}</button>{[1,2,3].map(s=><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} key={s} onClick={()=>{if(!warResult){setSpeed(s);setRunning(true)}}} className={speed===s?"active":""}>×{s}</button>)}</div>
     </header>
 
+    {multiplayer&&networkPhase==="opponent-left"&&<div className="network-status-banner">OPPONENT DISCONNECTED · MATCH PAUSED</div>}
     {isMobile&&mobilePanel!=="none"&&<button className="mobile-backdrop" aria-label="Close panel" onClick={()=>setMobilePanel("none")}/>}
     <aside className={"left-panel "+(mobilePanel==="forces"?"mobile-open":"")}>
       <button className="mobile-panel-close" onClick={()=>setMobilePanel("none")}>CLOSE</button>
@@ -1563,10 +1760,10 @@ export default function Home(){
       <button disabled={selected.length<2} className={mobileTool==="front"?"active":""} onClick={()=>{setMobileTool("front");setMobilePanel("none")}}><b>╱</b><span>FRONT</span></button>
       <button className={mobilePanel==="forces"?"active":""} onClick={()=>setMobilePanel(v=>v==="forces"?"none":"forces")}><b>☷</b><span>FORCES</span></button>
       <button disabled={!primary} className={mobilePanel==="unit"?"active":""} onClick={()=>setMobilePanel(v=>v==="unit"?"none":"unit")}><b>⌖</b><span>ORDERS</span></button>
-      <button onClick={()=>setRunning(v=>warResult?v:!v)}><b>{running?"Ⅱ":"▶"}</b><span>{running?"PAUSE":"PLAY"}</span></button>
+      <button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)}><b>{running?"Ⅱ":"▶"}</b><span>{running?"PAUSE":"PLAY"}</span></button>
     </nav>
 
-    <footer className="statusbar"><span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB: MOVE · SHIFT/CTRL+RMB: QUEUE</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><span>ENGINEERS: BUILD WORKS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
+    <footer className="statusbar">{multiplayer&&<span className="status-room">PVP ROOM {multiplayer.code}</span>}<span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB: MOVE · SHIFT/CTRL+RMB: QUEUE</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><span>ENGINEERS: BUILD WORKS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
   </main>
 }
 
