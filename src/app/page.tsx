@@ -1115,7 +1115,7 @@ export default function Home(){
   const [constructionAnchor,setConstructionAnchor]=useState<{x:number;y:number}|null>(null);
   const [isMobile,setIsMobile]=useState(false);
   const [mobilePanel,setMobilePanel]=useState<"none"|"forces"|"unit">("none");
-  const [mobileTool,setMobileTool]=useState<"pan"|"select"|"front">("pan");
+  const [mobileTool,setMobileTool]=useState<"pan"|"front">("pan");
   const [multiplayer,setMultiplayer]=useState<MultiplayerSession|null>(null);
   const [networkPhase,setNetworkPhase]=useState<"idle"|"matching"|"waiting"|"connected"|"opponent-left"|"error">("idle");
   const [networkError,setNetworkError]=useState("");
@@ -1124,6 +1124,7 @@ export default function Home(){
   const drag=useRef<{mode:"pan"|"box"|"front"|"select"|"target";startClientX:number;startClientY:number;px:number;py:number;moved:boolean}|null>(null);
   const touchPoints=useRef<Map<number,{x:number;y:number}>>(new Map());
   const pinch=useRef<{distance:number;zoom:number;worldX:number;worldY:number}|null>(null);
+  const longPressTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   const suppressContextMenu=useRef(false);
   const viewport=useRef<HTMLDivElement>(null);
   const unitsRef=useRef<Formation[]>([]);
@@ -1309,6 +1310,9 @@ export default function Home(){
 
   const selectedUnits=units.filter(u=>selected.includes(u.id));
   const primary=selectedUnits[0];
+  const selectedStrength=selectedUnits.reduce((sum,u)=>sum+u.strength,0)/Math.max(1,selectedUnits.length);
+  const selectedOrganization=selectedUnits.reduce((sum,u)=>sum+u.organization,0)/Math.max(1,selectedUnits.length);
+  const selectedSupply=selectedUnits.reduce((sum,u)=>sum+u.supply,0)/Math.max(1,selectedUnits.length);
   const primaryTracked=primary?.order?.targetUnitId?units.find(u=>u.id===primary.order?.targetUnitId):undefined;
   const primaryTargetX=primaryTracked?.x??primary?.order?.targetX,primaryTargetY=primaryTracked?.y??primary?.order?.targetY;
   const blue=units.filter(u=>localSides.has(u.side)),enemy=units.filter(u=>!localSides.has(u.side));
@@ -1749,6 +1753,7 @@ export default function Home(){
   }
 
   function beginPinch(){
+    if(longPressTimer.current){clearTimeout(longPressTimer.current);longPressTimer.current=null}
     const rect=viewport.current?.getBoundingClientRect();
     const points=[...touchPoints.current.values()];
     if(!rect||points.length<2)return;
@@ -1767,10 +1772,19 @@ export default function Home(){
       if(touchPoints.current.size>=2){beginPinch();return}
       const screen=viewportPoint(e.clientX,e.clientY);if(!screen)return;
       const targeting=Boolean(pendingOrder||pendingPlan||pendingBuild||pendingStrategicBuild);
-      const mode:"pan"|"box"|"front"|"target"=targeting?"target":mobileTool==="select"?"box":mobileTool==="front"&&selected.length>1?"front":"pan";
+      const mode:"pan"|"front"|"target"=targeting?"target":mobileTool==="front"&&selected.length>1?"front":"pan";
       drag.current={mode,startClientX:e.clientX,startClientY:e.clientY,px:pan.x,py:pan.y,moved:false};
-      if(mode==="box")setSelectionBox({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
       if(mode==="front")setFrontPreview({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
+      if(mode==="pan"){
+        if(longPressTimer.current)clearTimeout(longPressTimer.current);
+        longPressTimer.current=setTimeout(()=>{
+          const active=drag.current;
+          if(!active||active.mode!=="pan"||active.moved||touchPoints.current.size!==1)return;
+          active.mode="box";
+          setSelectionBox({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
+          longPressTimer.current=null;
+        },340);
+      }
       return;
     }
 
@@ -1804,7 +1818,9 @@ export default function Home(){
     }
 
     const d=drag.current;if(!d)return;
-    if(Math.hypot(e.clientX-d.startClientX,e.clientY-d.startClientY)>6)d.moved=true;
+    const travel=Math.hypot(e.clientX-d.startClientX,e.clientY-d.startClientY);
+    if(travel>6)d.moved=true;
+    if(e.pointerType==="touch"&&d.mode==="pan"&&travel>10&&longPressTimer.current){clearTimeout(longPressTimer.current);longPressTimer.current=null}
     if(d.mode==="pan"){setPan(boundedPan({x:d.px+e.clientX-d.startClientX,y:d.py+e.clientY-d.startClientY}));return}
     if(d.mode==="target"||d.mode==="select")return;
     const screen=viewportPoint(e.clientX,e.clientY),start=viewportPoint(d.startClientX,d.startClientY);if(!screen||!start)return;
@@ -1814,6 +1830,7 @@ export default function Home(){
 
   function onPointerUp(e:ReactPointerEvent<HTMLDivElement>){
     if(e.pointerType==="touch"){
+      if(longPressTimer.current){clearTimeout(longPressTimer.current);longPressTimer.current=null}
       touchPoints.current.delete(e.pointerId);
       if(pinch.current){
         if(touchPoints.current.size<2)pinch.current=null;
@@ -1836,7 +1853,10 @@ export default function Home(){
   }
 
   function onPointerCancel(e:ReactPointerEvent<HTMLDivElement>){
-    if(e.pointerType==="touch")touchPoints.current.delete(e.pointerId);
+    if(e.pointerType==="touch"){
+      if(longPressTimer.current){clearTimeout(longPressTimer.current);longPressTimer.current=null}
+      touchPoints.current.delete(e.pointerId);
+    }
     if(touchPoints.current.size<2)pinch.current=null;
     drag.current=null;setSelectionBox(null);setFrontPreview(null);
   }
@@ -1965,8 +1985,27 @@ export default function Home(){
       {warResult&&<div className={"war-result "+warResult}><b>{localSides.has(warResult)?"VICTORY":"DEFEAT"}</b><span>ALL STRATEGIC CITIES CONTROLLED BY {activeScenario.sideNames[warResult]??warResult.toUpperCase()}</span></div>}
     </div>
 
-    <aside className={"right-panel "+(mobilePanel==="unit"?"mobile-open":"")}>
-      <button className="mobile-panel-close" onClick={()=>setMobilePanel("none")}>CLOSE</button>
+    {isMobile&&primary&&<section className="mobile-selection-summary" aria-label="Selected formation controls">
+      <div className="mobile-selection-head">
+        <div><b>{selectedUnits.length>1?selectedUnits.length+" FORMATIONS":primary.name}</b><span>STR {pct(selectedStrength)} · ORG {pct(selectedOrganization)} · SUP {pct(selectedSupply)}</span></div>
+        <button aria-label="Clear selection" onClick={()=>{setSelected([]);setPendingOrder(null);setPendingBuild(null);setConstructionAnchor(null)}}>×</button>
+      </div>
+      <div className="mobile-quick-orders">
+        <button className={pendingOrder==="move"?"active":""} onClick={()=>startOrder("move")}>MOVE</button>
+        <button disabled={!selectedUnits.some(u=>DIRECT_COMBAT_KINDS.has(u.kind))} className={pendingOrder==="assault"?"active":""} onClick={()=>startOrder("assault")}>ASSAULT</button>
+        <button disabled={!selectedUnits.some(u=>ARTILLERY_KINDS.has(u.kind))} className={pendingOrder==="fire"?"active":""} onClick={()=>startOrder("fire")}>FIRE</button>
+        <button onClick={()=>startOrder("defend")}>HOLD</button>
+        <button onClick={()=>startOrder("dig")}>DIG</button>
+        <button onClick={()=>startOrder("resupply")}>SUPPLY</button>
+      </div>
+      <div className="mobile-build-orders">
+        <button className={pendingBuild==="trench"?"active":""} onClick={()=>armConstruction("trench")}>TRENCH</button>
+        <button className={pendingBuild==="barricade"?"active":""} onClick={()=>armConstruction("barricade")}>BARRIER</button>
+        <button disabled={!selectedUnits.some(u=>u.kind==="logistics")} className={pendingBuild==="road"?"active":""} onClick={()=>armConstruction("road")}>ROAD</button>
+      </div>
+    </section>}
+
+    <aside className="right-panel">
       {openWorld&&!primary?<div className="openworld-inspector"><div className="section-title">OPEN WORLD</div><b>{cities.filter(c=>c.owner===playerSide).length} CONTROLLED CITIES</b><span>{openWorld.recruitment.filter(q=>q.side===playerSide).length} formations recruiting</span><span>Keep forces concentrated on empty land to urbanize it into a permanent city.</span></div>:primary?<div className="inspector">
         <div className="unit-heading"><div className="big-counter">{UNIT_LABEL[primary.kind]}</div><div><small>{primary.kind.toUpperCase()} FORMATION</small><h2>{primary.name}</h2><span>{orderLabel(primary)}</span></div></div>
         <div className="stat-grid"><Stat label="Strength" value={primary.strength}/><Stat label="Organization" value={primary.organization}/><Stat label="Supply" value={primary.supply}/><Stat label="Fuel" value={primary.fuel}/><Stat label="Entrenchment" value={primary.entrenchment}/><Stat label="Readiness" value={primary.readiness}/></div>
@@ -1998,10 +2037,8 @@ export default function Home(){
 
     <nav className="mobile-toolbar" aria-label="Mobile controls">
       <button className={mobileTool==="pan"?"active":""} onClick={()=>{setMobileTool("pan");setMobilePanel("none")}}><b>✥</b><span>PAN</span></button>
-      <button className={mobileTool==="select"?"active":""} onClick={()=>{setMobileTool("select");setMobilePanel("none")}}><b>▧</b><span>SELECT</span></button>
       <button disabled={selected.length<2} className={mobileTool==="front"?"active":""} onClick={()=>{setMobileTool("front");setMobilePanel("none")}}><b>╱</b><span>FRONT</span></button>
       <button className={mobilePanel==="forces"?"active":""} onClick={()=>setMobilePanel(v=>v==="forces"?"none":"forces")}><b>☷</b><span>FORCES</span></button>
-      <button disabled={!primary} className={mobilePanel==="unit"?"active":""} onClick={()=>setMobilePanel(v=>v==="unit"?"none":"unit")}><b>⌖</b><span>ORDERS</span></button>
       <button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)}><b>{running?"Ⅱ":"▶"}</b><span>{running?"PAUSE":"PLAY"}</span></button>
     </nav>
 
