@@ -988,7 +988,7 @@ export default function Home(){
       if(aiElapsed>=AI_COMMAND_INTERVAL_SECONDS){for(const side of botSides)working=enemyAI(scenario,working,citiesRef.current,side);aiElapsed=0}
       let nextUnits=simulate(scenario,working,simHours,citiesRef.current,emplacementsRef.current,openWorldRef.current);
       if(openWorldRef.current){
-        const ow=advanceOpenWorld(openWorldRef.current,nextUnits,citiesRef.current,simHours);
+        const ow=advanceOpenWorld(scenario,openWorldRef.current,nextUnits,citiesRef.current,simHours);
         openWorldRef.current=ow.state;setOpenWorld(ow.state);
         if(ow.spawned.length)nextUnits=[...nextUnits,...ow.spawned];
         if(ow.newCities.length){citiesRef.current=[...citiesRef.current,...ow.newCities];setCities(citiesRef.current)}
