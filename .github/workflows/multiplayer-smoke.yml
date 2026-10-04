@@ -1,0 +1,74 @@
+name: Multiplayer backend smoke test
+
+on:
+  push:
+    branches: ["feature/supabase-multiplayer"]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --no-audit --no-fund
+      - name: Invite matchmaking and Realtime smoke test
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import {createClient} from "@supabase/supabase-js";
+
+          const url="https://qyylrkqktctcsrqgviwp.supabase.co";
+          const key="sb_publishable_VaV0h0GhPx171fJHTG-avw_7oWSlJt8";
+
+          async function matchmaking(payload){
+            const response=await fetch(url+"/functions/v1/matchmaking",{
+              method:"POST",
+              headers:{"Content-Type":"application/json",apikey:key},
+              body:JSON.stringify(payload)
+            });
+            const body=await response.json();
+            if(!response.ok)throw new Error(JSON.stringify(body));
+            return body;
+          }
+          const wait=(ms)=>new Promise(resolve=>setTimeout(resolve,ms));
+          async function until(fn,label,timeout=12000){
+            const start=Date.now();
+            while(Date.now()-start<timeout){
+              if(fn())return;
+              await wait(100);
+            }
+            throw new Error("timeout: "+label);
+          }
+
+          const host=(await matchmaking({action:"create_invite",presetId:"frontier",side:"blue"})).session;
+          if(!host?.isHost||!host.code||host.side!=="blue")throw new Error("bad host session");
+
+          const guest=(await matchmaking({action:"join_invite",code:host.code})).session;
+          if(!guest||guest.roomId!==host.roomId||guest.side!=="red"||guest.isHost)throw new Error("bad guest session");
+
+          const a=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+          const b=createClient(url,key,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+          let ping=false;
+          let aSubscribed=false,bSubscribed=false;
+
+          const ca=a.channel("kspiel:"+host.roomId,{config:{presence:{key:host.playerToken},broadcast:{ack:false,self:false}}})
+            .on("broadcast",{event:"smoke-ping"},({payload})=>{if(payload?.ok===true)ping=true});
+          const cb=b.channel("kspiel:"+guest.roomId,{config:{presence:{key:guest.playerToken},broadcast:{ack:false,self:false}}});
+
+          ca.subscribe(async status=>{if(status==="SUBSCRIBED"){aSubscribed=true;await ca.track({role:"host",side:"blue"})}});
+          cb.subscribe(async status=>{if(status==="SUBSCRIBED"){bSubscribed=true;await cb.track({role:"guest",side:"red"})}});
+
+          await until(()=>aSubscribed&&bSubscribed,"subscriptions");
+          await until(()=>Object.values(ca.presenceState()).reduce((n,v)=>n+v.length,0)>=2,"presence");
+          await cb.send({type:"broadcast",event:"smoke-ping",payload:{ok:true}});
+          await until(()=>ping,"broadcast");
+
+          await Promise.all([a.removeChannel(ca),b.removeChannel(cb)]);
+          await matchmaking({action:"cancel_room",roomId:host.roomId,playerToken:host.playerToken});
+          console.log("MULTIPLAYER_SMOKE_OK",host.code,host.roomId);
+          NODE
