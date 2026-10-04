@@ -43,6 +43,34 @@ function segmentsIntersect(ax:number,ay:number,bx:number,by:number,cx:number,cy:
   return ((o1>0&&o2<0)||(o1<0&&o2>0))&&((o3>0&&o4<0)||(o3<0&&o4>0));
 }
 
+function segmentIntersectionPoint(ax:number,ay:number,bx:number,by:number,cx:number,cy:number,dx:number,dy:number){
+  const rx=bx-ax,ry=by-ay,sx=dx-cx,sy=dy-cy;
+  const den=rx*sy-ry*sx;
+  if(Math.abs(den)<1e-7)return null;
+  const qx=cx-ax,qy=cy-ay;
+  const t=(qx*sy-qy*sx)/den,u=(qx*ry-qy*rx)/den;
+  if(t<0||t>1||u<0||u>1)return null;
+  return{x:ax+t*rx,y:ay+t*ry};
+}
+
+function constructionLabel(kind:EmplacementKind){
+  return kind==="observatory"?"OBSERVATORY"
+    :kind==="fixed_artillery"?"FIXED ARTILLERY"
+    :kind==="field_fortification"?"FIELD FORTIFICATION"
+    :kind==="supply_depot"?"SUPPLY DEPOT"
+    :kind==="trench"?"TRENCH"
+    :kind==="barricade"?"BARRICADE"
+    :"ROAD";
+}
+
+function constructionShort(kind:EmplacementKind){
+  return kind==="observatory"?"OBS":kind==="fixed_artillery"?"BAT":kind==="field_fortification"?"FORT":kind==="supply_depot"?"DEP":kind==="trench"?"TRN":kind==="barricade"?"BAR":"RD";
+}
+
+function isLinearConstruction(kind:EmplacementKind){
+  return kind==="trench"||kind==="barricade"||kind==="road";
+}
+
 function structureSegmentDistance(s:{x:number;y:number;x2?:number;y2?:number},x:number,y:number){
   return s.x2===undefined||s.y2===undefined?Math.hypot(s.x-x,s.y-y):segmentContact(s.x,s.y,s.x2,s.y2,x,y).distance;
 }
@@ -264,6 +292,7 @@ function movementRoutePlan(
   u:Formation,
   from:{x:number;y:number},
   to:{x:number;y:number},
+  emplacements:Emplacement[]=[],
   openWorld?:OpenWorldState|null
 ){
   let best:{cost:number;points:Array<{x:number;y:number}>}={
@@ -274,10 +303,13 @@ function movementRoutePlan(
     if(Number.isFinite(cost)&&cost<best.cost)best={cost,points:dedupeRoutePoints(points)};
   };
 
-  const builtRoads=(openWorld?.structures??[])
-    .filter(s=>s.kind==="road"&&s.side===u.side&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined)
+  const fieldRoads=emplacements
+    .filter(e=>e.kind==="road"&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined)
+    .map(e=>[{x:e.x,y:e.y},{x:e.x2!,y:e.y2!}]);
+  const strategicRoads=(openWorld?.structures??[])
+    .filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined)
     .map(s=>[{x:s.x,y:s.y},{x:s.x2!,y:s.y2!}]);
-  const localRoads=[...scenario.roadRoutes,...builtRoads];
+  const localRoads=[...scenario.roadRoutes,...fieldRoads,...strategicRoads];
 
   // Fast single-road candidates. This catches most useful "hop onto the road,
   // leave it near the destination" cases without a full path search.
@@ -422,23 +454,72 @@ function supplySourceAtPoint(side:Side,point:{x:number;y:number},cities:CityStat
   return roadSource.capacity>citySource.capacity?roadSource:citySource;
 }
 
-function builtRoadSupplyAccess(u:Formation,units:Formation[],cities:CityState[],network:SupplyNetwork,openWorld:OpenWorldState|null){
-  if(!openWorld)return null;
+function builtRoadSupplyAccess(u:Formation,units:Formation[],cities:CityState[],network:SupplyNetwork,emplacements:Emplacement[],openWorld:OpenWorldState|null){
+  const roads=[
+    ...emplacements
+      .filter(e=>e.kind==="road"&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined)
+      .map(e=>({route:[{x:e.x,y:e.y},{x:e.x2!,y:e.y2!}],side:e.side})),
+    ...(openWorld?.structures??[])
+      .filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined)
+      .map(s=>({route:[{x:s.x,y:s.y},{x:s.x2!,y:s.y2!}],side:s.side}))
+  ];
+  if(!roads.length)return null;
+
+  const near=roads
+    .map((road,index)=>({road,index,pos:routePosition(road.route,u.x,u.y)}))
+    .filter(x=>x.pos.distance<=62);
+  if(!near.length)return null;
+
+  const usable=roads.map(road=>routeInterdictionPoints(road.route,u.side,units).length===0);
+  const adjacency=roads.map(()=>new Set<number>());
+  for(let i=0;i<roads.length;i++)for(let j=i+1;j<roads.length;j++){
+    const a=roads[i].route,b=roads[j].route;
+    const crosses=segmentsIntersect(a[0].x,a[0].y,a[1].x,a[1].y,b[0].x,b[0].y,b[1].x,b[1].y);
+    const close=Math.min(
+      segmentContact(a[0].x,a[0].y,a[1].x,a[1].y,b[0].x,b[0].y).distance,
+      segmentContact(a[0].x,a[0].y,a[1].x,a[1].y,b[1].x,b[1].y).distance,
+      segmentContact(b[0].x,b[0].y,b[1].x,b[1].y,a[0].x,a[0].y).distance,
+      segmentContact(b[0].x,b[0].y,b[1].x,b[1].y,a[1].x,a[1].y).distance
+    )<=34;
+    if(crosses||close){adjacency[i].add(j);adjacency[j].add(i)}
+  }
+
+  const roadSources=(index:number)=>{
+    const route=roads[index].route;
+    const candidates:Array<{capacity:number;source:CityState;distance:number}>=[];
+    for(const point of route){
+      const source=supplySourceAtPoint(u.side,point,cities,network);
+      if(source)candidates.push(source);
+    }
+    for(const generated of network.roads){
+      for(let s=0;s<generated.route.length-1;s++){
+        const p=segmentIntersectionPoint(
+          route[0].x,route[0].y,route[1].x,route[1].y,
+          generated.route[s].x,generated.route[s].y,generated.route[s+1].x,generated.route[s+1].y
+        );
+        if(!p)continue;
+        const source=supplySourceAtPoint(u.side,p,cities,network);
+        if(source)candidates.push(source);
+      }
+    }
+    return candidates;
+  };
+
   let best:{capacity:number;source:CityState;distance:number}|null=null;
-  for(const road of openWorld.structures){
-    if(road.kind!=="road"||road.side!==u.side||road.strength<=0||road.x2===undefined||road.y2===undefined)continue;
-    const route=[{x:road.x,y:road.y},{x:road.x2,y:road.y2}];
-    const pos=routePosition(route,u.x,u.y);
-    if(pos.distance>62)continue;
-    const cuts=routeInterdictionPoints(route,u.side,units);
-    const endpoints=[{point:route[0],along:0},{point:route[1],along:pos.total}];
-    for(const endpoint of endpoints){
-      const source=supplySourceAtPoint(u.side,endpoint.point,cities,network);
-      if(!source)continue;
-      const lo=Math.min(pos.along,endpoint.along),hi=Math.max(pos.along,endpoint.along);
-      if(cuts.some(c=>c.along>=lo-4&&c.along<=hi+4))continue;
-      const distance=pos.distance+Math.abs(pos.along-endpoint.along)+source.distance;
-      if(!best||source.capacity>best.capacity||(source.capacity===best.capacity&&distance<best.distance))best={capacity:source.capacity,source:source.source,distance};
+  for(const entry of near){
+    const queue=[{index:entry.index,distance:entry.pos.distance}],seen=new Set<number>();
+    while(queue.length){
+      const current=queue.shift()!;if(seen.has(current.index)||!usable[current.index])continue;
+      seen.add(current.index);
+      for(const source of roadSources(current.index)){
+        const distance=current.distance+source.distance;
+        if(!best||source.capacity>best.capacity||(source.capacity===best.capacity&&distance<best.distance))best={capacity:source.capacity,source:source.source,distance};
+      }
+      const len=Math.hypot(
+        roads[current.index].route[1].x-roads[current.index].route[0].x,
+        roads[current.index].route[1].y-roads[current.index].route[0].y
+      );
+      for(const next of adjacency[current.index])if(!seen.has(next))queue.push({index:next,distance:current.distance+len*.5});
     }
   }
   return best;
@@ -507,7 +588,7 @@ function supplyAccess(scenario:Scenario,u:Formation,units:Formation[],cities:Cit
   const sample=terrainAt(scenario,u.x,u.y);
   const city=sample.objective?cities.find(c=>c.name===sample.objective):undefined;
   const generatedRoadLink=roadSupplyAccess(u,network);
-  const builtRoadLink=builtRoadSupplyAccess(u,units,cities,network,openWorld);
+  const builtRoadLink=builtRoadSupplyAccess(u,units,cities,network,emplacements,openWorld);
   const roadLink=!generatedRoadLink?builtRoadLink:!builtRoadLink?generatedRoadLink
     :builtRoadLink.capacity>generatedRoadLink.capacity?builtRoadLink
     :generatedRoadLink.capacity>builtRoadLink.capacity?generatedRoadLink
@@ -799,8 +880,10 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
         n.order=nextWaypoint?{type:"move",targetX:nextWaypoint.x,targetY:nextWaypoint.y,waypoints:remaining}:{type:"defend"};
       }else if(dist>0){
         const posture=n.order.type==="retreat"?1.9:n.order.type==="relieve"?1.12:n.order.type==="assault"?.58:n.order.type==="probe"?.74:1;
-        const builtRoad=openWorld?.structures.some(s=>s.kind==="road"&&s.side===u.side&&s.strength>0&&structureSegmentDistance(s,u.x,u.y)<34);
-        const roadBonus=(sample.road||builtRoad)
+        const fieldRoad=emplacements.some(e=>e.kind==="road"&&e.strength>0&&structureSegmentDistance(e,u.x,u.y)<34);
+        const strategicRoad=openWorld?.structures.some(s=>s.kind==="road"&&s.strength>0&&structureSegmentDistance(s,u.x,u.y)<34);
+        const onRoad=sample.road||fieldRoad||Boolean(strategicRoad);
+        const roadBonus=onRoad
           ?ARTILLERY_KINDS.has(u.kind)?2.5
           :u.kind==="logistics"?2.05
           :u.kind==="armor"||u.kind==="tank"||u.kind==="mechanized"||u.kind==="recon"?1.8
@@ -824,20 +907,22 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
         }
 
         const blockingWall=openWorld?.structures.find(s=>s.kind==="wall"&&s.side!==u.side&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined&&segmentsIntersect(u.x,u.y,nx,ny,s.x,s.y,s.x2,s.y2));
-        if(blockingWall){
+        const blockingBarricade=emplacements.find(e=>e.kind==="barricade"&&e.side!==u.side&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined&&segmentsIntersect(u.x,u.y,nx,ny,e.x,e.y,e.x2,e.y2));
+        const obstacle=blockingWall??blockingBarricade;
+        if(obstacle){
           if(n.order.type==="assault"||n.order.type==="probe"){
             const breachPower=(n.softAttack*.055+n.hardAttack*.08)*(n.organization/100)*Math.max(.25,n.supply/100);
-            blockingWall.strength=Math.max(0,blockingWall.strength-hours*breachPower);
+            obstacle.strength=Math.max(0,obstacle.strength-hours*breachPower);
             n.organization=clamp(n.organization-hours*.42,0,100);
             n.supply=clamp(n.supply-hours*.22,0,100);
           }
-          if(blockingWall.strength>0){nx=u.x;ny=u.y}
+          if(obstacle.strength>0){nx=u.x;ny=u.y}
         }
         const nextTerrain=terrainAt(scenario,nx,ny).terrain;
         const passable=nextTerrain!=="water"&&(nextTerrain!=="highmountain"||u.kind==="mountaineer");
         if(passable){
           n.x=nx;n.y=ny;
-          const movementSupplyCost=sample.road?0:travel*(u.kind==="armor"||u.kind==="tank"||u.kind==="mechanized"?.024:u.kind==="heavy_artillery"?.02:.012);
+          const movementSupplyCost=onRoad?0:travel*(u.kind==="armor"||u.kind==="tank"||u.kind==="mechanized"?.024:u.kind==="heavy_artillery"?.02:.012);
           n.supply=clamp(n.supply-movementSupplyCost,0,100);
           n.fuel=clamp(n.fuel-travel*(u.kind==="armor"||u.kind==="tank"?.021:u.kind==="mechanized"||u.kind==="recon"?.013:.001),0,100);
           n.entrenchment=Math.max(0,n.entrenchment-hours*.7);
@@ -871,8 +956,19 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       if(!aCan&&!bCan)continue;
       const aWall=openWorld?.structures.some(s=>(s.kind==="wall"||s.kind==="fort")&&s.side===a.side&&Math.hypot(s.x-a.x,s.y-a.y)<150)?1.32:1;
       const bWall=openWorld?.structures.some(s=>(s.kind==="wall"||s.kind==="fort")&&s.side===b.side&&Math.hypot(s.x-b.x,s.y-b.y)<150)?1.32:1;
-      const aDef=TERRAIN_RULES[terrainAt(scenario,a.x,a.y).terrain].defense*aWall;
-      const bDef=TERRAIN_RULES[terrainAt(scenario,b.x,b.y).terrain].defense*bWall;
+      const fieldDefense=(u:Formation)=>{
+        let factor=1;
+        for(const e of emplacements){
+          if(e.side!==u.side||e.strength<=0)continue;
+          const distance=structureSegmentDistance(e,u.x,u.y);
+          if(e.kind==="trench"&&distance<85)factor=Math.max(factor,1.38);
+          else if(e.kind==="barricade"&&distance<75)factor=Math.max(factor,1.22);
+          else if(e.kind==="field_fortification"&&distance<e.range)factor=Math.max(factor,1.26);
+        }
+        return factor;
+      };
+      const aDef=TERRAIN_RULES[terrainAt(scenario,a.x,a.y).terrain].defense*aWall*fieldDefense(a);
+      const bDef=TERRAIN_RULES[terrainAt(scenario,b.x,b.y).terrain].defense*bWall*fieldDefense(b);
       const aRetreat=a.order?.type==="retreat",bRetreat=b.order?.type==="retreat";
       const aPower=aCan&&!aRetreat?(a.softAttack*(1-b.hardness)+a.hardAttack*b.hardness)*(a.organization/100)*(a.supply/100):0;
       const bPower=bCan&&!bRetreat?(b.softAttack*(1-a.hardness)+b.hardAttack*a.hardness)*(b.organization/100)*(b.supply/100):0;
@@ -943,7 +1039,14 @@ function applyEmplacementFire(units:Formation[],emplacements:Emplacement[],citie
       }
       continue;
     }
-    if(emplacement.kind==="supply_depot")continue;
+    if(emplacement.kind==="trench"){
+      for(const u of result)if(u.side===emplacement.side&&structureSegmentDistance(emplacement,u.x,u.y)<=85){
+        u.entrenchment=clamp(u.entrenchment+hours*.34,0,100);
+        u.organization=clamp(u.organization+hours*.08,0,100);
+      }
+      continue;
+    }
+    if(emplacement.kind==="supply_depot"||emplacement.kind==="barricade"||emplacement.kind==="road")continue;
     if(emplacement.kind!=="fixed_artillery")continue;
     const target=result
       .filter(u=>u.side!==emplacement.side&&u.strength>1&&Math.hypot(u.x-emplacement.x,u.y-emplacement.y)<=emplacement.range)
@@ -961,15 +1064,18 @@ function advanceConstruction(projects:ConstructionProject[],emplacements:Emplace
   const nextProjects:ConstructionProject[]=[];
   const nextEmplacements=[...emplacements];
   for(const project of projects){
-    const builders=units.filter(u=>project.builderIds.includes(u.id)&&u.side===project.side&&u.kind==="engineer"&&u.strength>8);
-    const active=builders.filter(u=>Math.hypot(u.x-project.x,u.y-project.y)<78&&u.supply>18&&!isInCombat(u,units));
-    const workerPower=Math.min(3,active.length);
-    for(const builder of active)builder.supply=clamp(builder.supply-hours*(project.kind==="fixed_artillery"?.34:project.kind==="supply_depot"?.26:.2),0,100);
+    const workX=project.x2===undefined?project.x:(project.x+project.x2)*.5;
+    const workY=project.y2===undefined?project.y:(project.y+project.y2)*.5;
+    const builders=units.filter(u=>project.builderIds.includes(u.id)&&u.side===project.side&&u.strength>8&&(project.kind!=="road"||u.kind==="logistics"));
+    const active=builders.filter(u=>Math.hypot(u.x-workX,u.y-workY)<92&&u.supply>12&&!isInCombat(u,units));
+    const workerPower=Math.min(12,active.reduce((sum,builder)=>sum+(builder.kind==="engineer"?4:builder.kind==="logistics"&&project.kind==="road"?1.35:1),0));
+    for(const builder of active)builder.supply=clamp(builder.supply-hours*(project.kind==="fixed_artillery"?.34:project.kind==="supply_depot"?.26:project.kind==="road"?.24:.2),0,100);
     const progress=project.progress+hours*workerPower;
     if(progress>=project.requiredHours){
       nextEmplacements.push({
-        id:"em-"+project.id,kind:project.kind,side:project.side,x:project.x,y:project.y,strength:100,
-        range:project.kind==="observatory"?1100:project.kind==="fixed_artillery"?860:project.kind==="field_fortification"?125:540
+        id:"em-"+project.id,kind:project.kind,side:project.side,x:project.x,y:project.y,x2:project.x2,y2:project.y2,
+        strength:project.kind==="barricade"?145:project.kind==="trench"?125:100,
+        range:project.kind==="observatory"?1100:project.kind==="fixed_artillery"?860:project.kind==="field_fortification"?125:project.kind==="supply_depot"?540:project.kind==="trench"?85:project.kind==="barricade"?75:0
       });
     }else nextProjects.push({...project,progress});
   }
@@ -1006,6 +1112,7 @@ export default function Home(){
   const [emplacements,setEmplacements]=useState<Emplacement[]>([]);
   const [constructionProjects,setConstructionProjects]=useState<ConstructionProject[]>([]);
   const [pendingBuild,setPendingBuild]=useState<EmplacementKind|null>(null);
+  const [constructionAnchor,setConstructionAnchor]=useState<{x:number;y:number}|null>(null);
   const [isMobile,setIsMobile]=useState(false);
   const [mobilePanel,setMobilePanel]=useState<"none"|"forces"|"unit">("none");
   const [mobileTool,setMobileTool]=useState<"pan"|"select"|"front">("pan");
@@ -1292,14 +1399,14 @@ export default function Home(){
     const onKey=(e:KeyboardEvent)=>{
       const el=e.target as HTMLElement|null;if(el?.tagName==="INPUT"||el?.tagName==="TEXTAREA"||el?.isContentEditable)return;
       const key=e.key.toLowerCase();
-      if(key==="escape"){setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);return}
+      if(key==="escape"){setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);setConstructionAnchor(null);return}
       const digit=/^Digit([1-6])$/.exec(e.code);
       if(digit){
         const group=armyGroups[Number(digit[1])-1];
         if(e.ctrlKey){e.preventDefault();assignGroup(group.id)}else if(!e.metaKey&&!e.altKey){e.preventDefault();selectGroup(group.id)}
         return;
       }
-      if(key==="b"){setPendingPlan(true);setPendingOrder(null);setPendingBuild(null);return}
+      if(key==="b"){setPendingPlan(true);setPendingOrder(null);setPendingBuild(null);setConstructionAnchor(null);return}
       if(key==="m")startOrder("move");else if(key==="a")startOrder("assault");else if(key==="p")startOrder("probe");
       else if(key==="f")startOrder("fire");else if(key==="d")startOrder("defend");else if(key==="g")startOrder("dig");
       else if(key==="r")startOrder("resupply");else if(key==="t")startOrder("relieve");else if(key==="x")startOrder("retreat");
@@ -1315,7 +1422,7 @@ export default function Home(){
     if(network){setPlayerSide(network.side);setSelectedPresetId(network.presetId);setSelectedGameMode("scenario")}
     let generated=generateScenario(seed,presetId);
     if(gameMode==="openworld")generated={...generated,presetId:"open-world",title:"Open World Dominion",historical:false,sideNames:{blue:"Blue Dominion",red:"Red Dominion",green:"Green Dominion"},sideFlags:{blue:"generic-blue",red:"generic-red",green:"generic-blue"}};
-    warResultRef.current=null;setWarResult(null);setAttackPlans([]);setPendingPlan(false);setPendingOrder(null);setPendingBuild(null);setStrategicBuildAnchor(null);
+    warResultRef.current=null;setWarResult(null);setAttackPlans([]);setPendingPlan(false);setPendingOrder(null);setPendingBuild(null);setConstructionAnchor(null);setStrategicBuildAnchor(null);
     setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setMobilePanel("none");
     if(gameMode==="openworld"){
       const ow=createOpenWorldState(generated,generated.formations,generated.cities);openWorldRef.current=ow.state;setOpenWorld(ow.state);
@@ -1503,26 +1610,48 @@ export default function Home(){
   }
 
   function armConstruction(kind:EmplacementKind){
-    const engineers=selectedUnits.filter(u=>u.kind==="engineer"&&localSides.has(u.side));
-    if(!engineers.length)return;
-    setPendingBuild(kind);setPendingOrder(null);setPendingPlan(false);
+    const builders=selectedUnits.filter(u=>localSides.has(u.side)&&(kind!=="road"||u.kind==="logistics"));
+    if(!builders.length)return;
+    setPendingBuild(kind);setConstructionAnchor(null);setPendingOrder(null);setPendingPlan(false);
   }
 
   function createConstruction(tx:number,ty:number){
     if(!pendingBuild)return;
-    const engineers=selectedUnits.filter(u=>u.kind==="engineer"&&localSides.has(u.side));
-    if(!engineers.length){setPendingBuild(null);return}
+    const builders=selectedUnits.filter(u=>localSides.has(u.side)&&(pendingBuild!=="road"||u.kind==="logistics"));
+    if(!builders.length){setPendingBuild(null);setConstructionAnchor(null);return}
     const terrain=terrainAt(activeScenario,tx,ty).terrain;
     if(terrain==="water"||terrain==="highmountain")return;
+
+    if(isLinearConstruction(pendingBuild)&&!constructionAnchor){
+      setConstructionAnchor({x:tx,y:ty});
+      return;
+    }
+
+    const start=isLinearConstruction(pendingBuild)?constructionAnchor!:{x:tx,y:ty};
+    const end=isLinearConstruction(pendingBuild)?{x:tx,y:ty}:undefined;
+    const length=end?Math.hypot(end.x-start.x,end.y-start.y):0;
+    if(end&&length<70)return;
+    if(end){
+      const midTerrain=terrainAt(activeScenario,(start.x+end.x)*.5,(start.y+end.y)*.5).terrain;
+      if(midTerrain==="water"||midTerrain==="highmountain")return;
+    }
+
     const id="build-"+playerSide+"-"+buildCounter.current++;
+    const requiredHours=pendingBuild==="observatory"?26
+      :pendingBuild==="fixed_artillery"?50
+      :pendingBuild==="field_fortification"?18
+      :pendingBuild==="supply_depot"?34
+      :pendingBuild==="trench"?10+length*.02
+      :pendingBuild==="barricade"?12+length*.024
+      :18+length*.045;
     const project:ConstructionProject={
-      id,kind:pendingBuild,side:engineers[0].side,x:tx,y:ty,builderIds:engineers.map(u=>u.id),progress:0,
-      requiredHours:pendingBuild==="observatory"?26:pendingBuild==="fixed_artillery"?50:pendingBuild==="field_fortification"?18:34
+      id,kind:pendingBuild,side:builders[0].side,x:start.x,y:start.y,x2:end?.x,y2:end?.y,builderIds:builders.map(u=>u.id),progress:0,requiredHours
     };
     const next=[...projectsRef.current,project];projectsRef.current=next;setConstructionProjects(next);
     if(multiplayerRef.current&&!multiplayerRef.current.isHost)sendNetwork("construction-create",{project});
-    commitUnits(prev=>prev.map(u=>project.builderIds.includes(u.id)?{...u,order:{type:"move",targetX:tx,targetY:ty}}:u));
-    setPendingBuild(null);
+    const workX=end?(start.x+end.x)*.5:start.x,workY=end?(start.y+end.y)*.5:start.y;
+    commitUnits(prev=>prev.map(u=>project.builderIds.includes(u.id)?{...u,order:{type:"move",targetX:workX,targetY:workY}}:u));
+    setPendingBuild(null);setConstructionAnchor(null);
   }
 
   function issueMapTargetAt(clientX:number,clientY:number,append=false){
@@ -1556,7 +1685,7 @@ export default function Home(){
         if(!selected.includes(u.id))return u;
         if(append&&u.order?.targetX!==undefined&&u.order?.targetY!==undefined&&!u.order.targetUnitId){
           const tail=u.order.waypoints?.length?u.order.waypoints[u.order.waypoints.length-1]:{x:u.order.targetX,y:u.order.targetY};
-          const leg=movementRoutePlan(activeScenario,cities,u,tail,{x:tx,y:ty},openWorldRef.current);
+          const leg=movementRoutePlan(activeScenario,cities,u,tail,{x:tx,y:ty},emplacementsRef.current,openWorldRef.current);
           return{...u,order:{...u.order,waypoints:[...(u.order.waypoints??[]),...leg]}};
         }
         if(requested==="fire"){
@@ -1566,7 +1695,7 @@ export default function Home(){
           return{...u,order:{type:"fire",targetX:tx,targetY:ty}};
         }
         if(requested==="probe"&&DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:"probe",targetX:tx,targetY:ty}};
-        const route=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},{x:tx,y:ty},openWorldRef.current);
+        const route=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},{x:tx,y:ty},emplacementsRef.current,openWorldRef.current);
         const [first,...rest]=route;
         return first?{...u,order:{type:"move",targetX:first.x,targetY:first.y,waypoints:rest}}:{...u,order:{type:"move",targetX:tx,targetY:ty}};
       });
@@ -1698,7 +1827,7 @@ export default function Home(){
     if(d.mode==="select"){if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null)}return}
     if(d.mode==="box"){
       setSelectionBox(null);
-      if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);return}
+      if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);setConstructionAnchor(null);return}
       const a=mapPoint(d.startClientX,d.startClientY),b=mapPoint(e.clientX,e.clientY);if(!a||!b)return;
       const minX=Math.min(a.x,b.x),maxX=Math.max(a.x,b.x),minY=Math.min(a.y,b.y),maxY=Math.max(a.y,b.y);
       setSelected(units.filter(u=>localSides.has(u.side)&&u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY).map(u=>u.id));setPendingOrder(null);return;
@@ -1741,8 +1870,8 @@ export default function Home(){
       <section><div className="section-title">MAP LAYERS</div><div className="segmented">{(["terrain","supply","intel"] as OverlayMode[]).map(m=><button key={m} onClick={()=>setOverlay(m)} className={overlay===m?"active":""}>{m.toUpperCase()}</button>)}</div></section>
       <section><div className="section-title">ARMY GROUPS · CTRL+1…6 ASSIGN</div><div className="army-group-grid">{armyGroups.map(g=><button key={g.id} onClick={()=>selectGroup(g.id)}><b>{g.hotkey}</b><span>{g.name}<small>{blue.filter(u=>u.groupId===g.id).length} formations</small></span></button>)}</div></section>
       <section><div className="section-title">ATTACK PLANS · B THEN RMB</div><div className="plan-list">{attackPlans.length?attackPlans.map(p=><div className={"plan-row "+p.status} key={p.id}><button onClick={()=>setSelected(p.formationIds)}><b>{p.name}</b><small>{p.formationIds.length} formations · {p.status}</small></button>{p.status==="draft"&&<button onClick={()=>executePlan(p.id)}>GO</button>}<button onClick={()=>cancelPlan(p.id)}>×</button></div>):<small className="muted-line">No plans drafted.</small>}</div></section>
-      {openWorld&&<section className="openworld-panel"><div className="section-title">DOMINION</div><div className="resource-strip"><b>MP {Math.floor(openWorld.resources[playerSide].manpower)}</b><b>MAT {Math.floor(openWorld.resources[playerSide].materials)}</b><b>FUEL {Math.floor(openWorld.resources[playerSide].fuel)}</b></div><div className="section-title">RAISE FORMATIONS</div><div className="recruit-grid">{(["infantry","mountaineer","special_forces","engineer","cavalry","recon","mechanized","tank","mortar","artillery","heavy_artillery","logistics"] as Formation["kind"][]).map(kind=>{const cost=UNIT_COST[kind];const barracks=openWorld.structures.find(b=>b.side===playerSide&&b.kind===cost?.family);return <button key={kind} disabled={!cost||!barracks} onClick={()=>{if(!cost||!barracks)return;const next=queueRecruitment(openWorldRef.current!,playerSide,kind,barracks.id);openWorldRef.current=next;setOpenWorld(next)}}><b>{UNIT_LABEL[kind]}</b><small>{cost?cost.manpower+" MP · "+cost.materials+" MAT · "+cost.fuel+" F":"—"}</small></button>})}</div><div className="section-title">BUILD</div><div className="strategic-build-grid">{(["infantry_barracks","mobile_barracks","support_barracks","city","fort","wall","road"] as OpenWorldBuildKind[]).map(kind=><button key={kind} className={pendingStrategicBuild===kind?"active":""} onClick={()=>{setPendingStrategicBuild(kind);setStrategicBuildAnchor(null);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null)}}>{kind.replaceAll("_"," ").toUpperCase()}</button>)}</div><small className="muted-line">Owned territory yields resources automatically. Concentrated armies urbanize empty territory into new cities.</small></section>}
-      <section><div className="section-title">ENGINEER WORKS</div><div className="construction-list">{constructionProjects.length?constructionProjects.filter(p=>localSides.has(p.side)).map(project=><div className="construction-row" key={project.id}><b>{project.kind==="observatory"?"OBSERVATORY":project.kind==="fixed_artillery"?"FIXED ARTILLERY":project.kind==="field_fortification"?"FIELD FORTIFICATION":"SUPPLY DEPOT"}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span><i><em style={{width:Math.min(100,project.progress/project.requiredHours*100)+"%"}}/></i></div>):<small className="muted-line">No active construction.</small>}</div></section>
+      {openWorld&&<section className="openworld-panel"><div className="section-title">DOMINION</div><div className="resource-strip"><b>MP {Math.floor(openWorld.resources[playerSide].manpower)}</b><b>MAT {Math.floor(openWorld.resources[playerSide].materials)}</b><b>FUEL {Math.floor(openWorld.resources[playerSide].fuel)}</b></div><div className="section-title">RAISE FORMATIONS</div><div className="recruit-grid">{(["infantry","mountaineer","special_forces","engineer","cavalry","recon","mechanized","tank","mortar","artillery","heavy_artillery","logistics"] as Formation["kind"][]).map(kind=>{const cost=UNIT_COST[kind];const barracks=openWorld.structures.find(b=>b.side===playerSide&&b.kind===cost?.family);return <button key={kind} disabled={!cost||!barracks} onClick={()=>{if(!cost||!barracks)return;const next=queueRecruitment(openWorldRef.current!,playerSide,kind,barracks.id);openWorldRef.current=next;setOpenWorld(next)}}><b>{UNIT_LABEL[kind]}</b><small>{cost?cost.manpower+" MP · "+cost.materials+" MAT · "+cost.fuel+" F":"—"}</small></button>})}</div><div className="section-title">BUILD</div><div className="strategic-build-grid">{(["infantry_barracks","mobile_barracks","support_barracks","city","fort","wall"] as OpenWorldBuildKind[]).map(kind=><button key={kind} className={pendingStrategicBuild===kind?"active":""} onClick={()=>{setPendingStrategicBuild(kind);setStrategicBuildAnchor(null);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);setConstructionAnchor(null)}}>{kind.replaceAll("_"," ").toUpperCase()}</button>)}</div><small className="muted-line">Roads are built by logistics formations. Owned territory yields resources automatically.</small></section>}
+      <section><div className="section-title">FIELD WORKS</div><div className="construction-list">{constructionProjects.length?constructionProjects.filter(p=>localSides.has(p.side)).map(project=><div className="construction-row" key={project.id}><b>{constructionLabel(project.kind)}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span><i><em style={{width:Math.min(100,project.progress/project.requiredHours*100)+"%"}}/></i></div>):<small className="muted-line">No active construction.</small>}</div></section>
       <section><div className="section-title">ORDER OF BATTLE</div><div className="oob-list">{blue.map(u=><button key={u.id} onClick={()=>{setSelected([u.id]);if(isMobile)setMobilePanel("unit")}} className={selected.includes(u.id)?"selected":""}><span className="oob-code">{UNIT_LABEL[u.kind]}</span><span><b>{u.name}</b><small>{pct(u.strength)} STR · {pct(u.organization)} ORG</small></span></button>)}</div></section>
     </aside>
 
@@ -1764,7 +1893,9 @@ export default function Home(){
           </g>
           {activeScenario.riverRoutes.map((route,i)=><path key={"river"+i} d={polylinePath(route)} className="river"/>)}
           {activeScenario.roadRoutes.map((route,i)=><path key={"road"+i} d={polylinePath(route)} className="road"/>)}{activeScenario.roadNodes.map(node=><circle key={node.id} cx={node.x} cy={node.y} r="7" className="road-node"/>)}
-          {openWorld?.structures.filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined).map(s=><path key={s.id} d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2} className={"built-road "+s.side}/>)}
+          {emplacements.filter(e=>e.kind==="road"&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined).map(e=><path key={e.id} d={"M "+e.x+" "+e.y+" L "+e.x2+" "+e.y2} className="road"/>)}
+          {openWorld?.structures.filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined).map(s=><path key={s.id} d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2} className="road"/>)}
+          {emplacements.filter(e=>(e.kind==="trench"||e.kind==="barricade")&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined).map(e=><g key={e.id} className={"field-line "+e.kind+" "+e.side} opacity={.4+.6*e.strength/145}><path d={"M "+e.x+" "+e.y+" L "+e.x2+" "+e.y2}/></g>)}
           {openWorld?.structures.filter(s=>s.kind==="wall"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined).map(s=><g key={s.id} className={"built-wall "+s.side} opacity={.45+.55*s.strength/160}><path d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2}/><path className="wall-cap" d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2}/></g>)}
           {cities.map(s=><g key={s.name} className={"site-label "+s.owner+(overlay==="supply"?(localSides.has(s.owner)?" supply-city friendly-supply-city":" supply-city hostile-supply-city"):"")}><circle cx={s.x} cy={s.y} r="6" className="site-core"/><circle cx={s.x} cy={s.y} r="25" className="site-ring"/>{s.capture>0&&<circle cx={s.x} cy={s.y} r="30" className="capture-ring" pathLength="100" strokeDasharray={s.capture+" "+(100-s.capture)} transform={"rotate(-90 "+s.x+" "+s.y+")"}/>}<text x={s.x+11} y={s.y-11}>{s.name.toUpperCase()} · {s.owner==="blue"?"B":s.owner==="red"?"R":"G"}</text></g>)}
           {overlay==="supply"&&<g className="city-supply-ranges">{cities.map(s=><circle key={"range-"+s.name} cx={s.x} cy={s.y} r={currentLogisticsGraph.cityRange} className={"city-supply-range "+s.owner}/>)}</g>}
@@ -1782,10 +1913,10 @@ export default function Home(){
                 </g>)}
               </g>
             })}
-            {openWorld?.structures.filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined).map(s=>{
+            {[...emplacements.filter(e=>e.kind==="road"&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined),...(openWorld?.structures.filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined)??[])].map(s=>{
               const route=[{x:s.x,y:s.y},{x:s.x2!,y:s.y2!}],cuts=routeInterdictionPoints(route,playerSide,units);
-              const connected=s.side===playerSide&&(Boolean(supplySourceAtPoint(playerSide,route[0],cities,currentSupplyNetwork))||Boolean(supplySourceAtPoint(playerSide,route[1],cities,currentSupplyNetwork)));
-              const state=s.side!==playerSide?"hostile":cuts.length?"cut":connected?"local":"contested";
+              const connected=Boolean(supplySourceAtPoint(playerSide,route[0],cities,currentSupplyNetwork))||Boolean(supplySourceAtPoint(playerSide,route[1],cities,currentSupplyNetwork))||currentSupplyNetwork.roads.some(base=>base.route.slice(0,-1).some((p,i)=>segmentsIntersect(route[0].x,route[0].y,route[1].x,route[1].y,p.x,p.y,base.route[i+1].x,base.route[i+1].y)));
+              const state=cuts.length?"cut":connected?"local":"contested";
               return <g key={"built-supply-"+s.id}><path d={polylinePath(route)} className={"supply-route built "+state}/>{cuts.map((cut,i)=><g key={"built-cut-"+s.id+"-"+i} className="supply-cut-marker" transform={"translate("+cut.x+" "+cut.y+")"}><circle r="24"/><line x1="-14" y1="-14" x2="14" y2="14"/><line x1="-14" y1="14" x2="14" y2="-14"/></g>)}</g>
             })}
             {cities.map(s=><g key={s.name} className={localSides.has(s.owner)?"supply-city-node friendly":"supply-city-node hostile"}>
@@ -1811,10 +1942,13 @@ export default function Home(){
           return <button key={u.id} className={"unit-counter "+u.side+" kind-"+u.kind+" "+(selected.includes(u.id)?"selected ":"")+(u.organization<30?"shaken ":"")+(u.order?.type==="retreat"?"retreating":"")} style={{left:u.x-16,top:u.y-16}} onPointerDown={e=>{if(e.button===2)e.preventDefault();e.stopPropagation()}} onClick={e=>selectUnit(e,u)} onContextMenuCapture={e=>e.preventDefault()} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{localSides.has(u.side)?"Ⅰ":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
         })}
         {openWorld?.structures.filter(s=>s.kind!=="road"&&s.kind!=="wall").map(s=><div key={s.id} className={"ow-structure "+s.kind+" "+s.side} style={{left:s.x-16,top:s.y-16}} title={s.kind}><b>{s.kind==="infantry_barracks"?"INF":s.kind==="mobile_barracks"?"MOB":s.kind==="support_barracks"?"SUP":"FORT"}</b></div>)}
-        {emplacements.map(e=>{
-          return <div key={e.id} className={"emplacement "+e.kind+" "+e.side} style={{left:e.x-18,top:e.y-18}} title={e.kind==="observatory"?"Observatory tower":e.kind==="fixed_artillery"?"Stationary artillery battery":e.kind==="field_fortification"?"Field fortification":"Supply depot"}><b>{e.kind==="observatory"?"OBS":e.kind==="fixed_artillery"?"BAT":e.kind==="field_fortification"?"FORT":"DEP"}</b><small>{Math.round(e.strength)}</small></div>
+        {emplacements.filter(e=>!isLinearConstruction(e.kind)).map(e=>{
+          return <div key={e.id} className={"emplacement "+e.kind+" "+e.side} style={{left:e.x-18,top:e.y-18}} title={constructionLabel(e.kind)}><b>{constructionShort(e.kind)}</b><small>{Math.round(e.strength)}</small></div>
         })}
-        {constructionProjects.filter(project=>localSides.has(project.side)).map(project=><div key={project.id} className={"construction-site "+project.kind} style={{left:project.x-15,top:project.y-15}}><b>{project.kind==="observatory"?"OBS":project.kind==="fixed_artillery"?"BAT":project.kind==="field_fortification"?"FORT":"DEP"}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span></div>)}
+        {constructionProjects.filter(project=>localSides.has(project.side)).map(project=>{
+          const x=project.x2===undefined?project.x:(project.x+project.x2)*.5,y=project.y2===undefined?project.y:(project.y+project.y2)*.5;
+          return <div key={project.id} className={"construction-site "+project.kind} style={{left:x-15,top:y-15}}><b>{constructionShort(project.kind)}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span></div>
+        })}
         {primary&&primaryTargetX!==undefined&&primaryTargetY!==undefined&&<svg className="order-line" width={mapW} height={mapH}><polyline points={[{x:primary.x,y:primary.y},{x:primaryTargetX,y:primaryTargetY},...(primary.order?.waypoints??[])].map(point=>point.x+","+point.y).join(" ")} /><circle cx={primaryTargetX} cy={primaryTargetY} r="10"/>{(primary.order?.waypoints??[]).map((point,i)=><circle key={i} cx={point.x} cy={point.y} r="8"/>)}</svg>}
         {attackPlans.length>0&&<svg className="attack-plans" width={mapW} height={mapH}>{attackPlans.map(plan=>{const o=planOrigin(plan);return <g key={plan.id} className={plan.status}><line x1={o.x} y1={o.y} x2={plan.targetX} y2={plan.targetY}/><circle cx={plan.targetX} cy={plan.targetY} r="18"/><text x={plan.targetX+24} y={plan.targetY-18}>{plan.name}</text></g>})}</svg>}
       </div>
@@ -1825,7 +1959,7 @@ export default function Home(){
       {(openWorld||mapW>WORLD_W)&&<div className="minimap"><svg viewBox={"0 0 "+mapW+" "+mapH}>{openWorld?.resourceNodes.filter(cell=>cell.owner).map(cell=><circle key={"mt-"+cell.id} cx={cell.x} cy={cell.y} r="390" className={"territory-mini "+cell.owner}/>) }{cities.map(city=><circle key={"mc-"+city.name} cx={city.x} cy={city.y} r="52" className={city.owner}/>) }{units.map(u=><circle key={u.id} cx={u.x} cy={u.y} r="32" className={u.side}/>)}</svg></div>}
       <div className="map-hud"><div><span className="dot friendly"/>FRIENDLY {blue.length}</div><div><span className="dot hostile"/>CONTACTS {enemy.length}</div><div>CITIES {blueCities}/{cities.length}</div><div>{hovered?TERRAIN_RULES[hovered.terrain].label.toUpperCase()+" · "+(hovered.road?"SUPPLY ROAD":"OFF ROAD"):activeScenario.location.toUpperCase()}</div><div>ZOOM {Math.round(zoom*100)}%</div></div>
       {pendingStrategicBuild&&<div className="target-banner">BUILD {pendingStrategicBuild.replaceAll("_"," ").toUpperCase()} · {(pendingStrategicBuild==="road"||pendingStrategicBuild==="wall")?(strategicBuildAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP":"RMB")+" LOCATION"} <button onClick={()=>{setPendingStrategicBuild(null);setStrategicBuildAnchor(null)}}>CANCEL</button></div>}
-      {pendingBuild&&<div className="target-banner">{pendingBuild==="observatory"?"OBSERVATORY TOWER":pendingBuild==="fixed_artillery"?"FIXED ARTILLERY":pendingBuild==="field_fortification"?"FIELD FORTIFICATION":"SUPPLY DEPOT"} · {isMobile?"TAP CONSTRUCTION SITE":"RMB CONSTRUCTION SITE"} <button onClick={()=>setPendingBuild(null)}>CANCEL</button></div>}
+      {pendingBuild&&<div className="target-banner">{constructionLabel(pendingBuild)} · {isLinearConstruction(pendingBuild)?(constructionAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP CONSTRUCTION SITE":"RMB CONSTRUCTION SITE")} <button onClick={()=>{setPendingBuild(null);setConstructionAnchor(null)}}>CANCEL</button></div>}
       {pendingPlan&&<div className="target-banner">ATTACK PLAN · {isMobile?"TAP OBJECTIVE":"RMB OBJECTIVE"} <button onClick={()=>setPendingPlan(false)}>CANCEL</button></div>}
       {pendingOrder&&<div className="target-banner">{pendingOrder==="relieve"?"RELIEVE ARMED · "+(isMobile?"TAP FRIENDLY":"RMB FRIENDLY FRONTLINE"):pendingOrder==="fire"&&selectedUnits.some(u=>u.kind==="mortar")?"MORTAR FIRE · "+(isMobile?"TAP IMPACT AREA":"RMB IMPACT AREA"):pendingOrder==="assault"||pendingOrder==="fire"?pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP ENEMY":"RMB ENEMY FORMATION"):pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP TARGET":"RMB TARGET")} <button onClick={()=>setPendingOrder(null)}>CANCEL</button></div>}
       {warResult&&<div className={"war-result "+warResult}><b>{localSides.has(warResult)?"VICTORY":"DEFEAT"}</b><span>ALL STRATEGIC CITIES CONTROLLED BY {activeScenario.sideNames[warResult]??warResult.toUpperCase()}</span></div>}
@@ -1838,7 +1972,15 @@ export default function Home(){
         <div className="stat-grid"><Stat label="Strength" value={primary.strength}/><Stat label="Organization" value={primary.organization}/><Stat label="Supply" value={primary.supply}/><Stat label="Fuel" value={primary.fuel}/><Stat label="Entrenchment" value={primary.entrenchment}/><Stat label="Readiness" value={primary.readiness}/></div>
         <div className="section-title">COMBAT MODEL</div><div className="numbers"><Row k="Manpower" v={primary.manpower.toLocaleString()}/><Row k="Soft attack" v={String(primary.softAttack)}/><Row k="Hard attack" v={String(primary.hardAttack)}/><Row k="Defense" v={String(primary.defense)}/><Row k="Breakthrough" v={String(primary.breakthrough)}/><Row k="Recon" v={String(primary.recon)}/><Row k="Speed" v={primary.speed+" km/h"}/></div>
         <div className="section-title">SUPPLY ACCESS</div>{primaryAccess&&<div className={"supply-access level-"+primaryAccess.level}><b>{primaryAccess.label}</b><span>{primaryAccess.range>0?"Relay range "+Math.round(primaryAccess.range):primaryAccess.level===0?"Resupply severely limited":"Automatic resupply active"}</span></div>}
-        <div className="section-title">ENGINEER CONSTRUCTION</div><div className="build-controls"><button disabled={!selectedUnits.some(u=>u.kind==="engineer")} className={pendingBuild==="observatory"?"active":""} onClick={()=>armConstruction("observatory")}><b>OBSERVATORY</b><small>26 engineer-hours · long-range vision</small></button><button disabled={!selectedUnits.some(u=>u.kind==="engineer")} className={pendingBuild==="fixed_artillery"?"active":""} onClick={()=>armConstruction("fixed_artillery")}><b>FIXED ARTILLERY</b><small>50 engineer-hours · stationary fire support</small></button><button disabled={!selectedUnits.some(u=>u.kind==="engineer")} className={pendingBuild==="field_fortification"?"active":""} onClick={()=>armConstruction("field_fortification")}><b>FIELD FORT</b><small>18 engineer-hours · entrenchment support</small></button><button disabled={!selectedUnits.some(u=>u.kind==="engineer")} className={pendingBuild==="supply_depot"?"active":""} onClick={()=>armConstruction("supply_depot")}><b>SUPPLY DEPOT</b><small>34 engineer-hours · local resupply hub</small></button></div>
+        <div className="section-title">FIELD CONSTRUCTION</div><div className="build-controls">
+          <button disabled={!selectedUnits.length} className={pendingBuild==="trench"?"active":""} onClick={()=>armConstruction("trench")}><b>TRENCH</b><small>All troops · engineers build ×4 faster</small></button>
+          <button disabled={!selectedUnits.length} className={pendingBuild==="barricade"?"active":""} onClick={()=>armConstruction("barricade")}><b>BARRICADE</b><small>All troops · blocks enemy movement until breached</small></button>
+          <button disabled={!selectedUnits.some(u=>u.kind==="logistics")} className={pendingBuild==="road"?"active":""} onClick={()=>armConstruction("road")}><b>ROAD</b><small>Logistics only · select start and end · joins on intersection</small></button>
+          <button disabled={!selectedUnits.length} className={pendingBuild==="observatory"?"active":""} onClick={()=>armConstruction("observatory")}><b>OBSERVATORY</b><small>26 worker-hours · engineers ×4</small></button>
+          <button disabled={!selectedUnits.length} className={pendingBuild==="fixed_artillery"?"active":""} onClick={()=>armConstruction("fixed_artillery")}><b>FIXED ARTILLERY</b><small>50 worker-hours · engineers ×4</small></button>
+          <button disabled={!selectedUnits.length} className={pendingBuild==="field_fortification"?"active":""} onClick={()=>armConstruction("field_fortification")}><b>FIELD FORT</b><small>18 worker-hours · engineers ×4</small></button>
+          <button disabled={!selectedUnits.length} className={pendingBuild==="supply_depot"?"active":""} onClick={()=>armConstruction("supply_depot")}><b>SUPPLY DEPOT</b><small>34 worker-hours · engineers ×4</small></button>
+        </div>
         <div className="section-title">FORMATION</div><div className="formation-controls">{(["line","column","wedge","echelon"] as FormationShape[]).map(shape=><button key={shape} onClick={()=>arrangeFormation(shape)} disabled={selectedUnits.length<2}>{shape.toUpperCase()}</button>)}</div>
         <div className="section-title">ARMY GROUP</div><div className="group-assign">{armyGroups.map(g=><button key={g.id} className={selectedUnits.length>0&&selectedUnits.every(u=>u.groupId===g.id)?"active":""} onClick={()=>assignGroup(g.id)}>{g.hotkey}</button>)}</div>
         <div className="section-title">ORDERS</div><div className="orders">
@@ -1863,7 +2005,7 @@ export default function Home(){
       <button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)}><b>{running?"Ⅱ":"▶"}</b><span>{running?"PAUSE":"PLAY"}</span></button>
     </nav>
 
-    <footer className="statusbar">{multiplayer&&<span className="status-room">PVP ROOM {multiplayer.code}</span>}<span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB: MOVE · SHIFT/CTRL+RMB: QUEUE</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><span>ENGINEERS: BUILD WORKS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
+    <footer className="statusbar">{multiplayer&&<span className="status-room">PVP ROOM {multiplayer.code}</span>}<span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB: MOVE · SHIFT/CTRL+RMB: QUEUE</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><span>ALL TROOPS: FIELD WORKS · LOGISTICS: ROADS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
   </main>
 }
 
