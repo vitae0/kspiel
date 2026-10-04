@@ -88,13 +88,15 @@ export type GameCommand=
 export type SessionSnapshot={tick:number;scenarioSeed:number;formations:Formation[];cities:CityState[];plans:AttackPlan[]};
 
 
-export type EmplacementKind="observatory"|"fixed_artillery"|"field_fortification"|"supply_depot";
+export type EmplacementKind="observatory"|"fixed_artillery"|"field_fortification"|"supply_depot"|"trench"|"barricade"|"road";
 export type Emplacement={
   id:string;
   kind:EmplacementKind;
   side:Side;
   x:number;
   y:number;
+  x2?:number;
+  y2?:number;
   strength:number;
   range:number;
 };
@@ -104,6 +106,8 @@ export type ConstructionProject={
   side:Side;
   x:number;
   y:number;
+  x2?:number;
+  y2?:number;
   builderIds:string[];
   progress:number;
   requiredHours:number;
