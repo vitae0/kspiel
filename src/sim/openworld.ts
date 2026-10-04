@@ -102,7 +102,7 @@ export function buildStrategicCity(state:OpenWorldState,side:Side):{state:OpenWo
   return{built:true,state:{...state,resources:{...state.resources,[side]:{...r,materials:r.materials-materials,manpower:r.manpower-manpower}},serial:state.serial+1}};
 }
 
-export function advanceOpenWorld(state:OpenWorldState,units:Formation[],cities:CityState[],hours:number){
+export function advanceOpenWorld(scenario:Scenario,state:OpenWorldState,units:Formation[],cities:CityState[],hours:number){
   const structures=state.structures.filter(s=>s.strength>0);
   let resourceNodes=state.resourceNodes;
   let territoryClock=state.territoryClock+hours;
