@@ -99,7 +99,9 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .flag-imperial{background:#e4c852}.flag-imperial:after{content:"✠";position:absolute;left:8px;top:0;color:#171717;font:700 12px/16px serif}
 .flag-britain{background:#234a82}.flag-britain i{left:10px;top:0;width:5px;height:100%;background:#eee}.flag-britain em{left:0;top:6px;width:100%;height:5px;background:#eee}.flag-britain:after{content:"";position:absolute;left:11px;top:0;width:3px;height:100%;background:#b42d39;box-shadow:-11px 7px 0 -1px #b42d39}
 .flag-axis{background:linear-gradient(90deg,#222 0 48%,#1f733f 48% 65%,#eee 65% 82%,#a83d3d 82%)}
-.flag-usa{background:repeating-linear-gradient(#b63a3a 0 2px,#eee 2px 4px)}.flag-usa i{left:0;top:0;width:11px;height:8px;background:#294b80}\n.flag-spain-republic{background:linear-gradient(#9e3030 0 33.33%,#d8ba35 33.33% 66.66%,#68437f 66.66%)}\n.flag-spain-nationalist{background:linear-gradient(#9d2929 0 25%,#d5b43a 25% 75%,#9d2929 75%)}
+.flag-usa{background:repeating-linear-gradient(#b63a3a 0 2px,#eee 2px 4px)}.flag-usa i{left:0;top:0;width:11px;height:8px;background:#294b80}
+.flag-spain-republic{background:linear-gradient(#9e3030 0 33.33%,#d8ba35 33.33% 66.66%,#68437f 66.66%)}
+.flag-spain-nationalist{background:linear-gradient(#9d2929 0 25%,#d5b43a 25% 75%,#9d2929 75%)}
 
 .scenario-side-line{position:relative;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:7px;margin-top:8px;font-size:8px;color:#d0d5c9}.scenario-side-line>span{display:flex;align-items:center;gap:5px;min-width:0}.scenario-side-line>span:last-child{justify-content:flex-end;text-align:right}.scenario-side-line i{font-style:normal;color:#777f73;font-size:7px}
 .side-choice{display:flex;flex-direction:column;gap:6px;margin-bottom:22px}.side-choice button{display:flex;align-items:center;gap:9px;text-align:left;border:1px solid #343b31;background:#1b2019;padding:9px;cursor:pointer}.side-choice button.active{border-color:#a69661;background:#302e22}.side-choice b{display:block}.side-choice small{display:block;color:#87907f;font-size:7px;margin-top:2px}
