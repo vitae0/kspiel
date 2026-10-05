@@ -392,6 +392,12 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 
 
 /* Multiplayer lobby and live-session state */
+.nickname-field{display:grid;gap:5px;margin-bottom:16px}.nickname-field input{width:100%;border:1px solid #42493e;background:#11150f;color:#d9ddcf;padding:9px 10px;font:700 10px/1.2 system-ui,sans-serif;outline:none}.nickname-field input:focus{border-color:#9b8e62}.nickname-field input:disabled{opacity:.5}.nickname-field small{color:#7f8879;font-size:7px}
+.team-size-choice{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:18px}.team-size-choice button{border:1px solid #42493e;background:#1d221b;padding:9px 7px;font-weight:800;cursor:pointer}.team-size-choice button.active{border-color:#a69661;background:#302e22;color:#eadb9b}.team-size-choice button:disabled{opacity:.5;cursor:not-allowed}
+.invite-join-card{display:grid;gap:8px;margin-bottom:16px;padding:11px;border:1px solid #6a6248;background:#201f17}.invite-join-card>b{font-size:10px;color:#ddd19d;letter-spacing:.08em}.invite-join-card>small{font-size:8px;color:#969d8d;line-height:1.45}.invite-actions{display:grid;grid-template-columns:1fr auto;gap:6px}.invite-actions button{border:1px solid #5b624f;background:#292e23;color:#d8d3b7;padding:8px 10px;font-size:8px;font-weight:800;cursor:pointer}.invite-actions button:first-child{border-color:#9f9162;background:#3a3728;color:#eee2b0}.invite-actions button:disabled{opacity:.4;cursor:not-allowed}
+.lobby-roster{display:grid!important;grid-template-columns:1fr 1fr;gap:6px!important}.lobby-roster>div{display:block!important;border:1px solid #31382e;background:#11150f;padding:7px}.lobby-roster>div>b{margin-bottom:4px}.lobby-roster>div>small{display:block;margin-top:2px}.network-lobby>div:first-child>strong{flex:0 0 auto;color:#d7cf9f;font-size:10px}
+
+
 .mode-list button:not(:disabled){cursor:pointer}
 .mode-list button:not(:disabled):hover{background:#252b22;border-color:#5f6858}
 .setup-tabs button:disabled,.scenario-card:disabled,.side-choice button:disabled{cursor:not-allowed;opacity:.58}
