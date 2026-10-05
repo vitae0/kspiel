@@ -528,13 +528,17 @@ function builtRoadSupplyAccess(u:Formation,units:Formation[],cities:CityState[],
 type LogisticsLink={from:{x:number;y:number;id:string};to:{x:number;y:number;id:string};unitId:string;depth:number};
 type HubLink={from:{x:number;y:number;id:string};to:{x:number;y:number;id:string};hubId:string;active:boolean};
 
+function logisticsDistributionRange(u:Formation){
+  return 780+clamp(u.supply/100,0,1)*220;
+}
+
 function computeLogisticsLinks(scenario:Scenario,units:Formation[],cities:CityState[],network:SupplyNetwork,emplacements:Emplacement[]=[]){
   const logistics=units.filter(u=>u.kind==="logistics"&&u.strength>8);
   const supplied=new Map<string,{depth:number;source:{x:number;y:number;id:string}}>();
   const links:LogisticsLink[]=[];
   const hubLinks:HubLink[]=[];
   const activeHubs=new Set<string>();
-  const cityRange=520,relayRange=620,hubCityRange=1150;
+  const cityRange=850,relayRange=1000,hubCityRange=1450;
 
   for(const hub of emplacements.filter(e=>e.kind==="supply_depot"&&e.strength>0)){
     const nearest=cities.filter(c=>c.owner===hub.side).map(c=>({c,d:Math.hypot(c.x-hub.x,c.y-hub.y)})).sort((a,b)=>a.d-b.d)[0];
@@ -553,7 +557,7 @@ function computeLogisticsLinks(scenario:Scenario,units:Formation[],cities:CitySt
     const depot=emplacements
       .filter(e=>e.side===u.side&&e.kind==="supply_depot"&&e.strength>0&&activeHubs.has(e.id))
       .map(e=>({e,d:Math.hypot(e.x-u.x,e.y-u.y)}))
-      .filter(x=>x.d<=x.e.range)
+      .filter(x=>x.d<=Math.max(x.e.range,cityRange))
       .sort((a,b)=>a.d-b.d)[0];
     if(city){
       const source={x:city.c.x,y:city.c.y,id:"city:"+city.c.name};
@@ -572,7 +576,7 @@ function computeLogisticsLinks(scenario:Scenario,units:Formation[],cities:CitySt
       const parent=logistics
         .filter(v=>v.side===u.side&&supplied.has(v.id)&&v.id!==u.id)
         .map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y),depth:supplied.get(v.id)!.depth}))
-        .filter(x=>x.d<=relayRange)
+        .filter(x=>x.d<=Math.min(relayRange,logisticsDistributionRange(x.v)))
         .sort((a,b)=>a.depth-b.depth||a.d-b.d)[0];
       if(!parent)continue;
       const depth=parent.depth+1;
@@ -596,11 +600,11 @@ function supplyAccess(scenario:Scenario,u:Formation,units:Formation[],cities:Cit
   const depot=emplacements
     .filter(e=>e.side===u.side&&e.kind==="supply_depot"&&e.strength>0&&logisticsGraph.activeHubs.has(e.id))
     .map(e=>({e,d:Math.hypot(e.x-u.x,e.y-u.y)}))
-    .filter(x=>x.d<x.e.range)
+    .filter(x=>x.d<(u.kind==="logistics"?Math.max(x.e.range,logisticsGraph.cityRange):x.e.range))
     .sort((a,b)=>a.d-b.d)[0];
   const relay=units
     .filter(v=>v.side===u.side&&v.kind==="logistics"&&v.id!==u.id&&logisticsGraph.supplied.has(v.id))
-    .map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y),range:420+v.supply*1.5,depth:logisticsGraph.supplied.get(v.id)!.depth}))
+    .map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y),range:logisticsDistributionRange(v),depth:logisticsGraph.supplied.get(v.id)!.depth}))
     .filter(x=>x.d<x.range)
     .sort((a,b)=>a.depth-b.depth||a.d-b.d)[0];
   const selfRelay=u.kind==="logistics"?logisticsGraph.supplied.get(u.id):undefined;
@@ -1902,7 +1906,6 @@ export default function Home(){
 
   const currentLogisticsGraph=computeLogisticsLinks(activeScenario,units,cities,currentSupplyNetwork,emplacements);
   const primaryAccess=primary?supplyAccess(activeScenario,primary,units,cities,currentSupplyNetwork,emplacements,currentLogisticsGraph,openWorld):null;
-  const localSupplyStatus=units.filter(u=>localSides.has(u.side)).map(u=>({u,access:supplyAccess(activeScenario,u,units,cities,currentSupplyNetwork,emplacements,currentLogisticsGraph,openWorld)}));
   const canRetreat=selectedUnits.some(u=>isInCombat(u,units));
 
   return <main className={"game-shell theme-"+activeScenario.theme}>
@@ -1946,41 +1949,29 @@ export default function Home(){
           {openWorld?.structures.filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined).map(s=><path key={s.id} d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2} className="road"/>)}
           {emplacements.filter(e=>(e.kind==="trench"||e.kind==="barricade")&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined).map(e=><g key={e.id} className={"field-line "+e.kind+" "+e.side} opacity={.4+.6*e.strength/145}><path d={"M "+e.x+" "+e.y+" L "+e.x2+" "+e.y2}/></g>)}
           {openWorld?.structures.filter(s=>s.kind==="wall"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined).map(s=><g key={s.id} className={"built-wall "+s.side} opacity={.45+.55*s.strength/160}><path d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2}/><path className="wall-cap" d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2}/></g>)}
-          {cities.map(s=><g key={s.name} className={"site-label "+s.owner+(localSides.has(s.owner)?" supply-city friendly-supply-city":" supply-city hostile-supply-city")}><circle cx={s.x} cy={s.y} r="6" className="site-core"/><circle cx={s.x} cy={s.y} r="25" className="site-ring"/>{s.capture>0&&<circle cx={s.x} cy={s.y} r="30" className="capture-ring" pathLength="100" strokeDasharray={s.capture+" "+(100-s.capture)} transform={"rotate(-90 "+s.x+" "+s.y+")"}/>}<text x={s.x+11} y={s.y-11}>{s.name.toUpperCase()} · {s.owner==="blue"?"B":s.owner==="red"?"R":"G"}</text></g>)}
-          <g className="city-supply-ranges">{cities.map(s=><circle key={"range-"+s.name} cx={s.x} cy={s.y} r={currentLogisticsGraph.cityRange} className={"city-supply-range "+s.owner}/>)}</g>
-          <g className="supply-overlay">
-            <rect width={mapW} height={mapH} className="supply-map-wash"/>
+          {cities.map(s=><g key={s.name} className={"site-label "+s.owner}><circle cx={s.x} cy={s.y} r="6" className="site-core"/><circle cx={s.x} cy={s.y} r="25" className="site-ring"/>{s.capture>0&&<circle cx={s.x} cy={s.y} r="30" className="capture-ring" pathLength="100" strokeDasharray={s.capture+" "+(100-s.capture)} transform={"rotate(-90 "+s.x+" "+s.y+")"}/>}<text x={s.x+11} y={s.y-11}>{s.name.toUpperCase()} · {s.owner==="blue"?"B":s.owner==="red"?"R":"G"}</text></g>)}
+          <g className="supply-road-colors">
             {currentSupplyNetwork.roads.map(road=>{
               const friendlyA=localSides.has(road.a.owner),friendlyB=localSides.has(road.b.owner);
               const hostile=!friendlyA&&!friendlyB;
               const cuts=road.cuts[playerSide];
               const state=cuts.length?"cut":friendlyA&&friendlyB?"friendly":friendlyA||friendlyB?"local":hostile?"hostile":"contested";
-              return <g key={"supply-road-"+road.index}>
-                <path d={polylinePath(road.route)} className={"supply-route "+state}/>
-                {cuts.map((cut,i)=><g key={"cut-"+road.index+"-"+i} className="supply-cut-marker" transform={"translate("+cut.x+" "+cut.y+")"}>
-                  <circle r="24"/><line x1="-14" y1="-14" x2="14" y2="14"/><line x1="-14" y1="14" x2="14" y2="-14"/>
-                </g>)}
-              </g>
+              return <path key={"supply-road-"+road.index} d={polylinePath(road.route)} className={"supply-route "+state}/>;
             })}
             {[...emplacements.filter(e=>e.kind==="road"&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined),...(openWorld?.structures.filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined)??[])].map(s=>{
               const route=[{x:s.x,y:s.y},{x:s.x2!,y:s.y2!}],cuts=routeInterdictionPoints(route,playerSide,units);
               const connected=Boolean(supplySourceAtPoint(playerSide,route[0],cities,currentSupplyNetwork))||Boolean(supplySourceAtPoint(playerSide,route[1],cities,currentSupplyNetwork))||currentSupplyNetwork.roads.some(base=>base.route.slice(0,-1).some((p,i)=>segmentsIntersect(route[0].x,route[0].y,route[1].x,route[1].y,p.x,p.y,base.route[i+1].x,base.route[i+1].y)));
               const state=cuts.length?"cut":connected?"local":"contested";
-              return <g key={"built-supply-"+s.id}><path d={polylinePath(route)} className={"supply-route built "+state}/>{cuts.map((cut,i)=><g key={"built-cut-"+s.id+"-"+i} className="supply-cut-marker" transform={"translate("+cut.x+" "+cut.y+")"}><circle r="24"/><line x1="-14" y1="-14" x2="14" y2="14"/><line x1="-14" y1="14" x2="14" y2="-14"/></g>)}</g>
+              return <path key={"built-supply-"+s.id} d={polylinePath(route)} className={"supply-route built "+state}/>;
             })}
-            {cities.map(s=><g key={s.name} className={localSides.has(s.owner)?"supply-city-node friendly":"supply-city-node hostile"}>
-              <circle cx={s.x} cy={s.y} r={localSides.has(s.owner)?88:70} className={"supply-node "+s.owner}/>
-              {localSides.has(s.owner)&&<text x={s.x+30} y={s.y+34} className="supply-capacity">×{currentSupplyNetwork.capacity.get(s.name)??1}</text>}
-            </g>)}
-            {currentLogisticsGraph.hubLinks.filter(link=>emplacements.some(e=>e.id===link.hubId&&localSides.has(e.side))).map(link=><line key={"hub-link-"+link.hubId} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className={"hub-link "+(link.active?"active":"cut")}/>)}
-            {currentLogisticsGraph.links.filter(link=>units.find(u=>u.id===link.unitId&&localSides.has(u.side))).map(link=><line key={"log-link-"+link.unitId} x1={link.from.x} y1={link.from.y} x2={link.to.x} y2={link.to.y} className={"logistics-link depth-"+Math.min(3,link.depth)}/>)}
-            {units.filter(u=>u.kind==="logistics"&&localSides.has(u.side)).map(u=><circle key={u.id} cx={u.x} cy={u.y} r={currentLogisticsGraph.relayRange} className={"logistics-range "+u.side}/>)}
-            {localSupplyStatus.map(({u,access})=><g key={"supply-state-"+u.id} className={"unit-supply-state "+(access.level<=0?"cut":access.level===1?"strained":"supplied")}>
-              <circle cx={u.x} cy={u.y} r="46"/>
-              {selected.includes(u.id)&&<text x={u.x+52} y={u.y+5}>{access.level<=0?"NO SUPPLY":access.label}</text>}
-            </g>)}
           </g>
-          <path d={activeScenario.landPath} fill="url(#intelShade)" className="intel-overlay"/><rect width={mapW} height={mapH} className="fog-dark" mask="url(#fogMask)"/><rect x="1" y="1" width={mapW-2} height={mapH-2} className="world-boundary"/>
+          {selectedUnits.filter(u=>u.kind==="logistics").map(u=><g key={"logistics-range-"+u.id} className="logistics-range-display">
+            <circle cx={u.x} cy={u.y} r={currentLogisticsGraph.cityRange} className={"logistics-range pull "+u.side}/>
+            <circle cx={u.x} cy={u.y} r={logisticsDistributionRange(u)} className={"logistics-range distribute "+u.side}/>
+            <text x={u.x+16} y={u.y-currentLogisticsGraph.cityRange+24}>PULL {Math.round(currentLogisticsGraph.cityRange)}</text>
+            <text x={u.x+16} y={u.y-logisticsDistributionRange(u)+24}>DISTRIBUTE {Math.round(logisticsDistributionRange(u))}</text>
+          </g>)}
+          <rect width={mapW} height={mapH} className="fog-dark" mask="url(#fogMask)"/><rect x="1" y="1" width={mapW-2} height={mapH-2} className="world-boundary"/>
         </svg>
 
         {selectedUnits.some(u=>ARTILLERY_KINDS.has(u.kind))&&<svg className="artillery-ranges" width={mapW} height={mapH}>{selectedUnits.filter(u=>ARTILLERY_KINDS.has(u.kind)).map(u=>{const r=u.kind==="mortar"?mortarMaxRange(activeScenario,u):u.kind==="heavy_artillery"?820:540;return <g key={"range-"+u.id}><circle cx={u.x} cy={u.y} r={r}/><text x={u.x+10} y={u.y-r+22}>{Math.round(r)} RANGE</text></g>})}</svg>}
@@ -2002,7 +1993,6 @@ export default function Home(){
         {attackPlans.length>0&&<svg className="attack-plans" width={mapW} height={mapH}>{attackPlans.map(plan=>{const o=planOrigin(plan);return <g key={plan.id} className={plan.status}><line x1={o.x} y1={o.y} x2={plan.targetX} y2={plan.targetY}/><circle cx={plan.targetX} cy={plan.targetY} r="18"/><text x={plan.targetX+24} y={plan.targetY-18}>{plan.name}</text></g>})}</svg>}
       </div>
 
-      <div className="supply-legend"><b>SUPPLY CONTROL</b><span><i className="connected"/>CONNECTED ROAD</span><span><i className="local"/>LOCAL FEED</span><span><i className="cut"/>INTERDICTED / CUT</span><span><i className="unit"/>UNIT SUPPLIED</span></div>
       {selectionBox&&<div className="selection-box" style={{left:Math.min(selectionBox.x1,selectionBox.x2),top:Math.min(selectionBox.y1,selectionBox.y2),width:Math.abs(selectionBox.x2-selectionBox.x1),height:Math.abs(selectionBox.y2-selectionBox.y1)}}/>}
       {frontPreview&&<svg className="front-preview"><line x1={frontPreview.x1} y1={frontPreview.y1} x2={frontPreview.x2} y2={frontPreview.y2}/></svg>}
       {(openWorld||mapW>WORLD_W)&&<div className="minimap"><svg viewBox={"0 0 "+mapW+" "+mapH}>{openWorld?.resourceNodes.filter(cell=>cell.owner).map(cell=><circle key={"mt-"+cell.id} cx={cell.x} cy={cell.y} r="390" className={"territory-mini "+cell.owner}/>) }{cities.map(city=><circle key={"mc-"+city.name} cx={city.x} cy={city.y} r="52" className={city.owner}/>) }{units.map(u=><circle key={u.id} cx={u.x} cy={u.y} r="32" className={u.side}/>)}</svg></div>}
