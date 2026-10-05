@@ -9,15 +9,21 @@ export const supabase=createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{
   realtime:{params:{eventsPerSecond:24}}
 });
 
+export type MultiplayerTeamSize=1|2|3;
+
 export type MultiplayerSession={
   roomId:string;
   code:string;
   kind:"quickplay"|"invite";
-  role:"host"|"guest";
+  role:"host"|"player";
   isHost:boolean;
   playerToken:string;
+  nickname:string;
   side:Side;
   opponentSide:Side;
+  teamSize:MultiplayerTeamSize;
+  maxPlayers:number;
+  slot:number;
   seed:number;
   presetId:string;
   gameMode:"scenario";
@@ -46,9 +52,9 @@ export type MultiplayerSnapshot={
 };
 
 type MatchmakingPayload=
-  |{action:"quickplay";presetId:string;side:Side}
-  |{action:"create_invite";presetId:string;side:Side}
-  |{action:"join_invite";code:string}
+  |{action:"quickplay";presetId:string;side:Side;teamSize:MultiplayerTeamSize;nickname:string}
+  |{action:"create_invite";presetId:string;side:Side;teamSize:MultiplayerTeamSize;nickname:string}
+  |{action:"join_invite";code:string;side:Side;nickname:string}
   |{action:"cancel_room";roomId:string;playerToken:string};
 
 async function matchmaking(payload:MatchmakingPayload){
@@ -62,20 +68,20 @@ async function matchmaking(payload:MatchmakingPayload){
   return body as {session?:MultiplayerSession;ok?:boolean};
 }
 
-export async function findQuickPlay(presetId:string,side:Side){
-  const body=await matchmaking({action:"quickplay",presetId,side});
+export async function findQuickPlay(presetId:string,side:Side,teamSize:MultiplayerTeamSize,nickname:string){
+  const body=await matchmaking({action:"quickplay",presetId,side,teamSize,nickname});
   if(!body.session)throw new Error("missing_session");
   return body.session;
 }
 
-export async function createPrivateMatch(presetId:string,side:Side){
-  const body=await matchmaking({action:"create_invite",presetId,side});
+export async function createPrivateMatch(presetId:string,side:Side,teamSize:MultiplayerTeamSize,nickname:string){
+  const body=await matchmaking({action:"create_invite",presetId,side,teamSize,nickname});
   if(!body.session)throw new Error("missing_session");
   return body.session;
 }
 
-export async function joinPrivateMatch(code:string){
-  const body=await matchmaking({action:"join_invite",code});
+export async function joinPrivateMatch(code:string,side:Side,nickname:string){
+  const body=await matchmaking({action:"join_invite",code,side,nickname});
   if(!body.session)throw new Error("missing_session");
   return body.session;
 }
