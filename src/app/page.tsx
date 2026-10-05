@@ -4,7 +4,7 @@ import {useEffect,useRef,useState,type MouseEvent as ReactMouseEvent,type Pointe
 import {generateScenario,polylinePath,SCENARIO_PRESETS,terrainAt,TERRAIN_RULES,UNIT_LABEL,WORLD_H,WORLD_W} from "@/sim/game";
 import {botControlledSides,createMatchConfig,defaultArmyGroups,localControlledSides} from "@/sim/session";
 import {addStrategicStructure,advanceOpenWorld,buildStrategicCity,createOpenWorldState,queueRecruitment,UNIT_COST,type OpenWorldBuildKind,type OpenWorldState} from "@/sim/openworld";
-import {closeMultiplayerRoom,createPrivateMatch,findQuickPlay,inviteUrl,joinPrivateMatch,supabase,type MultiplayerSession,type MultiplayerSnapshot,type UnitCommandPatch} from "@/lib/multiplayer";
+import {closeMultiplayerRoom,createPrivateMatch,findQuickPlay,inviteUrl,joinPrivateMatch,supabase,type MultiplayerSession,type MultiplayerSnapshot,type MultiplayerTeamSize,type UnitCommandPatch} from "@/lib/multiplayer";
 import type {AttackPlan,CityState,ConstructionProject,Emplacement,EmplacementKind,FlagStyle,Formation,FormationShape,OrderType,Scenario,Side,TerrainSample} from "@/sim/types";
 
 const SPEED_MULTIPLIER=[0,1,2.5,6];
@@ -1119,6 +1119,10 @@ export default function Home(){
   const [networkPhase,setNetworkPhase]=useState<"idle"|"matching"|"waiting"|"connected"|"opponent-left"|"error">("idle");
   const [networkError,setNetworkError]=useState("");
   const [inviteLink,setInviteLink]=useState("");
+  const [nickname,setNickname]=useState("");
+  const [multiplayerTeamSize,setMultiplayerTeamSize]=useState<MultiplayerTeamSize>(1);
+  const [pendingInviteCode,setPendingInviteCode]=useState("");
+  const [onlinePlayers,setOnlinePlayers]=useState<Array<{token:string;nickname:string;side:Side;slot:number}>>([]);
 
   const drag=useRef<{mode:"pan"|"box"|"front"|"select"|"target";startClientX:number;startClientY:number;px:number;py:number;moved:boolean}|null>(null);
   const touchPoints=useRef<Map<number,{x:number;y:number}>>(new Map());
@@ -1143,20 +1147,13 @@ export default function Home(){
   latestSnapshotRef.current={seq:0,units,cities,attackPlans,emplacements,constructionProjects,hour,day,running,speed,warResult};
 
   useEffect(()=>{
+    const saved=window.localStorage.getItem("kspiel.nickname");
+    if(saved)setNickname(saved.slice(0,20));
     const code=new URLSearchParams(window.location.search).get("join")?.trim().toUpperCase();
     if(!code)return;
-    let cancelled=false;
-    setNetworkPhase("matching");setNetworkError("");
-    joinPrivateMatch(code).then(session=>{
-      if(cancelled)return;
-      multiplayerRef.current=session;setMultiplayer(session);setPlayerSide(session.side);setSelectedPresetId(session.presetId);setSelectedGameMode("scenario");
-      setNetworkPhase("waiting");
-      window.history.replaceState(null,"",window.location.pathname+window.location.hash);
-    }).catch(error=>{
-      if(cancelled)return;
-      setNetworkError(error instanceof Error?error.message:"Could not join match");setNetworkPhase("error");
-    });
-    return()=>{cancelled=true};
+    setPendingInviteCode(code);
+    setSelectedGameMode("scenario");
+    window.history.replaceState(null,"",window.location.pathname+window.location.hash);
   },[]);
 
   useEffect(()=>{
@@ -1181,18 +1178,26 @@ export default function Home(){
       warResultRef.current=snapshot.warResult;setWarResult(snapshot.warResult);
       setHour(snapshot.hour);setDay(snapshot.day);setRunning(snapshot.running);setSpeed(snapshot.speed);
     };
+    const senderSide=(payload:Record<string,unknown>|null|undefined):Side|null=>{
+      const token=typeof payload?.playerToken==="string"?payload.playerToken:"";
+      if(!token)return null;
+      const state=channel.presenceState() as Record<string,Array<Record<string,unknown>>>;
+      const entry=state[token]?.[state[token].length-1];
+      return entry?.side==="blue"||entry?.side==="red"?entry.side as Side:null;
+    };
 
     channel
       .on("broadcast",{event:"snapshot"},({payload})=>applySnapshot(payload as MultiplayerSnapshot))
       .on("broadcast",{event:"unit-patch"},({payload})=>{
         if(!multiplayer.isHost)return;
+        const side=senderSide(payload as Record<string,unknown>);
         const patches=Array.isArray(payload?.patches)?payload.patches as UnitCommandPatch[]:[];
-        if(!patches.length)return;
+        if(!side||!patches.length)return;
         const byId=new Map(patches.filter(p=>p&&typeof p.id==="string").map(p=>[p.id,p]));
         setUnits(prev=>{
           const next=prev.map(unit=>{
             const patch=byId.get(unit.id);
-            if(!patch||unit.side!==multiplayer.opponentSide)return unit;
+            if(!patch||unit.side!==side)return unit;
             const safeSupply=typeof patch.supply==="number"?Math.min(unit.supply,Math.max(0,Math.min(100,patch.supply))):unit.supply;
             return{...unit,supply:safeSupply,...("order" in patch?{order:patch.order}:{}),...("groupId" in patch?{groupId:patch.groupId}:{}),...("formationShape" in patch?{formationShape:patch.formationShape}:{})};
           });
@@ -1201,24 +1206,32 @@ export default function Home(){
       })
       .on("broadcast",{event:"plan-upsert"},({payload})=>{
         if(!multiplayer.isHost)return;
+        const side=senderSide(payload as Record<string,unknown>);
         const plan=payload?.plan as AttackPlan|undefined;
-        if(!plan||plan.side!==multiplayer.opponentSide)return;
+        if(!side||!plan||plan.side!==side)return;
         setAttackPlans(prev=>prev.some(p=>p.id===plan.id)?prev.map(p=>p.id===plan.id?plan:p):[...prev,plan]);
       })
       .on("broadcast",{event:"plan-delete"},({payload})=>{
         if(!multiplayer.isHost||typeof payload?.id!=="string")return;
-        setAttackPlans(prev=>prev.filter(plan=>!(plan.id===payload.id&&plan.side===multiplayer.opponentSide)));
+        const side=senderSide(payload as Record<string,unknown>);if(!side)return;
+        setAttackPlans(prev=>prev.filter(plan=>!(plan.id===payload.id&&plan.side===side)));
       })
       .on("broadcast",{event:"construction-create"},({payload})=>{
         if(!multiplayer.isHost)return;
+        const side=senderSide(payload as Record<string,unknown>);
         const project=payload?.project as ConstructionProject|undefined;
-        if(!project||project.side!==multiplayer.opponentSide)return;
+        if(!side||!project||project.side!==side)return;
         if(projectsRef.current.some(p=>p.id===project.id))return;
         const next=[...projectsRef.current,project];projectsRef.current=next;setConstructionProjects(next);
       })
       .on("presence",{event:"sync"},()=>{
-        const count=Object.values(channel.presenceState()).reduce((sum,entries)=>sum+entries.length,0);
-        if(count>=2){
+        const state=channel.presenceState() as Record<string,Array<Record<string,unknown>>>;
+        const roster=Object.entries(state).map(([token,entries])=>{
+          const entry=entries[entries.length-1]??{};
+          return{token,nickname:typeof entry.nickname==="string"?entry.nickname:"Commander",side:entry.side==="red"?"red" as Side:"blue" as Side,slot:typeof entry.slot==="number"?entry.slot:0};
+        });
+        setOnlinePlayers(roster);
+        if(roster.length>=multiplayer.maxPlayers){
           setNetworkPhase("connected");
           if(!networkStartedRef.current){
             networkStartedRef.current=true;
@@ -1230,7 +1243,7 @@ export default function Home(){
         }else setNetworkPhase("waiting");
       })
       .subscribe(async status=>{
-        if(status==="SUBSCRIBED")await channel.track({role:multiplayer.role,side:multiplayer.side,onlineAt:new Date().toISOString()});
+        if(status==="SUBSCRIBED")await channel.track({role:multiplayer.role,nickname:multiplayer.nickname,side:multiplayer.side,slot:multiplayer.slot,teamSize:multiplayer.teamSize,onlineAt:new Date().toISOString()});
         else if(status==="CHANNEL_ERROR"||status==="TIMED_OUT"){
           setNetworkError("Realtime connection failed");setNetworkPhase("error");
         }
@@ -1277,7 +1290,8 @@ export default function Home(){
   const sendNetwork=(event:string,payload:Record<string,unknown>)=>{
     const channel=networkChannelRef.current;
     if(!channel)return;
-    void channel.send({type:"broadcast",event,payload});
+    const session=multiplayerRef.current;
+    void channel.send({type:"broadcast",event,payload:session?{...payload,playerToken:session.playerToken}:payload});
   };
 
   const commitUnits=(fn:(prev:Formation[])=>Formation[])=>{
@@ -1440,28 +1454,42 @@ export default function Home(){
 
   function activateMultiplayer(session:MultiplayerSession){
     multiplayerRef.current=session;setMultiplayer(session);setPlayerSide(session.side);setSelectedPresetId(session.presetId);setSelectedGameMode("scenario");
+    setMultiplayerTeamSize(session.teamSize);setNickname(session.nickname);setPendingInviteCode("");
     setNetworkPhase("waiting");setNetworkError("");
     setInviteLink(session.kind==="invite"&&session.isHost?inviteUrl(session.code):"");
   }
 
   async function beginQuickPlay(){
     if(selectedGameMode!=="scenario"||networkPhase==="matching")return;
+    const playerName=nickname.trim();if(!playerName){setNetworkError("Choose a nickname");return}
+    window.localStorage.setItem("kspiel.nickname",playerName);
     setNetworkPhase("matching");setNetworkError("");
-    try{activateMultiplayer(await findQuickPlay(selectedPresetId,playerSide))}
+    try{activateMultiplayer(await findQuickPlay(selectedPresetId,playerSide,multiplayerTeamSize,playerName))}
     catch(error){setNetworkError(error instanceof Error?error.message:"Quick Play failed");setNetworkPhase("error")}
   }
 
   async function beginPrivateMatch(){
     if(selectedGameMode!=="scenario"||networkPhase==="matching")return;
+    const playerName=nickname.trim();if(!playerName){setNetworkError("Choose a nickname");return}
+    window.localStorage.setItem("kspiel.nickname",playerName);
     setNetworkPhase("matching");setNetworkError("");
-    try{activateMultiplayer(await createPrivateMatch(selectedPresetId,playerSide))}
+    try{activateMultiplayer(await createPrivateMatch(selectedPresetId,playerSide,multiplayerTeamSize,playerName))}
     catch(error){setNetworkError(error instanceof Error?error.message:"Could not create private match");setNetworkPhase("error")}
+  }
+
+  async function joinPendingInvite(){
+    if(!pendingInviteCode||networkPhase==="matching")return;
+    const playerName=nickname.trim();if(!playerName){setNetworkError("Choose a nickname");return}
+    window.localStorage.setItem("kspiel.nickname",playerName);
+    setNetworkPhase("matching");setNetworkError("");
+    try{activateMultiplayer(await joinPrivateMatch(pendingInviteCode,playerSide,playerName))}
+    catch(error){setNetworkError(error instanceof Error?error.message:"Could not join match");setNetworkPhase("error")}
   }
 
   function cancelMultiplayer(){
     const session=multiplayerRef.current;
     if(session)void closeMultiplayerRoom(session);
-    multiplayerRef.current=null;setMultiplayer(null);networkStartedRef.current=false;setNetworkPhase("idle");setNetworkError("");setInviteLink("");
+    multiplayerRef.current=null;setMultiplayer(null);networkStartedRef.current=false;setNetworkPhase("idle");setNetworkError("");setInviteLink("");setOnlinePlayers([]);
     window.history.replaceState(null,"",window.location.pathname+window.location.hash);
   }
 
@@ -1492,18 +1520,22 @@ export default function Home(){
           <aside className="setup-side">
             <div className="section-title">{selectedGameMode==="openworld"?"WORLD RULESET":"SELECTED THEATER"}</div><h2>{selectedGameMode==="openworld"?"Open World Dominion":selectedPreset.title}</h2><p>{selectedGameMode==="openworld"?"Procedural continental theater · three factions":selectedPreset.location+(selectedPreset.year?" · "+selectedPreset.year:"")}</p>
             <div className="setup-facts"><span><small>THEME</small><b>{selectedPreset.theme.toUpperCase()}</b></span><span><small>ERA</small><b>{selectedPreset.era.replace("_"," ").toUpperCase()}</b></span><span><small>MAP</small><b>{Math.round(WORLD_W*(selectedPreset.mapScale??1))} × {Math.round(WORLD_H*(selectedPreset.mapScale??1))}</b></span><span><small>FOG</small><b>ENABLED</b></span></div>
-            <div className="section-title">PLAY AS</div><div className="side-choice">
-              {(["blue","red"] as Side[]).map(side=><button key={side} disabled={Boolean(multiplayer)} className={playerSide===side?"active":""} onClick={()=>setPlayerSide(side)}><Flag styleName={selectedPreset.sideFlags[side]??"generic-blue"}/><span><b>{selectedPreset.sideNames[side]}</b><small>{selectedPreset.id==="spain-1937"?(side==="blue"?"REPUBLICAN COMMAND":"NATIONALIST COMMAND"):(side==="blue"?"LEFT / BLUE DEPLOYMENT":"RIGHT / RED DEPLOYMENT")}</small></span></button>)}
+            <div className="section-title">{pendingInviteCode?"CHOOSE TEAM":"PLAY AS"}</div><div className="side-choice">
+              {(["blue","red"] as Side[]).map(side=><button key={side} disabled={Boolean(multiplayer)} className={playerSide===side?"active":""} onClick={()=>setPlayerSide(side)}><Flag styleName={selectedPreset.sideFlags[side]??"generic-blue"}/><span><b>{pendingInviteCode?side.toUpperCase()+" TEAM":selectedPreset.sideNames[side]}</b><small>{pendingInviteCode?"Shared command of the entire "+side+" force":selectedPreset.id==="spain-1937"?(side==="blue"?"REPUBLICAN COMMAND":"NATIONALIST COMMAND"):(side==="blue"?"LEFT / BLUE DEPLOYMENT":"RIGHT / RED DEPLOYMENT")}</small></span></button>)}
             </div>
+            <div className="section-title">COMMANDER</div>
+            <div className="nickname-field"><input maxLength={20} placeholder="Nickname" value={nickname} disabled={Boolean(multiplayer)} onChange={e=>{const value=e.target.value;setNickname(value);window.localStorage.setItem("kspiel.nickname",value)}}/><small>1–20 characters · shown to both teams</small></div>
+            {!pendingInviteCode&&<><div className="section-title">TEAM SIZE</div><div className="team-size-choice">{([1,2,3] as MultiplayerTeamSize[]).map(size=><button key={size} disabled={Boolean(multiplayer)} className={multiplayerTeamSize===size?"active":""} onClick={()=>setMultiplayerTeamSize(size)}>{size}V{size}</button>)}</div>
             <div className="section-title">GAME MODE</div><div className="mode-list">
               <button disabled={Boolean(multiplayer)} className={!multiplayer?"active":""}><b>SINGLE PLAYER</b><small>You command {selectedPreset.sideNames[playerSide]}</small></button>
-              <button disabled={selectedGameMode==="openworld"||Boolean(multiplayer)||networkPhase==="matching"} onClick={()=>void beginQuickPlay()}><b>QUICK PLAY · PVP</b><small>{selectedGameMode==="openworld"?"Scenario mode only":"Match with the next available commander"}</small></button>
-              <button disabled={selectedGameMode==="openworld"||Boolean(multiplayer)||networkPhase==="matching"} onClick={()=>void beginPrivateMatch()}><b>PRIVATE MATCH</b><small>{selectedGameMode==="openworld"?"Scenario mode only":"Create a room and share its link"}</small></button>
-            </div>
-            {multiplayer&&<div className={"network-lobby "+networkPhase}><div><b>{networkPhase==="connected"?"OPPONENT CONNECTED":networkPhase==="opponent-left"?"OPPONENT DISCONNECTED":multiplayer.kind==="quickplay"?"QUICK PLAY QUEUE":"PRIVATE ROOM"}</b><small>ROOM {multiplayer.code} · YOU ARE {multiplayer.side.toUpperCase()}</small></div>{inviteLink&&<div className="invite-link"><input aria-label="Invite link" readOnly value={inviteLink}/><button onClick={()=>void navigator.clipboard.writeText(inviteLink)}>COPY LINK</button></div>}<button className="cancel-network" onClick={cancelMultiplayer}>CANCEL</button></div>}
+              <button disabled={selectedGameMode==="openworld"||Boolean(multiplayer)||networkPhase==="matching"||!nickname.trim()} onClick={()=>void beginQuickPlay()}><b>QUICK PLAY · {multiplayerTeamSize}V{multiplayerTeamSize}</b><small>{selectedGameMode==="openworld"?"Scenario mode only":"Queue for "+multiplayerTeamSize+" commanders on each team"}</small></button>
+              <button disabled={selectedGameMode==="openworld"||Boolean(multiplayer)||networkPhase==="matching"||!nickname.trim()} onClick={()=>void beginPrivateMatch()}><b>PRIVATE MATCH · {multiplayerTeamSize}V{multiplayerTeamSize}</b><small>{selectedGameMode==="openworld"?"Scenario mode only":"Create a room and share one link with every player"}</small></button>
+            </div></>}
+            {pendingInviteCode&&!multiplayer&&<div className="invite-join-card"><b>INVITE ROOM · {pendingInviteCode}</b><small>Pick a nickname and either team. Everyone on a team can command the full army.</small><div className="invite-actions"><button disabled={networkPhase==="matching"||!nickname.trim()} onClick={()=>void joinPendingInvite()}>JOIN ROOM</button><button onClick={()=>{setPendingInviteCode("");setNetworkError("")}}>DISMISS</button></div></div>}
+            {multiplayer&&<div className={"network-lobby "+networkPhase}><div><span><b>{networkPhase==="connected"?"ALL COMMANDERS CONNECTED":networkPhase==="opponent-left"?"PLAYER DISCONNECTED":multiplayer.kind==="quickplay"?"QUICK PLAY QUEUE":"PRIVATE ROOM"}</b><small>ROOM {multiplayer.code} · {multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.nickname} · {multiplayer.side.toUpperCase()} TEAM</small></span><strong>{onlinePlayers.length}/{multiplayer.maxPlayers}</strong></div><div className="lobby-roster">{(["blue","red"] as Side[]).map(side=><div key={side}><b>{side.toUpperCase()} TEAM</b>{onlinePlayers.filter(player=>player.side===side).sort((a,b)=>a.slot-b.slot).map(player=><small key={player.token}>{player.slot}. {player.nickname}{player.token===multiplayer.playerToken?" · YOU":""}</small>)}{onlinePlayers.filter(player=>player.side===side).length<multiplayer.teamSize&&<small>Waiting for {multiplayer.teamSize-onlinePlayers.filter(player=>player.side===side).length}…</small>}</div>)}</div>{inviteLink&&<div className="invite-link"><input aria-label="Invite link" readOnly value={inviteLink}/><button onClick={()=>void navigator.clipboard.writeText(inviteLink)}>COPY LINK</button></div>}<button className="cancel-network" onClick={cancelMultiplayer}>CANCEL</button></div>}
             {networkPhase==="matching"&&<div className="network-lobby matching"><b>CONNECTING TO MATCHMAKING…</b><small>Preparing Supabase Realtime session.</small></div>}
-            {networkError&&<div className="network-error">{networkError}</div>}
-            <button className="launch-button" disabled={Boolean(multiplayer)||networkPhase==="matching"} onClick={()=>startGame()}>{selectedGameMode==="openworld"?"FOUND DOMINION":"DEPLOY TO THEATER"}</button>
+            {networkError&&<div className="network-error">{networkError==="team_full"?"That team is full. Pick the other team.":networkError==="room_unavailable"?"That room is full, closed, or expired.":networkError}</div>}
+            <button className="launch-button" disabled={Boolean(multiplayer)||networkPhase==="matching"||Boolean(pendingInviteCode)} onClick={()=>startGame()}>{selectedGameMode==="openworld"?"FOUND DOMINION":"DEPLOY TO THEATER"}</button>
           </aside>
         </div>
       </div>
@@ -1580,7 +1612,7 @@ export default function Home(){
 
   function createAttackPlan(tx:number,ty:number){
     const chosen=units.filter(u=>selected.includes(u.id));if(!chosen.length)return;
-    const side=chosen[0].side,id="plan-"+side+"-"+planCounter.current++;
+    const side=chosen[0].side,actor=multiplayerRef.current?.playerToken.slice(0,8)??"local",id="plan-"+side+"-"+actor+"-"+planCounter.current++;
     const plan:AttackPlan={id,name:"OP "+String(planCounter.current-1).padStart(2,"0"),side,formationIds:chosen.map(u=>u.id),targetX:tx,targetY:ty,status:"draft"};
     setAttackPlans(prev=>[...prev,plan]);
     if(multiplayerRef.current&&!multiplayerRef.current.isHost)sendNetwork("plan-upsert",{plan});
@@ -1639,7 +1671,8 @@ export default function Home(){
       if(midTerrain==="water"||midTerrain==="highmountain")return;
     }
 
-    const id="build-"+playerSide+"-"+buildCounter.current++;
+    const actor=multiplayerRef.current?.playerToken.slice(0,8)??"local";
+    const id="build-"+playerSide+"-"+actor+"-"+buildCounter.current++;
     const requiredHours=pendingBuild==="observatory"?26
       :pendingBuild==="fixed_artillery"?50
       :pendingBuild==="field_fortification"?18
@@ -1875,12 +1908,12 @@ export default function Home(){
   return <main className={"game-shell theme-"+activeScenario.theme}>
     <header className="topbar">
       <div className="brand"><span className="brand-mark">K</span><div><b>KSPIEL</b><small>{activeScenario.title.toUpperCase()} · #{activeScenario.seed.toString(16).toUpperCase()}</small></div></div>
-      <div className="theater-state"><span className="command-side"><Flag styleName={activeScenario.sideFlags[playerSide]??"generic-blue"}/>{activeScenario.sideNames[playerSide]}</span><span>DAY {day}</span><strong>{timeLabel(hour)}</strong><span className={running?"live":"paused"}>{running?"RUNNING":"PAUSED"}</span>{multiplayer&&<span className={"network-badge "+networkPhase}>PVP · {multiplayer.code}</span>}</div>
+      <div className="theater-state"><span className="command-side"><Flag styleName={activeScenario.sideFlags[playerSide]??"generic-blue"}/>{activeScenario.sideNames[playerSide]}</span><span>DAY {day}</span><strong>{timeLabel(hour)}</strong><span className={running?"live":"paused"}>{running?"RUNNING":"PAUSED"}</span>{multiplayer&&<span className={"network-badge "+networkPhase}>{multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.code}</span>}</div>
       <div className="global-metrics"><div><small>SUPPLY</small><b>{pct(averageSupply)}%</b></div><div><small>ORG</small><b>{pct(averageOrg)}%</b></div><div><small>CITIES</small><b>{blueCities}/{cities.length}</b></div><div><small>CONTACTS</small><b>{enemy.length}</b></div></div>
       <div className="time-controls"><button className="setup-return" onClick={returnToSetup}>SETUP</button><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)} className="icon-btn">{running?"Ⅱ":"▶"}</button>{[1,2,3].map(s=><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} key={s} onClick={()=>{if(!warResult){setSpeed(s);setRunning(true)}}} className={speed===s?"active":""}>×{s}</button>)}</div>
     </header>
 
-    {multiplayer&&networkPhase==="opponent-left"&&<div className="network-status-banner">OPPONENT DISCONNECTED · MATCH PAUSED</div>}
+    {multiplayer&&networkPhase==="opponent-left"&&<div className="network-status-banner">PLAYER DISCONNECTED · MATCH PAUSED</div>}
     {isMobile&&mobilePanel!=="none"&&<button className="mobile-backdrop" aria-label="Close panel" onClick={()=>setMobilePanel("none")}/>}
     <aside className={"left-panel "+(mobilePanel==="forces"?"mobile-open":"")}>
       <button className="mobile-panel-close" onClick={()=>setMobilePanel("none")}>CLOSE</button>
@@ -2038,7 +2071,7 @@ export default function Home(){
       <button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)}><b>{running?"Ⅱ":"▶"}</b><span>{running?"PAUSE":"PLAY"}</span></button>
     </nav>
 
-    <footer className="statusbar">{multiplayer&&<span className="status-room">PVP ROOM {multiplayer.code}</span>}<span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB: MOVE · SHIFT/CTRL+RMB: QUEUE</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><span>ALL TROOPS: FIELD WORKS · LOGISTICS: ROADS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
+    <footer className="statusbar">{multiplayer&&<span className="status-room">{multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.nickname} · {multiplayer.side.toUpperCase()} · ROOM {multiplayer.code}</span>}<span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB: MOVE · SHIFT/CTRL+RMB: QUEUE</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><span>ALL TROOPS: FIELD WORKS · LOGISTICS: ROADS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
   </main>
 }
 
