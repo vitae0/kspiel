@@ -1661,10 +1661,10 @@ export default function Home(){
     if(!selected.length&&!pendingStrategicBuild)return;
     if((pendingOrder==="assault"||pendingOrder==="relieve")&&!pendingStrategicBuild)return;
     const point=mapPoint(clientX,clientY);if(!point)return;
-    const tx=clamp(point.x,1,mapW-1),ty=clamp(point.y,1,mapH-1);if(terrainAt(activeScenario,tx,ty).terrain==="water")return;
+    const tx=clamp(point.x,1,mapW-1),ty=clamp(point.y,1,mapH-1);const targetTerrain=terrainAt(activeScenario,tx,ty).terrain;if(targetTerrain==="water")return;
     if(pendingStrategicBuild&&openWorldRef.current){
       if(pendingStrategicBuild==="city"){
-        if(citiesRef.current.some(c=>Math.hypot(c.x-tx,c.y-ty)<360))return;
+        if(targetTerrain==="mountain"||targetTerrain==="highmountain"||citiesRef.current.some(c=>Math.hypot(c.x-tx,c.y-ty)<360))return;
         const built=buildStrategicCity(openWorldRef.current,playerSide);
         if(!built.built)return;
         const city:CityState={name:"Founded "+built.state.serial,x:tx,y:ty,owner:playerSide,capture:0};
