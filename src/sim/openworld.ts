@@ -1,4 +1,4 @@
-import {WORLD_H,WORLD_W} from "./game";
+import {terrainAt,WORLD_H,WORLD_W} from "./game";
 import type {CityState,Formation,Scenario,Side,UnitKind} from "./types";
 
 export type OpenWorldBuildKind="infantry_barracks"|"mobile_barracks"|"support_barracks"|"road"|"wall"|"fort"|"city";
@@ -13,6 +13,26 @@ export type OpenWorldState={
   territoryClock:number;
   serial:number;
 };
+
+function safeSpawnNear(scenario:Scenario,x:number,y:number){
+  const worldWidth=scenario.worldWidth??WORLD_W,worldHeight=scenario.worldHeight??WORLD_H;
+  const safe=(px:number,py:number)=>{
+    if(px<80||px>worldWidth-80||py<80||py>worldHeight-80)return false;
+    const terrain=terrainAt(scenario,px,py).terrain;
+    return terrain!=="water"&&terrain!=="mountain"&&terrain!=="highmountain";
+  };
+  if(safe(x,y))return{x,y};
+  for(let radius=35;radius<=1200;radius+=35){
+    const samples=Math.max(16,Math.ceil(Math.PI*2*radius/70));
+    for(let i=0;i<samples;i++){
+      const angle=i/samples*Math.PI*2;
+      const px=x+Math.cos(angle)*radius,py=y+Math.sin(angle)*radius;
+      if(safe(px,py))return{x:px,y:py};
+    }
+  }
+  for(let py=120;py<worldHeight-120;py+=90)for(let px=120;px<worldWidth-120;px+=90)if(safe(px,py))return{x:px,y:py};
+  throw new Error("No non-mountain spawn point available");
+}
 
 export const UNIT_COST:Partial<Record<UnitKind,{family:"infantry_barracks"|"mobile_barracks"|"support_barracks";manpower:number;materials:number;fuel:number;hours:number}>>={
   infantry:{family:"infantry_barracks",manpower:90,materials:35,fuel:0,hours:10},
@@ -54,10 +74,16 @@ function mkUnit(kind:UnitKind,side:Side,x:number,y:number,id:string):Formation{
 
 export function createOpenWorldState(scenario:Scenario,units:Formation[],cities:CityState[]):{state:OpenWorldState;units:Formation[];cities:CityState[]}{
   const nextCities:CityState[]=cities.map((c,i)=>({...c,owner:(i<cities.length/3?"blue":i<2*cities.length/3?"green":"red") as Side}));
-  const blue=units.filter(u=>u.side==="blue").slice(0,10).map((u,i)=>({...u,x:nextCities[Math.min(i%4,nextCities.length-1)]?.x??900,y:(nextCities[Math.min(i%4,nextCities.length-1)]?.y??900)+i*18}));
+  const blue=units.filter(u=>u.side==="blue").slice(0,10).map((u,i)=>{
+    const city=nextCities[Math.min(i%4,nextCities.length-1)],spawn=safeSpawnNear(scenario,city?.x??900,(city?.y??900)+i*18);
+    return{...u,x:spawn.x,y:spawn.y};
+  });
   const red=units.filter(u=>u.side==="red").slice(0,10);
   const greenAnchor=scenario.cities[Math.floor(scenario.cities.length/2)]??{x:WORLD_FALLBACK_X,y:WORLD_FALLBACK_Y};
-  const green=red.slice(0,8).map((u,i)=>({...u,id:"g"+i,name:"Green "+u.name,side:"green" as Side,x:greenAnchor.x+(i%4)*35,y:greenAnchor.y+Math.floor(i/4)*35}));
+  const green=red.slice(0,8).map((u,i)=>{
+    const spawn=safeSpawnNear(scenario,greenAnchor.x+(i%4)*35,greenAnchor.y+Math.floor(i/4)*35);
+    return{...u,id:"g"+i,name:"Green "+u.name,side:"green" as Side,x:spawn.x,y:spawn.y};
+  });
   const resourceNodes:ResourceNode[]=[];
   let n=0;
   const sampleStep=560;
@@ -251,7 +277,7 @@ export function advanceOpenWorld(scenario:Scenario,state:OpenWorldState,units:Fo
   for(const q of state.recruitment){
     const left=q.hoursLeft-hours;
     if(left>0){recruitment.push({...q,hoursLeft:left});continue}
-    const b=structures.find(s=>s.id===q.barracksId);if(b)spawned.push(mkUnit(q.kind,q.side,b.x+28,b.y+28,"owu-"+serial++));
+    const b=structures.find(s=>s.id===q.barracksId);if(b){const spawn=safeSpawnNear(scenario,b.x+28,b.y+28);spawned.push(mkUnit(q.kind,q.side,spawn.x,spawn.y,"owu-"+serial++))}
   }
   const newCities:CityState[]=[];
   for(const cell of resourceNodes)if(cell.owner&&cell.control>.55&&cell.urban>=100&&!cities.some(c=>Math.hypot(c.x-cell.x,c.y-cell.y)<260)){
