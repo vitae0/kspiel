@@ -138,6 +138,48 @@ function inFeature(x:number,y:number,f:TerrainFeature){
   return Math.hypot(lx/f.rx,ly/f.ry)<boundary;
 }
 
+function isMountainFeatureAt(features:TerrainFeature[],x:number,y:number){
+  return features.some(f=>(f.terrain==="mountain"||f.terrain==="highmountain")&&inFeature(x,y,f));
+}
+
+function relocateCitiesOffMountains(
+  cities:CityState[],
+  features:TerrainFeature[],
+  worldWidth:number,
+  worldHeight:number,
+  isAllowed:(x:number,y:number)=>boolean
+){
+  const placed:CityState[]=[];
+  const valid=(x:number,y:number)=>{
+    if(x<120||x>worldWidth-120||y<120||y>worldHeight-120||!isAllowed(x,y)||isMountainFeatureAt(features,x,y))return false;
+    return placed.every(other=>Math.hypot(other.x-x,other.y-y)>150);
+  };
+  for(const city of cities){
+    if(valid(city.x,city.y)){placed.push(city);continue}
+    let found:{x:number;y:number}|null=null;
+    const phase=(city.name.length*.61803398875)%1*Math.PI*2;
+    for(let radius=60;radius<=1500&&!found;radius+=60){
+      const samples=Math.max(18,Math.ceil(Math.PI*2*radius/95));
+      for(let i=0;i<samples;i++){
+        const angle=phase+i/samples*Math.PI*2;
+        const x=city.x+Math.cos(angle)*radius,y=city.y+Math.sin(angle)*radius;
+        if(valid(x,y)){found={x,y};break}
+      }
+    }
+    if(!found){
+      let bestD=Infinity;
+      for(let y=160;y<worldHeight-160;y+=90)for(let x=160;x<worldWidth-160;x+=90){
+        if(!valid(x,y))continue;
+        const d=Math.hypot(x-city.x,y-city.y);
+        if(d<bestD){bestD=d;found={x,y}}
+      }
+    }
+    if(!found)throw new Error("Unable to place city outside mountain terrain: "+city.name);
+    placed.push({...city,x:found.x,y:found.y});
+  }
+  return placed;
+}
+
 function pointSegmentDistance(x:number,y:number,a:{x:number;y:number},b:{x:number;y:number}){
   const dx=b.x-a.x,dy=b.y-a.y;
   const len=dx*dx+dy*dy;
@@ -395,7 +437,7 @@ function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>numbe
     const y=Math.max(90,Math.min(worldHeight-90,base.y+Math.sin(angle)*radius));
     const terrain=terrainAt(scenario,x,y).terrain;
     const nearHostileCity=hostile.some(c=>Math.hypot(c.x-x,c.y-y)<180);
-    if(!nearHostileCity&&terrain!=="water"&&(terrain!=="highmountain"||kind==="mountaineer"||kind==="special_forces"))return{x,y};
+    if(!nearHostileCity&&terrain!=="water"&&terrain!=="mountain"&&terrain!=="highmountain")return{x,y};
   }
   const anchor=owned.sort((a,b)=>{
     const da=Math.min(...hostile.map(c=>Math.hypot(c.x-a.x,c.y-a.y)),Infinity);
@@ -528,14 +570,25 @@ function makeSpainRivers(worldWidth:number,worldHeight:number){
 
 function generateSpainScenario(seed:number,preset:ScenarioPreset,rnd:()=>number):Scenario{
   const worldWidth=WORLD_W*(preset.mapScale??2),worldHeight=WORLD_H*(preset.mapScale??2);
-  const cities=makeSpainCities(worldWidth,worldHeight);
-  const roadNetwork=makeSpainRoadNetwork(cities,rnd);
+  const rawCities=makeSpainCities(worldWidth,worldHeight);
+  const roadNetwork=makeSpainRoadNetwork(rawCities,rnd);
   const landPolygon=makeSpainLandPolygon(worldWidth,worldHeight);
+  const terrainFeatures=makeSpainFeatures(worldWidth,worldHeight,rnd);
+  const cities=relocateCitiesOffMountains(rawCities,terrainFeatures,worldWidth,worldHeight,(x,y)=>pointInPolygon(x,y,landPolygon));
+  const movedByName=new Map(cities.map(city=>[city.name,city]));
+  const safeRoadRoutes=roadNetwork.routes.map(route=>{
+    const next=route.map(p=>({...p}));
+    const start=rawCities.find(city=>Math.hypot(city.x-route[0].x,city.y-route[0].y)<1);
+    const end=rawCities.find(city=>Math.hypot(city.x-route[route.length-1].x,city.y-route[route.length-1].y)<1);
+    if(start){const moved=movedByName.get(start.name);if(moved)next[0]={x:moved.x,y:moved.y}}
+    if(end){const moved=movedByName.get(end.name);if(moved)next[next.length-1]={x:moved.x,y:moved.y}}
+    return next;
+  });
   const shell:Scenario={
     seed,presetId:preset.id,title:preset.title,theme:preset.theme,era:preset.era,historical:preset.historical,year:preset.year,
     location:preset.location,sideNames:preset.sideNames,sideFlags:preset.sideFlags,worldWidth,worldHeight,landPolygon,
     coast:{base:-999,amp1:0,amp2:0,amp3:0,f1:0,f2:0,f3:0,p1:0,p2:0},
-    cities,terrainFeatures:makeSpainFeatures(worldWidth,worldHeight,rnd),roadNodes:roadNetwork.nodes,roadRoutes:roadNetwork.routes,
+    cities,terrainFeatures,roadNodes:cities.map((city,i)=>({id:"road-"+i,x:city.x,y:city.y,cityName:city.name})),roadRoutes:safeRoadRoutes,
     riverRoutes:makeSpainRivers(worldWidth,worldHeight),formations:[],landPath:""
   };
   shell.landPath="M "+landPolygon.map(p=>p.x.toFixed(1)+" "+p.y.toFixed(1)).join(" L ")+" Z";
@@ -548,8 +601,9 @@ export function generateScenario(seed:number,presetId="frontier"):Scenario{
   const rnd=mulberry32(seed||1);
   if(preset.id==="spain-1937")return generateSpainScenario(seed,preset,rnd);
   const coast=coastForTheme(preset.theme,rnd);
-  const cities=makeCities(rnd,preset);
+  const rawCities=makeCities(rnd,preset);
   const terrainFeatures=makeFeatures(rnd,preset.theme);
+  const cities=relocateCitiesOffMountains(rawCities,terrainFeatures,WORLD_W,WORLD_H,(x,y)=>x>=coastX(coast,y));
   const roadNetwork=makeRoadNetwork(cities,rnd);
   const roadRoutes=roadNetwork.routes;
   const riverRoutes=makeRivers(rnd,preset.theme);
