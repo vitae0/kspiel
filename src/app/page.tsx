@@ -678,6 +678,16 @@ export default function Home(){
         (setupCategory==="historical"&&p.historical)||(setupCategory==="fictional"&&!p.historical)||
         (setupCategory==="mega"&&(p.mapScale??1)>=2)||(setupCategory==="guerrilla"&&p.warfare==="guerrilla"));
     const selectedPreset=SCENARIO_PRESETS.find(p=>p.id===selectedPresetId)??SCENARIO_PRESETS[0];
+    const changeFilter=(category:typeof setupCategory)=>{
+      setSetupCategory(category);
+      const visible=SCENARIO_PRESETS.filter(p=>category==="all"||
+        (category==="historical"&&p.historical)||(category==="fictional"&&!p.historical)||
+        (category==="mega"&&(p.mapScale??1)>=2)||(category==="guerrilla"&&p.warfare==="guerrilla"));
+      if(visible.length&&!visible.some(p=>p.id===selectedPresetId)){
+        setSelectedPresetId(visible[0].id);
+        setPlayerSide("blue");
+      }
+    };
     const chooseMode=(mode:"scenario"|"openworld")=>{
       if(multiplayer)return;
       setSelectedGameMode(mode);
@@ -726,18 +736,18 @@ export default function Home(){
               <p>Inspect real terrain previews, unit counts, battle rosters and tactical conditions. Select a theater to configure your forces and deploy.</p>
             </div>
             {selectedGameMode==="scenario"?<div className="setup-tabs theater-filters" role="group" aria-label="Filter theaters">
-              <button className={setupCategory==="all"?"active":""} onClick={()=>setSetupCategory("all")}>ALL</button>
-              <button className={setupCategory==="fictional"?"active":""} onClick={()=>setSetupCategory("fictional")}>FICTIONAL</button>
-              <button className={setupCategory==="historical"?"active":""} onClick={()=>setSetupCategory("historical")}>HISTORICAL</button>
-              <button className={setupCategory==="mega"?"active":""} onClick={()=>setSetupCategory("mega")}>MEGA MAPS</button>
-              <button className={setupCategory==="guerrilla"?"active":""} onClick={()=>setSetupCategory("guerrilla")}>GUERRILLA</button>
+              <button className={setupCategory==="all"?"active":""} onClick={()=>changeFilter("all")}>ALL</button>
+              <button className={setupCategory==="fictional"?"active":""} onClick={()=>changeFilter("fictional")}>FICTIONAL</button>
+              <button className={setupCategory==="historical"?"active":""} onClick={()=>changeFilter("historical")}>HISTORICAL</button>
+              <button className={setupCategory==="mega"?"active":""} onClick={()=>changeFilter("mega")}>MEGA MAPS</button>
+              <button className={setupCategory==="guerrilla"?"active":""} onClick={()=>changeFilter("guerrilla")}>GUERRILLA</button>
             </div>:<div className="theater-mode-note">THREE FACTIONS · PROCEDURAL TERRITORY · BUILD AND EXPAND</div>}
             <MapSelection presets={presets} selectedPresetId={selectedPresetId} mode={selectedGameMode}
               locked={Boolean(multiplayer)||Boolean(pendingInviteCode)}
               onSelect={id=>{if(multiplayer||pendingInviteCode)return;setSelectedPresetId(id);setPlayerSide("blue")}}/>
           </section>
           <aside className="setup-side">
-            <div className="section-title">{selectedGameMode==="openworld"?"WORLD RULESET":"SELECTED THEATER"}</div><h2>{selectedGameMode==="openworld"?"Open World Dominion":selectedPreset.title}</h2><p>{selectedGameMode==="openworld"?"Procedural continental theater · three factions":selectedPreset.location+(selectedPreset.year?" · "+selectedPreset.year:"")}</p>
+            <div className="section-title">{selectedGameMode==="openworld"?"WORLD RULESET":"SELECTED THEATER"}</div><h2>{selectedPreset.title}</h2><p>{selectedGameMode==="openworld"?"Open World Dominion · three factions · "+selectedPreset.location:selectedPreset.location+(selectedPreset.year?" · "+selectedPreset.year:"")}</p>
             <div className="setup-facts"><span><small>THEME</small><b>{selectedPreset.theme.toUpperCase()}</b></span><span><small>ERA</small><b>{selectedPreset.era.replace("_"," ").toUpperCase()}</b></span><span><small>MAP</small><b>{Math.round(WORLD_W*(selectedPreset.mapScale??1))} × {Math.round(WORLD_H*(selectedPreset.mapScale??1))}</b></span><span><small>FOG</small><b>ENABLED</b></span></div>
             <div className="section-title">{pendingInviteCode?"CHOOSE TEAM":"PLAY AS"}</div><div className="side-choice">
               {(["blue","red"] as Side[]).map(side=><button key={side} disabled={Boolean(multiplayer)} className={playerSide===side?"active":""} onClick={()=>setPlayerSide(side)}><Flag styleName={selectedPreset.sideFlags[side]??"generic-blue"}/><span><b>{pendingInviteCode?side.toUpperCase()+" TEAM":selectedPreset.sideNames[side]}</b><small>{pendingInviteCode?"Shared command of the entire "+side+" force":selectedPreset.warfare==="guerrilla"?(side==="blue"?"PARTISANS · MILITIA · RAIDERS":"GARRISONS · PATROLS · ARMOR"):selectedPreset.id==="spain-1937"?(side==="blue"?"REPUBLICAN COMMAND":"NATIONALIST COMMAND"):(side==="blue"?"BLUE THEATER COMMAND":"RED THEATER COMMAND")}</small></span></button>)}
