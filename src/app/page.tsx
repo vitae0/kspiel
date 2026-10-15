@@ -7,6 +7,9 @@ import {AMMO_TYPES,SHELL_INTERVAL,constructionWork,fireBudget,marchPaces,marchSl
 import {advanceDirective,applyEncirclement,decoyVisibleTo,frontAssignments,isDetected,updateContacts,type FrontDirective,type FrontMode,type LastSeenContact,type DecoyContact} from "@/sim/warfare";
 import {startHistory,updateHistory,finishHistory,addBattleEvent,type BattleHistory} from "@/sim/telemetry";
 import AfterActionReport from "./after-action";
+import BrandMark from "./brand-mark";
+import MenuAtmosphere from "./menu-atmosphere";
+import MenuScore from "./menu-score";
 import {scenarioTerritoryCells,territoryBoundaryPath} from "@/sim/territory";
 import {botControlledSides,createMatchConfig,defaultArmyGroups,localControlledSides} from "@/sim/session";
 import {addStrategicStructure,advanceOpenWorld,buildStrategicCity,createOpenWorldState,queueRecruitment,UNIT_COST,type OpenWorldBuildKind,type OpenWorldState} from "@/sim/openworld";
@@ -1889,11 +1892,12 @@ export default function Home(){
       (setupCategory==="mega"&&(p.mapScale??1)>=2)||(setupCategory==="guerrilla"&&p.warfare==="guerrilla"));
     const selectedPreset=SCENARIO_PRESETS.find(p=>p.id===selectedPresetId)??SCENARIO_PRESETS[0];
     return <main className="setup-shell">
+      <MenuAtmosphere/>
       <div className="setup-panel">
-        <div className="setup-brand"><span className="brand-mark">K</span><div><b>KSPIEL</b><small>OPERATIONAL COMMAND SIMULATION</small></div></div>
+        <div className="setup-brand"><BrandMark/><div className="setup-brand-identity"><b>KSPIEL</b><small>OPERATIONAL COMMAND SIMULATION</small></div><div className="menu-brand-actions"><span className="menu-build-tag">THE WAR ROOM</span><MenuScore/></div></div>
         <div className="setup-grid">
           <section className="setup-main">
-            <div className="setup-heading"><small>CREATE GAME</small><h1>{selectedGameMode==="openworld"?"Build a dominion":"Choose a theater"}</h1><p>{selectedGameMode==="openworld"?"Expand territory, exploit resources automatically, build infrastructure and raise new armies against multiple rivals.":"Terrain now changes the roster, mobility, visibility and logistics. Historical presets are stylized scenarios, not exact order-of-battle reconstructions."}</p></div>
+            <div className="setup-heading"><small>FIELD OPERATIONS / NEW CAMPAIGN</small><h1>{selectedGameMode==="openworld"?"Build a dominion":"Choose a theater"}</h1><p>{selectedGameMode==="openworld"?"Expand territory, exploit resources automatically, build infrastructure and raise new armies against multiple rivals.":"Terrain now changes the roster, mobility, visibility and logistics. Historical presets are stylized scenarios, not exact order-of-battle reconstructions."}</p></div>
             <div className="setup-tabs"><button disabled={Boolean(multiplayer)} className={selectedGameMode==="scenario"?"active":""} onClick={()=>setSelectedGameMode("scenario")}>SCENARIO WAR</button><button disabled={Boolean(multiplayer)} className={selectedGameMode==="openworld"?"active":""} onClick={()=>{setSelectedGameMode("openworld");setSelectedPresetId("frontier")}}>OPEN WORLD</button></div>
             <div className="setup-tabs"><button className={setupCategory==="all"?"active":""} onClick={()=>setSetupCategory("all")}>ALL</button><button className={setupCategory==="fictional"?"active":""} onClick={()=>setSetupCategory("fictional")}>FICTIONAL</button><button className={setupCategory==="historical"?"active":""} onClick={()=>setSetupCategory("historical")}>HISTORICAL</button><button className={setupCategory==="mega"?"active":""} onClick={()=>setSetupCategory("mega")}>MEGA MAPS</button><button className={setupCategory==="guerrilla"?"active":""} onClick={()=>setSetupCategory("guerrilla")}>GUERRILLA</button></div>
             {selectedGameMode==="scenario"&&<div className="scenario-grid">{presets.map(preset=><button key={preset.id} disabled={Boolean(multiplayer)} className={"scenario-card theme-"+preset.theme+" "+(selectedPresetId===preset.id?"selected":"")} onClick={()=>{setSelectedPresetId(preset.id);setPlayerSide("blue")}}>
@@ -2428,7 +2432,7 @@ export default function Home(){
 
   return <main className={"game-shell theme-"+activeScenario.theme}>
     <header className="topbar">
-      <div className="brand"><span className="brand-mark">K</span><div><b>KSPIEL</b><small>{activeScenario.title.toUpperCase()} · #{activeScenario.seed.toString(16).toUpperCase()}</small></div></div>
+      <div className="brand"><BrandMark/><div><b>KSPIEL</b><small>{activeScenario.title.toUpperCase()} · #{activeScenario.seed.toString(16).toUpperCase()}</small></div></div>
       <div className="theater-state"><span className="command-side"><Flag styleName={activeScenario.sideFlags[playerSide]??"generic-blue"}/>{activeScenario.sideNames[playerSide]}</span><span>DAY {day}</span><strong>{timeLabel(hour)}</strong><span className={running?"live":"paused"}>{running?"RUNNING":"PAUSED"}</span>{multiplayer&&<span className={"network-badge "+networkPhase}>{multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.code}</span>}</div>
       <div className="global-metrics"><div><small>SUPPLY</small><b>{pct(averageSupply)}%</b></div><div><small>ORG</small><b>{pct(averageOrg)}%</b></div><div><small>CITIES</small><b>{blueCities}/{cities.length}</b></div><div><small>CONTACTS</small><b>{enemy.filter(u=>isDetected(u,observerForces,cities,emplacements,activeScenario,playerSide)).length}</b></div></div>
       <div className="time-controls"><button className="guide-toggle" onClick={()=>{setShowTutorial(true);setTutorialStep(0)}}>GUIDE ?</button>{!multiplayer&&<button className="aar-end" onClick={concludeSession}>END MATCH · REPORT</button>}<button className="setup-return" onClick={returnToSetup}>SETUP</button><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)} className="icon-btn">{running?"Ⅱ":"▶"}</button>{[1,2,3].map(s=><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} key={s} onClick={()=>{if(!warResult){setSpeed(s);setRunning(true)}}} className={speed===s?"active":""}>×{(multiplayer?MULTIPLAYER_SPEED:SOLO_SPEED)[s]}</button>)}</div>
