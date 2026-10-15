@@ -77,6 +77,7 @@ export default function Home(){
   const [massTargets,setMassTargets]=useState<string[]>([]);
   const [frontToolActive,setFrontToolActive]=useState(false);
   const [showTutorial,setShowTutorial]=useState(false);
+  const [unitSymbols,setUnitSymbols]=useState(false);
   const [tutorialStep,setTutorialStep]=useState(0);
   const [selectedPresetId,setSelectedPresetId]=useState("frontier");
   const [selectedGameMode,setSelectedGameMode]=useState<"scenario"|"openworld">("scenario");
@@ -152,6 +153,7 @@ export default function Home(){
 
   useEffect(()=>{
     const saved=window.localStorage.getItem("kspiel.nickname");
+    setUnitSymbols(window.localStorage.getItem("kspiel.natoSymbols")==="true");
     if(saved)setNickname(saved.slice(0,20));
     const code=new URLSearchParams(window.location.search).get("join")?.trim().toUpperCase();
     if(!code)return;
@@ -353,6 +355,8 @@ export default function Home(){
       return next;
     });
   };
+
+  useEffect(()=>{window.localStorage.setItem("kspiel.natoSymbols",String(unitSymbols))},[unitSymbols]);
 
   const localPlayerId=multiplayer?.playerToken??"local";
   const matchConfig=createMatchConfig(multiplayer?"pvp":"singleplayer",localPlayerId,playerSide);
@@ -1230,7 +1234,7 @@ export default function Home(){
   });
 
   return <main className={"game-shell theme-"+activeScenario.theme}>
-    <GameHeader {...{activeScenario,playerSide,day,hour,running,multiplayer,networkPhase,averageSupply,averageOrg,blueCities,cities,enemy,detectedEnemies,speed,warResult,setShowTutorial,setTutorialStep,concludeSession,returnToSetup,setRunning,setSpeed}}/>
+    <GameHeader {...{activeScenario,playerSide,day,hour,running,multiplayer,networkPhase,averageSupply,averageOrg,blueCities,cities,enemy,detectedEnemies,speed,warResult,setShowTutorial,setTutorialStep,concludeSession,returnToSetup,setRunning,setSpeed,unitSymbols,setUnitSymbols}}/>
 
     <GameTutorial {...{showTutorial,battleReport,tutorialStep,setShowTutorial,setTutorialStep}}/>
     {multiplayer&&networkPhase==="opponent-left"&&<div className="network-status-banner">PLAYER DISCONNECTED · MATCH PAUSED</div>}
@@ -1301,7 +1305,7 @@ export default function Home(){
         </svg>}
         {selectedUnits.some(u=>ARTILLERY_KINDS.has(u.kind))&&<svg className="artillery-ranges" width={mapW} height={mapH}>{selectedUnits.filter(u=>ARTILLERY_KINDS.has(u.kind)).map(u=>{const r=u.kind==="mortar"?mortarMaxRange(activeScenario,u):u.kind==="heavy_artillery"?820:540;return <g key={"range-"+u.id}><circle cx={u.x} cy={u.y} r={r}/><text x={u.x+10} y={u.y-r+22}>{Math.round(r)} RANGE</text></g>})}</svg>}
         {pendingOrder==="fire"&&aimPoint&&selectedUnits.some(u=>u.kind==="mortar")&&<svg className="mortar-aim" width={mapW} height={mapH}><circle cx={aimPoint.x} cy={aimPoint.y} r={mortarDispersion(activeScenario,aimPoint.x,aimPoint.y,Math.min(1,Math.min(...selectedUnits.filter(u=>u.kind==="mortar").map(u=>Math.hypot(aimPoint.x-u.x,aimPoint.y-u.y)/mortarMaxRange(activeScenario,u)))))} /><circle className="mortar-aim-core" cx={aimPoint.x} cy={aimPoint.y} r="7"/></svg>}
-        <MapUnitLayer {...{renderedUnits,localSides,detectedEnemies,selected,massTargets,selectUnit,issueUnitTarget}}/>
+        <MapUnitLayer {...{renderedUnits,localSides,detectedEnemies,selected,massTargets,unitSymbols,selectUnit,issueUnitTarget}}/>
         {revealedContacts.map(c=><div key={"contact-"+c.id} className="stale-contact" style={{left:c.x-17,top:c.y-17,opacity:Math.max(.2,c.confidence)}} title={"LAST CONTACT · "+Math.round((elapsedHoursRef.current-c.seenAt)*10)/10+"h AGO"}><b>?</b><small>{UNIT_LABEL[c.kind]}</small></div>)}
         {decoys.filter(d=>d.owner===playerSide||decoyVisibleTo(d,playerSide,units,activeScenario,elapsedHoursRef.current)).map(d=><div key={d.id} className={"deception-counter "+(d.owner===playerSide?"friendly":"enemy")} style={{left:d.x-16,top:d.y-16}} title={d.owner===playerSide?"Friendly deception marker":"Unconfirmed hostile formation"}><b>{d.owner===playerSide?"△":"INF"}</b><small>{d.owner===playerSide?"DECOY":"?"}</small></div>)}
         {openWorld?.structures.filter(s=>s.kind!=="road"&&s.kind!=="wall").map(s=><div key={s.id} className={"ow-structure "+s.kind+" "+s.side} style={{left:s.x-16,top:s.y-16}} title={s.kind}><b>{s.kind==="infantry_barracks"?"INF":s.kind==="mobile_barracks"?"MOB":s.kind==="support_barracks"?"SUP":"FORT"}</b></div>)}
