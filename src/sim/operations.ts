@@ -2,7 +2,7 @@ import type {Formation,Side} from "./types";
 
 export const ARMY_PALETTE=["#f4d35e","#c5a3ef","#f4aa73","#eaded0","#e69ac5","#d6c684"];
 export function armyGroupColor(groupId?:string){
-  const match=groupId?.match(/-army-(\\d+)$/);
+  const match=groupId?.match(/-army-(\d+)$/);
   return match?ARMY_PALETTE[(Number(match[1])-1)%ARMY_PALETTE.length]:"#a7a79c";
 }
 
