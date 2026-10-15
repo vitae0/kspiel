@@ -84,8 +84,8 @@ function TheaterThumbnail({presetId,mode,priority=false}:{presetId:string;mode:M
   </div>;
 }
 
-export function MapSelection({presets,selectedPresetId,onSelect,mode}:{
-  presets:ScenarioPreset[];selectedPresetId:string;onSelect:(id:string)=>void;mode:MapMode;
+export function MapSelection({presets,selectedPresetId,onSelect,mode,locked=false}:{
+  presets:ScenarioPreset[];selectedPresetId:string;onSelect:(id:string)=>void;mode:MapMode;locked?:boolean;
 }){
   if(!presets.length)return <p className="theater-empty">No maps match this filter.</p>;
   return <div className="theater-picker" aria-label="Available battle maps">
@@ -94,7 +94,7 @@ export function MapSelection({presets,selectedPresetId,onSelect,mode}:{
       const blue=sideCount(preset.id,"blue",mode),red=sideCount(preset.id,"red",mode);
       const roster=[...new Set([...rosterRows(preset.id,"blue",mode),...rosterRows(preset.id,"red",mode)]
         .map(row=>row.kind))];
-      return <button type="button" key={preset.id} disabled={false}
+      return <button type="button" key={preset.id} disabled={locked}
         aria-pressed={chosen}
         className={"theater-option theme-"+preset.theme+(chosen?" selected":"")}
         onClick={()=>onSelect(preset.id)}>
