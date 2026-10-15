@@ -919,8 +919,9 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .theater-thumb-control-area.red{fill:#df5650;stroke:#df5650}
 .theater-thumb-control-area.green{fill:#3abf73;stroke:#3abf73}
 .theater-thumb-flag{overflow:visible;pointer-events:none}
-.theater-thumb-flag-surface{display:block;width:100%;height:100%;filter:drop-shadow(0 2px 4px #000c)}
-.theater-thumb-flag .flag{display:block;width:100%;height:100%;border:2px solid #f5e8c6}
+.theater-thumb-flag-surface{display:block;width:26px;height:16px;transform-origin:top left;filter:drop-shadow(0 1px 2px #000c)}
+.theater-thumb-flag .flag{display:block;width:26px;height:16px;border:1px solid #f5e8c6}
+.theater-thumb-flag.green .flag-generic-blue,.theater-option-force .green .flag-generic-blue,.theater-roster.green .flag-generic-blue{background:#579a6f}
 .menu-mobile-switch{display:none}
 .menu-setup-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;flex:none;margin-bottom:7px}
 .menu-setup-tabs button{
