@@ -75,6 +75,7 @@ export type Formation={
   softAttack:number;hardAttack:number;defense:number;breakthrough:number;
   speed:number;recon:number;movementProgress:number;
   groupId?:string;formationShape?:FormationShape;
+  morale?:number;suppression?:number;isolationHours?:number;damageDealt?:number;suppressionInflicted?:number;
   order?:{type:OrderType;targetX?:number;targetY?:number;targetUnitId?:string;finalType?:OrderType;finalTargetUnitId?:string;waypoints?:Array<{x:number;y:number}>};
 };
 
