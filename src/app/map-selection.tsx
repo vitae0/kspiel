@@ -117,7 +117,7 @@ function TheaterThumbnail({presetId,mode,priority=false}:{presetId:string;mode:M
       </g>)}
       {flags.map(city=><foreignObject key={"flag-"+city.name} x={city.x-w*.021} y={city.y-w*.039}
         width={w*.042} height={w*.027} className="theater-thumb-flag">
-        <span className="theater-thumb-flag-surface"><Flag styleName={scene.sideFlags[city.side]??"generic-blue"}/></span>
+        <span className="theater-thumb-flag-surface" style={{transform:"scale("+(w*.042/26)+")"}}><Flag styleName={scene.sideFlags[city.side]??"generic-blue"}/></span>
       </foreignObject>)}
       {preview.units.filter((_,i)=>i%Math.max(1,Math.ceil(preview.units.length/90))===0).map(unit=><rect
         key={unit.id} className={"theater-thumb-unit "+unit.side} x={unit.x-w*.003} y={unit.y-w*.003}
