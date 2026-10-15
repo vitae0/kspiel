@@ -155,9 +155,9 @@ export function advanceOpenWorld(scenario:Scenario,state:OpenWorldState,units:Fo
   if(territoryClock>=TERRITORY_RECALC_HOURS){
     const elapsed=territoryClock;
     territoryClock%=TERRITORY_RECALC_HOURS;
-    const citiesBySide:Record<Side,CityState[]>={blue:[],red:[],green:[]};
-    const unitsBySide:Record<Side,Formation[]>={blue:[],red:[],green:[]};
-    const structuresBySide:Record<Side,OpenWorldStructure[]>={blue:[],red:[],green:[]};
+    const citiesBySide:Record<Side,CityState[]>={blue:[],red:[],green:[],yellow:[],purple:[]};
+    const unitsBySide:Record<Side,Formation[]>={blue:[],red:[],green:[],yellow:[],purple:[]};
+    const structuresBySide:Record<Side,OpenWorldStructure[]>={blue:[],red:[],green:[],yellow:[],purple:[]};
     for(const city of cities)citiesBySide[city.owner].push(city);
     for(const unit of units)if(unit.strength>8)unitsBySide[unit.side].push(unit);
     for(const structure of structures)if(structure.kind==="fort"||structure.kind.includes("barracks"))structuresBySide[structure.side].push(structure);
@@ -191,7 +191,7 @@ export function advanceOpenWorld(scenario:Scenario,state:OpenWorldState,units:Fo
       const localTerrain=terrainAt(scenario,cell.x,cell.y).terrain;
       const terrainReach=localTerrain==="mountain"||localTerrain==="highmountain"?.54:localTerrain==="forest"?.76:localTerrain==="marsh"?.62:1;
       const terrainFort=localTerrain==="mountain"||localTerrain==="highmountain"?1.25:localTerrain==="urban"?1.15:1;
-      const out:Record<Side,number>={blue:0,red:0,green:0};
+      const out:Record<Side,number>={blue:0,red:0,green:0,yellow:0,purple:0};
       for(const side of SIDES){
         let score=0;
 
@@ -284,7 +284,7 @@ export function advanceOpenWorld(scenario:Scenario,state:OpenWorldState,units:Fo
   }
 
   const income:Record<Side,{manpower:number;materials:number;fuel:number}>={
-    blue:{manpower:0,materials:0,fuel:0},red:{manpower:0,materials:0,fuel:0},green:{manpower:0,materials:0,fuel:0}
+    blue:{manpower:0,materials:0,fuel:0},red:{manpower:0,materials:0,fuel:0},green:{manpower:0,materials:0,fuel:0},yellow:{manpower:0,materials:0,fuel:0},purple:{manpower:0,materials:0,fuel:0}
   };
   for(const cell of resourceNodes)if(cell.owner){
     const effective=.35+.65*cell.control;
