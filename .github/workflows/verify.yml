@@ -18,5 +18,7 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Scenario runtime smoke test
         run: node scripts/smoke-theaters.cjs
+      - name: Attrition and synchronized march tests
+        run: node scripts/smoke-attrition.cjs
       - name: Typecheck and static build
         run: npm run build

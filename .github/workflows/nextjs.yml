@@ -34,6 +34,8 @@ jobs:
 
       - name: Scenario runtime smoke test
         run: node scripts/smoke-theaters.cjs
+      - name: Attrition and synchronized march tests
+        run: node scripts/smoke-attrition.cjs
       - name: Build static site
         run: npm run build
 
