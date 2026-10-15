@@ -1295,7 +1295,7 @@ export default function Home(){
 
       {selectionBox&&<div className="selection-box" style={{left:Math.min(selectionBox.x1,selectionBox.x2),top:Math.min(selectionBox.y1,selectionBox.y2),width:Math.abs(selectionBox.x2-selectionBox.x1),height:Math.abs(selectionBox.y2-selectionBox.y1)}}/>}
       {frontPreview&&<svg className="front-preview"><line x1={frontPreview.x1} y1={frontPreview.y1} x2={frontPreview.x2} y2={frontPreview.y2}/></svg>}
-      <GameMinimap {...{openWorld,mapW,mapH,territoryPaths,cities,units}}/>}
+      <GameMinimap {...{openWorld,mapW,mapH,territoryPaths,cities,units}}/>
       <GameMapHud {...{blue,enemy,detectedEnemies,blueCities,cities,hovered,activeScenario,zoom}}/>
       {pendingStrategicBuild&&<div className="target-banner">BUILD {pendingStrategicBuild.replaceAll("_"," ").toUpperCase()} · {(pendingStrategicBuild==="road"||pendingStrategicBuild==="wall")?(strategicBuildAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP":"RMB")+" LOCATION"} <button onClick={()=>{setPendingStrategicBuild(null);setStrategicBuildAnchor(null)}}>CANCEL</button></div>}
       {pendingBuild&&<div className="target-banner">{constructionLabel(pendingBuild)} · {isLinearConstruction(pendingBuild)?(constructionAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP CONSTRUCTION SITE":"RMB CONSTRUCTION SITE")} <button onClick={()=>{setPendingBuild(null);setConstructionAnchor(null)}}>CANCEL</button></div>}
