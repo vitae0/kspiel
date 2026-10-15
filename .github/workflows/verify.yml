@@ -26,5 +26,7 @@ jobs:
         run: node scripts/smoke-supply.cjs
       - name: Simulation performance sample (non-gating)
         run: KSPIEL_BENCH_UNITS=100 npm run bench:sim
+      - name: Modular UI render smoke tests
+        run: node scripts/smoke-ui.cjs
       - name: Typecheck and static build
         run: npm run build
