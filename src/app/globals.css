@@ -461,3 +461,6 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .aar-scoreboard.sides-1{grid-template-columns:1fr}
 .aar-downloads{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 @media(max-width:780px){.aar-scoreboard.sides-2,.aar-scoreboard.sides-3{grid-template-columns:1fr}.aar-footer{flex-direction:column;align-items:stretch}.aar-downloads button{flex:1}}
+
+.unit-counter.encircled{outline:2px dashed #eaba7b;outline-offset:3px;box-shadow:inset 0 4px 0 #bd7450,0 0 13px #e3776870}
+.isolated-warning{padding:9px;margin:12px 0;border:1px solid #b97750;background:#3b2720;color:#f1c6a5;font-size:10px;font-weight:700;line-height:1.5}
