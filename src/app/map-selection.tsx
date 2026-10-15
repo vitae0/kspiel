@@ -130,9 +130,28 @@ function TheaterThumbnail({presetId,mode,priority=false}:{presetId:string;mode:M
 export function MapSelection({presets,selectedPresetId,onSelect,mode,locked=false}:{
   presets:ScenarioPreset[];selectedPresetId:string;onSelect:(id:string)=>void;mode:MapMode;locked?:boolean;
 }){
+  const [page,setPage]=useState(0);
+  const [pageSize,setPageSize]=useState(2);
+  useEffect(()=>{
+    const resize=()=>{
+      const width=window.innerWidth,height=window.innerHeight;
+      setPageSize(width<=900?1:height>=880&&width>=1260?4:2);
+    };
+    resize();
+    window.addEventListener("resize",resize);
+    return()=>window.removeEventListener("resize",resize);
+  },[]);
+  const count=Math.max(1,Math.ceil(presets.length/pageSize));
+  const selectedIndex=presets.findIndex(p=>p.id===selectedPresetId);
+  const pageIndex=Math.min(page,count-1);
+  useEffect(()=>{
+    if(selectedIndex>=0)setPage(Math.floor(selectedIndex/pageSize));
+    else setPage(0);
+  },[selectedPresetId,pageSize,presets.length,presets[0]?.id]);
   if(!presets.length)return <p className="theater-empty">No maps match this filter.</p>;
-  return <div className="theater-picker" aria-label="Available battle maps">
-    {presets.map(preset=>{
+  return <div className="theater-list" aria-label="Available battle maps">
+    <div className="theater-picker" aria-live="polite">
+      {presets.slice(pageIndex*pageSize,(pageIndex+1)*pageSize).map(preset=>{
       const chosen=preset.id===selectedPresetId;
       const blue=sideCount(preset.id,"blue",mode),red=sideCount(preset.id,"red",mode);
       const roster=[...new Set([...rosterRows(preset.id,"blue",mode),...rosterRows(preset.id,"red",mode)]
@@ -163,6 +182,12 @@ export function MapSelection({presets,selectedPresetId,onSelect,mode,locked=fals
         </div>
       </button>;
     })}
+    </div>
+    <div className="theater-pagination" aria-label="Map pages">
+      <button type="button" disabled={pageIndex===0} aria-label="Previous map page" onClick={()=>setPage(n=>Math.max(0,n-1))}>← PREVIOUS</button>
+      <span>MAPS {pageIndex*pageSize+1}–{Math.min(presets.length,(pageIndex+1)*pageSize)} / {presets.length}</span>
+      <button type="button" disabled={pageIndex>=count-1} aria-label="Next map page" onClick={()=>setPage(n=>Math.min(count-1,n+1))}>NEXT →</button>
+    </div>
   </div>;
 }
 
