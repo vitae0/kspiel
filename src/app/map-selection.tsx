@@ -40,23 +40,34 @@ function TheaterThumbnail({presetId,mode,priority=false}:{presetId:string;mode:M
   useEffect(()=>{
     const cached=previewCache.get(presetId);
     if(cached){setScene(cached);return}
-    let cancelled=false,observer:IntersectionObserver|null=null;
+    let cancelled=false,observer:IntersectionObserver|null=null,timer:number|null=null;
     const load=()=>{
-      if(cancelled)return;
-      // Deferred even when already visible, keeping button response immediate.
-      const scenario=previewCache.get(presetId)??generateScenario(PREVIEW_SEED,presetId);
-      previewCache.set(presetId,scenario);
-      if(!cancelled)setScene(scenario);
+      if(cancelled||timer!==null)return;
       observer?.disconnect();
+      // Stagger expensive world generation and allow the new screen to paint.
+      timer=window.setTimeout(()=>{
+        timer=null;
+        if(cancelled)return;
+        try{
+          const scenario=previewCache.get(presetId)??generateScenario(PREVIEW_SEED,presetId);
+          if(!previewCache.has(presetId)){
+            if(previewCache.size>=8)previewCache.delete(previewCache.keys().next().value!);
+            previewCache.set(presetId,scenario);
+          }
+          if(!cancelled)setScene(scenario);
+        }catch{
+          // A bad optional preview must not prevent map selection or deployment.
+        }
+      },priority?20:100);
     };
     if(priority||typeof IntersectionObserver==="undefined")load();
     else if(element.current){
       observer=new IntersectionObserver(entries=>{
         if(entries.some(entry=>entry.isIntersecting))load();
-      },{rootMargin:"160px"});
+      },{rootMargin:"120px"});
       observer.observe(element.current);
     }
-    return()=>{cancelled=true;observer?.disconnect()};
+    return()=>{cancelled=true;observer?.disconnect();if(timer!==null)window.clearTimeout(timer)};
   },[presetId,priority]);
   const preview=useMemo(()=>{
     if(!scene)return null;
