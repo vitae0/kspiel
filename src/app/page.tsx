@@ -362,7 +362,9 @@ export default function Home(){
   const matchConfig=createMatchConfig(multiplayer?"pvp":"singleplayer",localPlayerId,playerSide);
   const localSides=new Set(localControlledSides(matchConfig,localPlayerId));
   const botSides=multiplayer?[]:openWorld?(["blue","red","green"] as Side[]).filter(side=>!localSides.has(side)):botControlledSides(matchConfig);
-  const armyGroups=defaultArmyGroups(playerSide,units.filter(u=>u.side===playerSide).length||64);
+  const deployedCount=initialCountRef.current[playerSide]||units.filter(u=>u.side===playerSide).length||64;
+  const highestArmyIndex=units.filter(u=>u.side===playerSide).reduce((highest,u)=>Math.max(highest,Number(u.groupId?.match(/-army-(\d+)$/)?.[1]??0)),0);
+  const armyGroups=defaultArmyGroups(playerSide,Math.max(deployedCount,highestArmyIndex*16));
 
   const selectedUnits=units.filter(u=>selected.includes(u.id));
   const primary=selectedUnits[0];
@@ -1240,7 +1242,7 @@ export default function Home(){
     {multiplayer&&networkPhase==="opponent-left"&&<div className="network-status-banner">PLAYER DISCONNECTED · MATCH PAUSED</div>}
     {isMobile&&mobilePanel!=="none"&&<button className="mobile-backdrop" aria-label="Close panel" onClick={()=>setMobilePanel("none")}/>}
     <LeftSidebar {...{
-      mobilePanel,setMobilePanel,armyGroups,blue,selected,selectGroup,pendingMassAttack,
+      mobilePanel,setMobilePanel,armyGroups,blue,selected,selectGroup,unitSymbols,pendingMassAttack,
       setPendingMassAttack,setMassTargets,setPendingOrder,setPendingPlan,massTargets,
       launchGroupAttack,frontDirectives,playerSide,units,changeFrontMode,attackPlans,
       setSelected,executePlan,cancelPlan,openWorld,pendingStrategicBuild,
@@ -1356,7 +1358,7 @@ export default function Home(){
     </section>}
 
     <UnitInspector {...{
-      openWorld,primary,cities,playerSide,orderLabel,primaryAccess,selectedUnits,
+      openWorld,primary,cities,playerSide,orderLabel,primaryAccess,selectedUnits,unitSymbols,
       pendingBuild,armConstruction,marchShape,setMarchShape,armyGroups,assignGroup,
       frontToolActive,setFrontToolActive,setPendingMassAttack,pendingOrder,setPendingOrder,
       activeFront,changeFrontMode,pendingDecoy,setPendingDecoy,setPendingPlan,
