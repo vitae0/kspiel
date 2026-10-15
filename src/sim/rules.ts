@@ -20,7 +20,7 @@ export const MORTAR_BASE_DISPERSION=170;
 export const MOTORIZED_KINDS=new Set<Formation["kind"]>(["armor","tank","mechanized","recon","logistics"]);
 
 export function isInCombat(u:Formation,units:Formation[]){
-  return units.some(v=>v.side!==u.side&&DIRECT_COMBAT_KINDS.has(v.kind)&&Math.hypot(v.x-u.x,v.y-u.y)<58);
+  return units.some(v=>v.side!==u.side&&DIRECT_COMBAT_KINDS.has(v.kind)&&Math.hypot(v.x-u.x,v.y-u.y)<116);
 }
 
 export function retreatDestination(u:Formation,units:Formation[],cities:CityState[]){
