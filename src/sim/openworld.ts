@@ -79,7 +79,8 @@ function mkUnit(kind:UnitKind,side:Side,x:number,y:number,id:string):Formation{
     logistics:[60,8,3,15,5,14,.12,8,8],
     armor:[75,24,30,25,32,16,.62,18,15]
   }[kind]??[80,18,6,18,12,8,.1,14,10];
-  return{id,name:kind.replace("_"," ").toUpperCase()+" "+id.slice(-3),side,kind,x,y,manpower:Math.round(base[0]*55),strength:100,organization:86,supply:100,fuel:100,entrenchment:0,experience:18,readiness:90,hardness:base[6],softAttack:base[1],hardAttack:base[2],defense:base[3],breakthrough:base[4],speed:base[5],recon:base[7],movementProgress:0};
+  return{id,name:kind.replace("_"," ").toUpperCase()+" "+id.slice(-3),side,kind,x,y,manpower:Math.round(base[0]*55),strength:100,organization:86,supply:100,fuel:100,entrenchment:0,experience:18,readiness:90,hardness:base[6],softAttack:base[1],hardAttack:base[2],defense:base[3],breakthrough:base[4],speed:base[5],recon:base[7],movementProgress:0,ammo:["mortar","artillery","heavy_artillery"].includes(kind)?100:undefined,
+    materials:kind==="engineer"?100:kind==="logistics"?85:undefined,shotClock:0};
 }
 
 export function createOpenWorldState(scenario:Scenario,units:Formation[],cities:CityState[]):{state:OpenWorldState;units:Formation[];cities:CityState[]}{

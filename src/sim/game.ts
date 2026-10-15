@@ -404,6 +404,9 @@ function unit(id:string,name:string,side:Side,kind:UnitKind,x:number,y:number,rn
     experience:25+rnd()*45,
     readiness:74+rnd()*18,
     movementProgress:0,
+    ammo:["mortar","artillery","heavy_artillery"].includes(kind)?95+rnd()*5:undefined,
+    materials:kind==="engineer"?90+rnd()*10:kind==="logistics"?75:undefined,
+    shotClock:0,
     ...unitBase(kind),
     ...mods
   };
