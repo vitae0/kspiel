@@ -490,33 +490,48 @@ export function presetRoster(presetId:string,side:Side):UnitKind[]{
   return rosterForScenario({presetId:preset.id,era:preset.era,theme:preset.theme},side);
 }
 
+/** Dispersed initial assembly positions in friendly-controlled forward ground,
+ * not stacked on city centers. Keeping the rear city within ~520 units also
+ * allows the initial force to enter the territorial-supply system safely. */
 function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>number){
-  const owned=cities.filter(c=>c.owner===side);
+  const owned=cities.filter(city=>city.owner===side);
+  const hostile=cities.filter(city=>city.owner!==side);
   if(!owned.length)throw new Error("Cannot deploy formations without a friendly supply city");
-  const hostile=cities.filter(c=>c.owner!==side);
-  const width=scenario.worldWidth??WORLD_W,height=scenario.worldHeight??WORLD_H;
-  // Only a friendly city's urban footprint guarantees immediate supply.
-  for(let tries=0;tries<120;tries++){
-    // More troops are placed at border cities, while every formation still
-    // spawns inside an owned city's guaranteed supply footprint.
-    const weights=owned.map(c=>{
-      const nearest=hostile.length?Math.min(...hostile.map(e=>Math.hypot(c.x-e.x,c.y-e.y))):2500;
-      const normalized=nearest/Math.max(1,scenario.worldWidth/8);
-      return 1+9/Math.pow(1+normalized,2);
-    });
-    const total=weights.reduce((a,b)=>a+b,0);
-    let draw=rnd()*total,anchor=owned[owned.length-1];
-    for(let i=0;i<owned.length;i++){draw-=weights[i];if(draw<=0){anchor=owned[i];break}}
-    const angle=rnd()*Math.PI*2,radius=8+Math.sqrt(rnd())*51;
+  const w=scenario.worldWidth,h=scenario.worldHeight;
+  const ordered=owned.map(city=>({
+    city,
+    enemyDistance:hostile.length?Math.min(...hostile.map(enemy=>Math.hypot(enemy.x-city.x,enemy.y-city.y))):1400
+  })).sort((a,b)=>a.enemyDistance-b.enemyDistance);
+  // Focus on the frontier third while keeping multiple independent assembly areas.
+  const forward=ordered.slice(0,Math.max(2,Math.ceil(ordered.length*.6)));
+  for(let tries=0;tries<280;tries++){
+    const entry=forward[Math.floor(rnd()*forward.length)],anchor=entry.city;
+    const enemy=hostile.reduce<CityState|null>((best,city)=>!best||
+      Math.hypot(city.x-anchor.x,city.y-anchor.y)<Math.hypot(best.x-anchor.x,best.y-anchor.y)?city:best,null);
+    const towards=enemy?Math.atan2(enemy.y-anchor.y,enemy.x-anchor.x):rnd()*Math.PI*2;
+    const angle=towards+(rnd()-.5)*Math.PI*(tries<210?1.35:2);
+    const radius=135+Math.sqrt(rnd())*(tries<220?355:230);
     const x=anchor.x+Math.cos(angle)*radius,y=anchor.y+Math.sin(angle)*radius;
-    if(x<1||y<1||x>=width||y>=height)continue;
-    if(terrainAt(scenario,x,y).objective!==anchor.name)continue;
-    if(hostile.some(c=>Math.hypot(c.x-x,c.y-y)<165))continue;
+    if(x<130||y<130||x>w-130||y>h-130)continue;
+    const ground=terrainAt(scenario,x,y);
+    if(ground.terrain==="water"||ground.terrain==="highmountain"||ground.terrain==="mountain")continue;
+    if(ground.objective)continue; // Town squares must not contain the entire army.
+    const nearestFriend=Math.min(...owned.map(city=>Math.hypot(x-city.x,y-city.y)));
+    const nearestHostile=hostile.length?Math.min(...hostile.map(city=>Math.hypot(x-city.x,y-city.y))):Infinity;
+    if(nearestFriend>515||nearestHostile<Math.max(165,nearestFriend*.85))continue;
     return{x,y};
   }
-  const anchor=owned.find(c=>terrainAt(scenario,c.x,c.y).objective===c.name);
-  if(!anchor)throw new Error("No valid friendly supply city for initial deployment");
-  return{x:anchor.x,y:anchor.y};
+  // An unusually narrow island or mountain valley may need an accessible
+  // position nearer the city. Keep a guaranteed valid fallback.
+  for(const anchor of ordered.map(entry=>entry.city)){
+    for(let radius=90;radius<=200;radius+=22)for(let j=0;j<16;j++){
+      const angle=j*Math.PI/8,x=anchor.x+Math.cos(angle)*radius,y=anchor.y+Math.sin(angle)*radius;
+      if(x<=2||y<=2||x>=w-2||y>=h-2)continue;
+      const sample=terrainAt(scenario,x,y);
+      if(sample.terrain!=="water"&&sample.terrain!=="highmountain"&&sample.terrain!=="mountain"&&!sample.objective)return{x,y};
+    }
+  }
+  return{x:owned[0].x,y:owned[0].y};
 }
 
 function makeFormations(side:Side,scenario:Scenario,rnd:()=>number){
@@ -529,8 +544,7 @@ function makeFormations(side:Side,scenario:Scenario,rnd:()=>number){
   const formations=kinds.map((kind,i)=>{
     const p=spawnPoint(side,scenario.cities,scenario,rnd);
     const prefix=side[0];
-    const groupId=side+"-army-"+(1+Math.floor(i/10));
-    return unit(prefix+(i+1),(i+1)+"th "+labels[kind],side,kind,p.x,p.y,rnd,{groupId,...(kind==="logistics"?{supply:100}: {})});
+    return unit(prefix+(i+1),(i+1)+"th "+labels[kind],side,kind,p.x,p.y,rnd,{...(kind==="logistics"?{supply:100}: {})});
   });
   return groupNearbyFormations(formations,side);
 }
