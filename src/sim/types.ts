@@ -4,9 +4,10 @@ export type PoliticalVector={stateControl:number;centralization:number;militaryI
 export type TerrainKind="water"|"plains"|"forest"|"hills"|"mountain"|"highmountain"|"marsh"|"urban"|"desert";
 export type ScenarioTheme="mixed"|"mountain"|"forest"|"desert"|"winter"|"steppe"|"urban";
 export type Era="medieval"|"early_modern"|"napoleonic"|"industrial"|"modern";
-export type FlagStyle="generic-blue"|"generic-red"|"ussr"|"germany-ww2"|"ottoman"|"crusader"|"sweden"|"imperial"|"france"|"austria"|"russia"|"german-empire"|"britain"|"axis"|"usa"|"spain-republic"|"spain-nationalist";
+export type FlagStyle="generic-blue"|"generic-red"|"generic-green"|"generic-yellow"|"generic-purple"|"ussr"|"germany-ww2"|"ottoman"|"crusader"|"sweden"|"imperial"|"france"|"austria"|"russia"|"german-empire"|"britain"|"axis"|"usa"|"spain-republic"|"spain-nationalist";
 export type UnitKind="infantry"|"militia"|"partisan"|"raider"|"mechanized"|"armor"|"tank"|"cavalry"|"mountaineer"|"special_forces"|"mortar"|"artillery"|"heavy_artillery"|"recon"|"engineer"|"logistics";
-export type Side="blue"|"red"|"green";
+export const ALL_SIDES=["blue","red","green","yellow","purple"] as const;
+export type Side=typeof ALL_SIDES[number];
 export type OrderType="move"|"defend"|"assault"|"probe"|"fire"|"resupply"|"dig"|"relieve"|"retreat";
 export type OverlayMode="terrain"|"supply"|"intel";
 export type FormationShape="line"|"column"|"wedge"|"echelon";
@@ -27,8 +28,8 @@ export type ScenarioPreset={
   historical:boolean;
   year?:number;
   location:string;
-  sideNames:{blue:string;red:string;green?:string};
-  sideFlags:{blue:FlagStyle;red:FlagStyle;green?:FlagStyle};
+  sideNames:{blue:string;red:string;green?:string;yellow?:string;purple?:string};
+  sideFlags:{blue:FlagStyle;red:FlagStyle;green?:FlagStyle;yellow?:FlagStyle;purple?:FlagStyle};
   cityNames:string[];
   mapScale?:number;
   warfare?:"conventional"|"guerrilla";
@@ -52,8 +53,8 @@ export type Scenario={
   historical:boolean;
   year?:number;
   location:string;
-  sideNames:{blue:string;red:string;green?:string};
-  sideFlags:{blue:FlagStyle;red:FlagStyle;green?:FlagStyle};
+  sideNames:{blue:string;red:string;green?:string;yellow?:string;purple?:string};
+  sideFlags:{blue:FlagStyle;red:FlagStyle;green?:FlagStyle;yellow?:FlagStyle;purple?:FlagStyle};
   worldWidth:number;
   worldHeight:number;
   landPolygon?:Array<{x:number;y:number}>;
@@ -76,7 +77,7 @@ export type Formation={
   entrenchment:number;experience:number;readiness:number;hardness:number;
   softAttack:number;hardAttack:number;defense:number;breakthrough:number;
   speed:number;recon:number;movementProgress:number;
-  groupId?:string;formationShape?:FormationShape;
+  groupId?:string;formationShape?:FormationShape;commanderSlot?:number;
   morale?:number;suppression?:number;isolationHours?:number;damageDealt?:number;suppressionInflicted?:number;
   /** 0-100 tactical ammunition for guns and field engineering material stores. */
   ammo?:number;materials?:number;shotClock?:number;

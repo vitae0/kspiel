@@ -28,6 +28,14 @@ npm run dev
 - A marching column does **not** change group identity. Active marches temporarily take precedence over automatic front reassignment.
 - **Multiplayer speed:** host-controlled 0.5× / 1× / 2×; solo speeds are 1× / 2.5× / 6×.
 
+### Bot teams and Free for All
+
+- **1v1 Bot:** one player-controlled army versus the AI.
+- **2v2 Bot:** the local commander controls one of two allied military divisions, while an allied AI manages the other. Two hostile bot divisions coordinate on the opposing faction.
+- **3v3 Bot:** one local commander and two allied AI divisions face three enemy bot divisions. Army-group IDs are disjoint across AI and human divisions, and reinforcements inherit their original commander slot.
+- **Free for All (local):** three dedicated balanced map presets, *Triad Basin* (3 factions), *Four Crossroads* (4) and *Pentagon Marches* (5). Pick any faction. Every other faction is automatically bot-controlled. There are no alliances: each side has four initially supplied cities, its own military roster, city capture conditions, supply, fog, territorial influence and final statistics.
+- **Online FFA rooms:** not enabled in this release. Multiplayer room allocation currently supports two opposing teams; FFA's additional humans and partial-lobby bot takeover require corresponding backend work. The existing multiplayer modes are unchanged.
+
 ### Scenarios
 
 Includes Spain 1937, giant Eastern Front / Balkans / Italy theaters and Yugoslav Partisans / Vietnam Central Highlands guerrilla scenarios. Historical presets are stylized wargame setups, not historically exact deployments.
@@ -37,6 +45,7 @@ Includes Spain 1937, giant Eastern Front / Balkans / Italy theaters and Yugoslav
 ```sh
 node scripts/smoke-theaters.cjs
 node scripts/smoke-attrition.cjs
+node scripts/smoke-ffa.cjs
 npm run build
 ```
 

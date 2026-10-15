@@ -14,7 +14,7 @@ import {scenarioTerritoryCells,territoryBoundaryPath} from "@/sim/territory";
 import {botControlledSides,createMatchConfig,defaultArmyGroups,localControlledSides} from "@/sim/session";
 import {addStrategicStructure,advanceOpenWorld,buildStrategicCity,createOpenWorldState,queueRecruitment,UNIT_COST,type OpenWorldBuildKind,type OpenWorldState} from "@/sim/openworld";
 import {closeMultiplayerRoom,createPrivateMatch,findQuickPlay,inviteUrl,joinPrivateMatch,supabase,type MultiplayerSession,type MultiplayerSnapshot,type MultiplayerTeamSize,type UnitCommandPatch} from "@/lib/multiplayer";
-import type {AttackPlan,CityState,ConstructionProject,Emplacement,EmplacementKind,FlagStyle,Formation,FormationShape,OrderType,Scenario,Side,TerrainSample} from "@/sim/types";
+import {ALL_SIDES,type AttackPlan,type CityState,type ConstructionProject,type Emplacement,type EmplacementKind,type FlagStyle,type Formation,type FormationShape,type OrderType,type Scenario,type Side,type TerrainSample} from "@/sim/types";
 
 const COMMAND_GUIDE=[
   {title:"SELECT YOUR ARMY",body:"Click a unit or drag a selection box. Keys 1–6 select army groups; Ctrl+1–6 assigns selected units. Nearby units start in the same group."},
@@ -440,7 +440,9 @@ function computeSupplyNetwork(scenario:Scenario,units:Formation[],cities:CitySta
     const cuts:Record<Side,RoadCutPoint[]>={
       blue:routeInterdictionPoints(route,"blue",units),
       red:routeInterdictionPoints(route,"red",units),
-      green:routeInterdictionPoints(route,"green",units)
+      green:routeInterdictionPoints(route,"green",units),
+      yellow:routeInterdictionPoints(route,"yellow",units),
+      purple:routeInterdictionPoints(route,"purple",units)
     };
     roads.push({index,route,a,b,cuts});
     if(a.owner===b.owner&&cuts[a.owner].length===0){
@@ -687,7 +689,7 @@ function updateCities(cities:CityState[],units:Formation[],hours:number):CitySta
   });
 }
 
-function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],side:Side,decoys:DecoyContact[]=[],elapsed=0):Formation[]{
+function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],side:Side,decoys:DecoyContact[]=[],elapsed=0,canCommand:(unit:Formation)=>boolean=()=>true):Formation[]{
   const friendly=units.filter(u=>u.side===side);
   const hostile=units.filter(u=>u.side!==side);
   const hostileCities=cities.filter(c=>c.owner!==side);
@@ -717,9 +719,12 @@ function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],side:Sid
   };
 
   return units.map((u):Formation=>{
-    if(u.side!==side)return u;
+    if(u.side!==side||!canCommand(u))return u;
     const nearestHostile=hostile.map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
-    if(!nearestHostile)return u;
+    if(!nearestHostile){
+      const target=hostileCities.map(c=>({c,d:Math.hypot(c.x-u.x,c.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
+      return target?{...u,order:{type:"move",targetX:target.c.x,targetY:target.c.y}}:u;
+    }
     // Irregulars prioritize isolated convoys and vulnerable artillery instead of open-field clashes.
     if(u.kind==="partisan"||u.kind==="raider"){
       const rearTarget=hostile.filter(v=>v.kind==="logistics"||ARTILLERY_KINDS.has(v.kind))
@@ -1309,7 +1314,9 @@ export default function Home(){
   const [showTutorial,setShowTutorial]=useState(false);
   const [tutorialStep,setTutorialStep]=useState(0);
   const [selectedPresetId,setSelectedPresetId]=useState("frontier");
-  const [selectedGameMode,setSelectedGameMode]=useState<"scenario"|"openworld">("scenario");
+  const [selectedGameMode,setSelectedGameMode]=useState<"scenario"|"openworld"|"ffa">("scenario");
+  const [botTeamSize,setBotTeamSize]=useState<1|2|3>(1);
+  const [ffaSize,setFfaSize]=useState<3|4|5>(3);
   const [openWorld,setOpenWorld]=useState<OpenWorldState|null>(null);
   const [pendingStrategicBuild,setPendingStrategicBuild]=useState<OpenWorldBuildKind|null>(null);
   const [strategicBuildAnchor,setStrategicBuildAnchor]=useState<{x:number;y:number}|null>(null);
@@ -1353,9 +1360,9 @@ export default function Home(){
   const initialRosterRef=useRef<Formation[]>([]);
   const marchSerial=useRef(1);
   const gunEffectsRef=useRef<GunEvent[]>([]);
-  const initialCountRef=useRef<Record<Side,number>>({blue:0,red:0,green:0});
+  const initialCountRef=useRef<Record<Side,number>>({blue:0,red:0,green:0,yellow:0,purple:0});
   const elapsedHoursRef=useRef(0);
-  const lastReserveRef=useRef<Record<Side,number>>({blue:0,red:0,green:0});
+  const lastReserveRef=useRef<Record<Side,number>>({blue:0,red:0,green:0,yellow:0,purple:0});
   const reserveSerialRef=useRef(1);
   const emplacementsRef=useRef<Emplacement[]>([]);
   const projectsRef=useRef<ConstructionProject[]>([]);
@@ -1580,10 +1587,13 @@ export default function Home(){
   const localPlayerId=multiplayer?.playerToken??"local";
   const matchConfig=createMatchConfig(multiplayer?"pvp":"singleplayer",localPlayerId,playerSide);
   const localSides=new Set(localControlledSides(matchConfig,localPlayerId));
-  const botSides=multiplayer?[]:openWorld?(["blue","red","green"] as Side[]).filter(side=>!localSides.has(side)):botControlledSides(matchConfig);
+  const botSides=multiplayer?[]:openWorld?(["blue","red","green"] as Side[]).filter(side=>!localSides.has(side)):
+    scenario?.presetId.startsWith("ffa-")?[...new Set(scenario.cities.map(c=>c.owner))].filter(side=>!localSides.has(side)):botControlledSides(matchConfig);
+  const hasAlliedBots=!multiplayer&&!openWorld&&scenario&&!scenario.presetId.startsWith("ffa-")&&botTeamSize>1;
+  const playerCanCommand=(u:Formation)=>localSides.has(u.side)&&(!hasAlliedBots||u.commanderSlot===0);
   const armyGroups=defaultArmyGroups(playerSide);
 
-  const selectedUnits=units.filter(u=>selected.includes(u.id));
+  const selectedUnits=units.filter(u=>selected.includes(u.id)&&playerCanCommand(u));
   const primary=selectedUnits[0];
   const selectedStrength=selectedUnits.reduce((sum,u)=>sum+u.strength,0)/Math.max(1,selectedUnits.length);
   const selectedOrganization=selectedUnits.reduce((sum,u)=>sum+u.organization,0)/Math.max(1,selectedUnits.length);
@@ -1606,7 +1616,9 @@ export default function Home(){
 
       const beforeUnits=unitsRef.current,beforeCities=citiesRef.current,beforeEmplacements=emplacementsRef.current;
       let working=unitsRef.current;
-      if(aiElapsed>=AI_COMMAND_INTERVAL_SECONDS){for(const side of botSides)working=enemyAI(scenario,working,citiesRef.current,side,decoysRef.current,elapsedHoursRef.current);aiElapsed=0}
+      if(aiElapsed>=AI_COMMAND_INTERVAL_SECONDS){for(const side of botSides)working=enemyAI(scenario,working,citiesRef.current,side,decoysRef.current,elapsedHoursRef.current);
+        if(hasAlliedBots)working=enemyAI(scenario,working,citiesRef.current,playerSide,decoysRef.current,elapsedHoursRef.current,u=>u.commanderSlot!==0);
+        aiElapsed=0}
       const freshEffects:GunEvent[]=[];
       let nextUnits=simulate(scenario,working,simHours,citiesRef.current,emplacementsRef.current,openWorldRef.current,freshEffects,now);
       // Keep the map responsive during mass barrages, including 100+ artillery pieces.
@@ -1659,7 +1671,7 @@ export default function Home(){
         lastIntelRef.current=elapsedHoursRef.current;
       }
       if(!openWorldRef.current&&elapsedHoursRef.current>=96){
-        for(const side of ["blue","red"] as Side[]){
+        for(const side of [...new Set(citiesRef.current.map(c=>c.owner))]){
           const original=initialCountRef.current[side];
           if(!original||nextUnits.filter(u=>u.side===side).length>=original*2/3)continue;
           if(elapsedHoursRef.current-lastReserveRef.current[side]<36)continue;
@@ -1677,8 +1689,8 @@ export default function Home(){
             const x=rear.x+Math.cos(angle)*radius,y=rear.y+Math.sin(angle)*radius;
             if(terrainAt(scenario,x,y).objective!==rear.name)continue;
             if(nextUnits.some(u=>u.side!==side&&Math.hypot(u.x-x,u.y-y)<170))continue;
-            const nearest=nextUnits.filter(u=>u.side===side&&u.groupId).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0];
-            reserves.push({...template,id:side[0]+"-reserve-"+reserveSerialRef.current+"-"+i,name:"Reserve "+template.name,
+            const nearest=nextUnits.filter(u=>u.side===side&&u.commanderSlot===template.commanderSlot&&u.groupId).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0];
+            reserves.push({...template,id:side[0]+"-reserve-"+reserveSerialRef.current+"-"+i,name:"Reserve "+template.name,commanderSlot:template.commanderSlot,
               x,y,groupId:nearest?.groupId??template.groupId,strength:100,supply:94,organization:85,fuel:94,entrenchment:0,order:{type:"defend"}});
           }
           if(reserves.length){nextUnits=[...nextUnits,...reserves];lastReserveRef.current[side]=elapsedHoursRef.current;reserveSerialRef.current++}
@@ -1742,7 +1754,8 @@ export default function Home(){
 
   function selectUnit(e:ReactMouseEvent,u:Formation){
     e.stopPropagation();
-    if(!localSides.has(u.side)){
+    if(!playerCanCommand(u)){
+      if(localSides.has(u.side))return;
       if(pendingMassAttack){setMassTargets(prev=>prev.includes(u.id)?prev.filter(id=>id!==u.id):[...prev,u.id]);return}
       if(pendingOrder==="assault"||pendingOrder==="fire"||pendingOrder==="probe")issueUnitTargetCore(u,false);
       return;
@@ -1802,11 +1815,20 @@ export default function Home(){
     const activeSide=network?.side??playerSide;
     if(network){setPlayerSide(network.side);setSelectedPresetId(network.presetId);setSelectedGameMode("scenario")}
     let generated=generateScenario(seed,presetId);
+    if(!network&&gameMode==="scenario"&&botTeamSize>1){
+      const assigned=new Map<Side,number>();
+      generated={...generated,formations:generated.formations.map(u=>{
+        const index=assigned.get(u.side)??0;assigned.set(u.side,index+1);
+        const commanderSlot=index%botTeamSize;
+        const groupsPerCommander=6/botTeamSize;
+        return{...u,commanderSlot,groupId:u.side+"-army-"+(1+commanderSlot*groupsPerCommander+(Math.floor(index/botTeamSize)%groupsPerCommander))};
+      })};
+    }
     if(gameMode==="openworld")generated={...generated,presetId:"open-world",title:"Open World Dominion",historical:false,sideNames:{blue:"Blue Dominion",red:"Red Dominion",green:"Green Dominion"},sideFlags:{blue:"generic-blue",red:"generic-red",green:"generic-blue"}};
     warResultRef.current=null;setWarResult(null);setAttackPlans([]);setPendingPlan(false);setPendingMassAttack(false);setMassTargets([]);setFrontToolActive(false);setPendingOrder(null);setPendingBuild(null);setConstructionAnchor(null);setStrategicBuildAnchor(null);
     initialRosterRef.current=generated.formations;
-    initialCountRef.current={blue:generated.formations.filter(u=>u.side==="blue").length,red:generated.formations.filter(u=>u.side==="red").length,green:0};
-    elapsedHoursRef.current=0;lastReserveRef.current={blue:0,red:0,green:0};reserveSerialRef.current=1;
+    initialCountRef.current=Object.fromEntries(ALL_SIDES.map(side=>[side,generated.formations.filter(u=>u.side===side).length])) as Record<Side,number>;
+    elapsedHoursRef.current=0;lastReserveRef.current={blue:0,red:0,green:0,yellow:0,purple:0};reserveSerialRef.current=1;
     frontsRef.current=[];setFrontDirectives([]);contactsRef.current=[];setContacts([]);
     decoysRef.current=[];setDecoys([]);setPendingDecoy(false);decoySerialRef.current=1;
     lastOperationalRef.current=0;lastEncirclementRef.current=0;lastIntelRef.current=0;
@@ -1821,7 +1843,7 @@ export default function Home(){
       setCities(generated.cities);citiesRef.current=generated.cities;
       historyRef.current=startHistory(generated.title,seed,generated.formations,generated.cities,null);
     }
-    const first=generated.formations.find(u=>u.side===activeSide);setSelected(first?[first.id]:[]);
+    const first=generated.formations.find(u=>u.side===activeSide&&(network||gameMode!=="scenario"||botTeamSize===1||u.commanderSlot===0));setSelected(first?[first.id]:[]);
     const mapScale=generated.worldWidth/WORLD_W;setRunning(true);setSpeed(network?2:1);
     gunEffectsRef.current=[];setGunEffects([]);marchSerial.current=1;setHour(6);setDay(1);setPan({x:-260,y:-190});setZoom((isMobile ? .34 : .24)/mapScale);setMobilePanel("none");setMobileTool("pan");
   }
@@ -1887,44 +1909,54 @@ export default function Home(){
   const theaterTerritory=useMemo(()=>scenario&&!openWorld?scenarioTerritoryCells(scenario,cities,units,scenario.worldWidth>WORLD_W?560:360):[],[scenario,cities,units,openWorld]);
 
   if(!scenario){
-    const presets=SCENARIO_PRESETS.filter(p=>setupCategory==="all"||
+    const presets=SCENARIO_PRESETS.filter(p=>!p.id.startsWith("ffa-")&&(setupCategory==="all"||
       (setupCategory==="historical"&&p.historical)||(setupCategory==="fictional"&&!p.historical)||
-      (setupCategory==="mega"&&(p.mapScale??1)>=2)||(setupCategory==="guerrilla"&&p.warfare==="guerrilla"));
-    const selectedPreset=SCENARIO_PRESETS.find(p=>p.id===selectedPresetId)??SCENARIO_PRESETS[0];
+      (setupCategory==="mega"&&(p.mapScale??1)>=2)||(setupCategory==="guerrilla"&&p.warfare==="guerrilla")));
+    const selectedPreset=SCENARIO_PRESETS.find(p=>p.id===selectedPresetId)??SCENARIO_PRESETS.find(p=>p.id==="frontier")!;
+    const ffaPresets=SCENARIO_PRESETS.filter(p=>p.id.startsWith("ffa-"));
+    const ffaSides=ALL_SIDES.slice(0,ffaSize);
     return <main className="setup-shell">
       <MenuAtmosphere/>
       <div className="setup-panel">
         <div className="setup-brand"><BrandMark/><div className="setup-brand-identity"><b>KSPIEL</b><small>OPERATIONAL COMMAND SIMULATION</small></div><div className="menu-brand-actions"><span className="menu-build-tag">THE WAR ROOM</span><MenuScore/></div></div>
         <div className="setup-grid">
           <section className="setup-main">
-            <div className="setup-heading"><small>FIELD OPERATIONS / NEW CAMPAIGN</small><h1>{selectedGameMode==="openworld"?"Build a dominion":"Choose a theater"}</h1><p>{selectedGameMode==="openworld"?"Expand territory, exploit resources automatically, build infrastructure and raise new armies against multiple rivals.":"Terrain now changes the roster, mobility, visibility and logistics. Historical presets are stylized scenarios, not exact order-of-battle reconstructions."}</p></div>
-            <div className="setup-tabs"><button disabled={Boolean(multiplayer)} className={selectedGameMode==="scenario"?"active":""} onClick={()=>setSelectedGameMode("scenario")}>SCENARIO WAR</button><button disabled={Boolean(multiplayer)} className={selectedGameMode==="openworld"?"active":""} onClick={()=>{setSelectedGameMode("openworld");setSelectedPresetId("frontier")}}>OPEN WORLD</button></div>
-            <div className="setup-tabs"><button className={setupCategory==="all"?"active":""} onClick={()=>setSetupCategory("all")}>ALL</button><button className={setupCategory==="fictional"?"active":""} onClick={()=>setSetupCategory("fictional")}>FICTIONAL</button><button className={setupCategory==="historical"?"active":""} onClick={()=>setSetupCategory("historical")}>HISTORICAL</button><button className={setupCategory==="mega"?"active":""} onClick={()=>setSetupCategory("mega")}>MEGA MAPS</button><button className={setupCategory==="guerrilla"?"active":""} onClick={()=>setSetupCategory("guerrilla")}>GUERRILLA</button></div>
+            <div className="setup-heading"><small>FIELD OPERATIONS / NEW CAMPAIGN</small><h1>{selectedGameMode==="openworld"?"Build a dominion":selectedGameMode==="ffa"?"Every commander for themselves":"Choose a theater"}</h1><p>{selectedGameMode==="openworld"?"Expand territory, exploit resources automatically, build infrastructure and raise new armies against multiple rivals." :selectedGameMode==="ffa"?"Independent factions, balanced starting cities and dedicated battle maps. Every unoccupied FFA faction is controlled by the AI.":"Terrain now changes the roster, mobility, visibility and logistics. Historical presets are stylized scenarios, not exact order-of-battle reconstructions."}</p></div>
+            <div className="setup-tabs"><button disabled={Boolean(multiplayer)} className={selectedGameMode==="scenario"?"active":""} onClick={()=>{setSelectedGameMode("scenario");if(selectedPresetId.startsWith("ffa-"))setSelectedPresetId("frontier");setPlayerSide("blue")}}>SCENARIO WAR</button><button disabled={Boolean(multiplayer)} className={selectedGameMode==="openworld"?"active":""} onClick={()=>{setSelectedGameMode("openworld");setSelectedPresetId("frontier")}}>OPEN WORLD</button><button className={selectedGameMode==="ffa"?"active":""} onClick={()=>{setSelectedGameMode("ffa");setFfaSize(3);setSelectedPresetId("ffa-triad");setPlayerSide("blue")}} disabled={Boolean(multiplayer)}>FREE FOR ALL</button></div>
+            {selectedGameMode==="scenario"&&<div className="setup-tabs"><button className={setupCategory==="all"?"active":""} onClick={()=>setSetupCategory("all")}>ALL</button><button className={setupCategory==="fictional"?"active":""} onClick={()=>setSetupCategory("fictional")}>FICTIONAL</button><button className={setupCategory==="historical"?"active":""} onClick={()=>setSetupCategory("historical")}>HISTORICAL</button><button className={setupCategory==="mega"?"active":""} onClick={()=>setSetupCategory("mega")}>MEGA MAPS</button><button className={setupCategory==="guerrilla"?"active":""} onClick={()=>setSetupCategory("guerrilla")}>GUERRILLA</button></div>}
             {selectedGameMode==="scenario"&&<div className="scenario-grid">{presets.map(preset=><button key={preset.id} disabled={Boolean(multiplayer)} className={"scenario-card theme-"+preset.theme+" "+(selectedPresetId===preset.id?"selected":"")} onClick={()=>{setSelectedPresetId(preset.id);setPlayerSide("blue")}}>
               <span className="scenario-theme">{preset.warfare==="guerrilla"?"⚑ GUERRILLA · ": (preset.mapScale??1)>=2?"◈ MEGA MAP · ":""}{preset.theme.toUpperCase()} · {preset.era.replace("_"," ").toUpperCase()}</span><b>{preset.title}</b><small>{preset.location}{preset.year?" · "+preset.year:""}</small><p>{preset.subtitle}</p>
               <span className="scenario-side-line"><span><Flag styleName={preset.sideFlags.blue}/>{preset.sideNames.blue}</span><i>VS</i><span><Flag styleName={preset.sideFlags.red}/>{preset.sideNames.red}</span></span>
             </button>)}</div>}
+            {selectedGameMode==="ffa"&&<>
+              <div className="ffa-mode-banner">FREE FOR ALL · {ffaSize} INDEPENDENT FACTIONS · NO ALLIANCES</div>
+              <div className="ffa-map-picker">{ffaPresets.map((preset,i)=><button key={preset.id} className={selectedPresetId===preset.id?"selected":""} onClick={()=>{setFfaSize((i+3) as 3|4|5);setSelectedPresetId(preset.id);setPlayerSide("blue")}}><span>FFA / {i+3} COMMANDERS</span><b>{preset.title}</b><small>{preset.subtitle}</small></button>)}</div>
+              <div className="ffa-rules"><b>LAST COMMAND STANDING</b><p>All factions are hostile to every other faction. Each begins with an identical supply-city network and comparable forces. Capture all strategic cities to win.</p><small>{ffaSize-1} vacant faction seats are immediately filled by independent bots in single-player.</small></div>
+            </>}
+            {selectedGameMode==="scenario"&&!multiplayer&&<div className="bot-match-options"><strong>COOPERATIVE BOT OPERATIONS</strong><div className="bot-team-choices">
+              {([1,2,3] as const).map(size=><button key={size} className={botTeamSize===size?"active":""} onClick={()=>setBotTeamSize(size)}>{size===1?"1V1 BOT":size+"V"+size+" BOT"}</button>)}
+              </div><p>{botTeamSize===1?"You command your army against an AI enemy.":botTeamSize===2?"You command half your allied army alongside one friendly AI commander. Two enemy AI divisions oppose you.":"You command one third of the allied army alongside two friendly AI commanders. Three enemy AI divisions oppose you."}</p></div>}
             {selectedGameMode==="openworld"&&<div className="openworld-intro"><b>OPEN WORLD DOMINION</b><p>Three rival powers. No fixed front. Territory itself is the objective.</p><span>Automatic regional resources · 3 barracks families · dynamic settlements · roads · walls · forts · generous supply · minimap</span></div>}
           </section>
           <aside className="setup-side">
             <div className="section-title">{selectedGameMode==="openworld"?"WORLD RULESET":"SELECTED THEATER"}</div><h2>{selectedGameMode==="openworld"?"Open World Dominion":selectedPreset.title}</h2><p>{selectedGameMode==="openworld"?"Procedural continental theater · three factions":selectedPreset.location+(selectedPreset.year?" · "+selectedPreset.year:"")}</p>
             <div className="setup-facts"><span><small>THEME</small><b>{selectedPreset.theme.toUpperCase()}</b></span><span><small>ERA</small><b>{selectedPreset.era.replace("_"," ").toUpperCase()}</b></span><span><small>MAP</small><b>{Math.round(WORLD_W*(selectedPreset.mapScale??1))} × {Math.round(WORLD_H*(selectedPreset.mapScale??1))}</b></span><span><small>FOG</small><b>ENABLED</b></span></div>
-            <div className="section-title">{pendingInviteCode?"CHOOSE TEAM":"PLAY AS"}</div><div className="side-choice">
-              {(["blue","red"] as Side[]).map(side=><button key={side} disabled={Boolean(multiplayer)} className={playerSide===side?"active":""} onClick={()=>setPlayerSide(side)}><Flag styleName={selectedPreset.sideFlags[side]??"generic-blue"}/><span><b>{pendingInviteCode?side.toUpperCase()+" TEAM":selectedPreset.sideNames[side]}</b><small>{pendingInviteCode?"Shared command of the entire "+side+" force":selectedPreset.warfare==="guerrilla"?(side==="blue"?"PARTISANS · MILITIA · RAIDERS":"GARRISONS · PATROLS · ARMOR"):selectedPreset.id==="spain-1937"?(side==="blue"?"REPUBLICAN COMMAND":"NATIONALIST COMMAND"):(side==="blue"?"BLUE THEATER COMMAND":"RED THEATER COMMAND")}</small></span></button>)}
+            <div className="section-title">{selectedGameMode==="ffa"?"COMMAND YOUR FACTION":pendingInviteCode?"CHOOSE TEAM":"PLAY AS"}</div><div className="side-choice">
+              {(selectedGameMode==="ffa"?ffaSides:["blue","red"] as Side[]).map(side=><button key={side} disabled={Boolean(multiplayer)} className={playerSide===side?"active":""} onClick={()=>setPlayerSide(side)}><Flag styleName={selectedPreset.sideFlags[side]??"generic-blue"}/><span><b>{pendingInviteCode?side.toUpperCase()+" TEAM":selectedPreset.sideNames[side]}</b><small>{pendingInviteCode?"Shared command of the entire "+side+" force":selectedGameMode==="ffa"?"INDEPENDENT FACTION · "+ffaSize+"-WAY WAR":selectedPreset.warfare==="guerrilla"?(side==="blue"?"PARTISANS · MILITIA · RAIDERS":"GARRISONS · PATROLS · ARMOR"):selectedPreset.id==="spain-1937"?(side==="blue"?"REPUBLICAN COMMAND":"NATIONALIST COMMAND"):(side==="blue"?"BLUE THEATER COMMAND":"RED THEATER COMMAND")}</small></span></button>)}
             </div>
             <div className="section-title">COMMANDER</div>
             <div className="nickname-field"><input maxLength={20} placeholder="Nickname" value={nickname} disabled={Boolean(multiplayer)} onChange={e=>{const value=e.target.value;setNickname(value);window.localStorage.setItem("kspiel.nickname",value)}}/><small>1–20 characters · shown to both teams</small></div>
-            {!pendingInviteCode&&<><div className="section-title">TEAM SIZE</div><div className="team-size-choice">{([1,2,3] as MultiplayerTeamSize[]).map(size=><button key={size} disabled={Boolean(multiplayer)} className={multiplayerTeamSize===size?"active":""} onClick={()=>setMultiplayerTeamSize(size)}>{size}V{size}</button>)}</div>
+            {!pendingInviteCode&&selectedGameMode==="scenario"&&<><div className="section-title">TEAM SIZE</div><div className="team-size-choice">{([1,2,3] as MultiplayerTeamSize[]).map(size=><button key={size} disabled={Boolean(multiplayer)} className={multiplayerTeamSize===size?"active":""} onClick={()=>setMultiplayerTeamSize(size)}>{size}V{size}</button>)}</div>
             <div className="section-title">GAME MODE</div><div className="mode-list">
               <button disabled={Boolean(multiplayer)} className={!multiplayer?"active":""}><b>SINGLE PLAYER</b><small>You command {selectedPreset.sideNames[playerSide]}</small></button>
-              <button disabled={selectedGameMode==="openworld"||Boolean(multiplayer)||networkPhase==="matching"||!nickname.trim()} onClick={()=>void beginQuickPlay()}><b>QUICK PLAY · {multiplayerTeamSize}V{multiplayerTeamSize}</b><small>{selectedGameMode==="openworld"?"Scenario mode only":"Queue for "+multiplayerTeamSize+" commanders on each team"}</small></button>
-              <button disabled={selectedGameMode==="openworld"||Boolean(multiplayer)||networkPhase==="matching"||!nickname.trim()} onClick={()=>void beginPrivateMatch()}><b>PRIVATE MATCH · {multiplayerTeamSize}V{multiplayerTeamSize}</b><small>{selectedGameMode==="openworld"?"Scenario mode only":"Create a room and share one link with every player"}</small></button>
+              <button disabled={selectedGameMode!=="scenario"||Boolean(multiplayer)||networkPhase==="matching"||!nickname.trim()} onClick={()=>void beginQuickPlay()}><b>QUICK PLAY · {multiplayerTeamSize}V{multiplayerTeamSize}</b><small>{"Queue for "+multiplayerTeamSize+" commanders on each team"}</small></button>
+              <button disabled={selectedGameMode!=="scenario"||Boolean(multiplayer)||networkPhase==="matching"||!nickname.trim()} onClick={()=>void beginPrivateMatch()}><b>PRIVATE MATCH · {multiplayerTeamSize}V{multiplayerTeamSize}</b><small>{"Create a room and share one link with every player"}</small></button>
             </div></>}
             {pendingInviteCode&&!multiplayer&&<div className="invite-join-card"><b>INVITE ROOM · {pendingInviteCode}</b><small>Pick a nickname and either team. Everyone on a team can command the full army.</small><div className="invite-actions"><button disabled={networkPhase==="matching"||!nickname.trim()} onClick={()=>void joinPendingInvite()}>JOIN ROOM</button><button onClick={()=>{setPendingInviteCode("");setNetworkError("")}}>DISMISS</button></div></div>}
             {multiplayer&&<div className={"network-lobby "+networkPhase}><div><span><b>{networkPhase==="connected"?"ALL COMMANDERS CONNECTED":networkPhase==="opponent-left"?"PLAYER DISCONNECTED":multiplayer.kind==="quickplay"?"QUICK PLAY QUEUE":"PRIVATE ROOM"}</b><small>ROOM {multiplayer.code} · {multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.nickname} · {multiplayer.side.toUpperCase()} TEAM</small></span><strong>{onlinePlayers.length}/{multiplayer.maxPlayers}</strong></div><div className="lobby-roster">{(["blue","red"] as Side[]).map(side=><div key={side}><b>{side.toUpperCase()} TEAM</b>{onlinePlayers.filter(player=>player.side===side).sort((a,b)=>a.slot-b.slot).map(player=><small key={player.token}>{player.slot}. {player.nickname}{player.token===multiplayer.playerToken?" · YOU":""}</small>)}{onlinePlayers.filter(player=>player.side===side).length<multiplayer.teamSize&&<small>Waiting for {multiplayer.teamSize-onlinePlayers.filter(player=>player.side===side).length}…</small>}</div>)}</div>{inviteLink&&<div className="invite-link"><input aria-label="Invite link" readOnly value={inviteLink}/><button onClick={()=>void navigator.clipboard.writeText(inviteLink)}>COPY LINK</button></div>}<button className="cancel-network" onClick={cancelMultiplayer}>CANCEL</button></div>}
             {networkPhase==="matching"&&<div className="network-lobby matching"><b>CONNECTING TO MATCHMAKING…</b><small>Preparing Supabase Realtime session.</small></div>}
             {networkError&&<div className="network-error">{networkError==="team_full"?"That team is full. Pick the other team.":networkError==="room_unavailable"?"That room is full, closed, or expired.":networkError}</div>}
-            <button className="launch-button" disabled={Boolean(multiplayer)||networkPhase==="matching"||Boolean(pendingInviteCode)} onClick={()=>startGame()}>{selectedGameMode==="openworld"?"FOUND DOMINION":"DEPLOY TO THEATER"}</button>
+            <button className="launch-button" disabled={Boolean(multiplayer)||networkPhase==="matching"||Boolean(pendingInviteCode)} onClick={()=>startGame()}>{selectedGameMode==="openworld"?"FOUND DOMINION":selectedGameMode==="ffa"?"ENTER FREE FOR ALL":botTeamSize>1?"DEPLOY "+botTeamSize+"V"+botTeamSize+" BOTS":"DEPLOY TO THEATER"}</button>
           </aside>
         </div>
       </div>
@@ -2047,13 +2079,13 @@ export default function Home(){
   }
 
   function selectGroup(groupId:string){
-    setSelected(units.filter(u=>localSides.has(u.side)&&u.groupId===groupId).map(u=>u.id));
+    setSelected(units.filter(u=>playerCanCommand(u)&&u.groupId===groupId).map(u=>u.id));
     setPendingOrder(null);setPendingPlan(false);setPendingMassAttack(false);setMassTargets([]);setPendingBuild(null);
   }
 
   function launchGroupAttack(){
     const group=primary?.groupId;
-    const force=units.filter(u=>u.side===playerSide&&(group?u.groupId===group:selected.includes(u.id)));
+    const force=units.filter(u=>playerCanCommand(u)&&(group?u.groupId===group:selected.includes(u.id)));
     const targets=units.filter(u=>massTargets.includes(u.id)&&u.side!==playerSide&&u.strength>1);
     if(group&&frontsRef.current.some(f=>f.groupId===group))changeFrontMode(group,"stop");
     if(!force.length||!targets.length)return;
@@ -2402,7 +2434,7 @@ export default function Home(){
       if(!d.moved){setSelected([]);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);setConstructionAnchor(null);return}
       const a=mapPoint(d.startClientX,d.startClientY),b=mapPoint(e.clientX,e.clientY);if(!a||!b)return;
       const minX=Math.min(a.x,b.x),maxX=Math.max(a.x,b.x),minY=Math.min(a.y,b.y),maxY=Math.max(a.y,b.y);
-      setSelected(units.filter(u=>localSides.has(u.side)&&u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY).map(u=>u.id));setPendingOrder(null);return;
+      setSelected(units.filter(u=>playerCanCommand(u)&&u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY).map(u=>u.id));setPendingOrder(null);return;
     }
     setFrontPreview(null);if(!d.moved)return;const a=mapPoint(d.startClientX,d.startClientY),b=mapPoint(e.clientX,e.clientY);if(a&&b)deployFront(a,b);
   }
@@ -2461,7 +2493,7 @@ export default function Home(){
       <section><div className="section-title">ATTACK PLANS · B THEN RMB</div><div className="plan-list">{attackPlans.length?attackPlans.map(p=><div className={"plan-row "+p.status} key={p.id}><button onClick={()=>setSelected(p.formationIds)}><b>{p.name}</b><small>{p.formationIds.length} formations · {p.status}</small></button>{p.status==="draft"&&<button onClick={()=>executePlan(p.id)}>GO</button>}<button onClick={()=>cancelPlan(p.id)}>×</button></div>):<small className="muted-line">No plans drafted.</small>}</div></section>
       {openWorld&&<section className="openworld-panel"><div className="section-title">DOMINION</div><div className="resource-strip"><b>MP {Math.floor(openWorld.resources[playerSide].manpower)}</b><b>MAT {Math.floor(openWorld.resources[playerSide].materials)}</b><b>FUEL {Math.floor(openWorld.resources[playerSide].fuel)}</b></div><div className="section-title">RAISE FORMATIONS</div><div className="recruit-grid">{(["infantry","militia","partisan","raider","mountaineer","special_forces","engineer","cavalry","recon","mechanized","tank","mortar","artillery","heavy_artillery","logistics"] as Formation["kind"][]).map(kind=>{const cost=UNIT_COST[kind];const barracks=openWorld.structures.find(b=>b.side===playerSide&&b.kind===cost?.family);return <button key={kind} title={IRREGULAR_TRAITS[kind]??kind.replace("_"," ")} disabled={!cost||!barracks} onClick={()=>{if(!cost||!barracks)return;const next=queueRecruitment(openWorldRef.current!,playerSide,kind,barracks.id);openWorldRef.current=next;setOpenWorld(next)}}><b>{UNIT_LABEL[kind]}</b><small>{cost?cost.manpower+" MP · "+cost.materials+" MAT · "+cost.fuel+" F":"—"}</small></button>})}</div><div className="section-title">BUILD</div><div className="strategic-build-grid">{(["infantry_barracks","mobile_barracks","support_barracks","city","fort","wall"] as OpenWorldBuildKind[]).map(kind=><button key={kind} className={pendingStrategicBuild===kind?"active":""} onClick={()=>{setPendingStrategicBuild(kind);setStrategicBuildAnchor(null);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);setConstructionAnchor(null)}}>{kind.replaceAll("_"," ").toUpperCase()}</button>)}</div><small className="muted-line">Roads are built by logistics formations. Owned territory yields resources automatically.</small></section>}
       <section><div className="section-title">FIELD WORKS</div><div className="construction-list">{constructionProjects.length?constructionProjects.filter(p=>localSides.has(p.side)).map(project=><div className="construction-row" key={project.id}><b>{constructionLabel(project.kind)}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span><i><em style={{width:Math.min(100,project.progress/project.requiredHours*100)+"%"}}/></i></div>):<small className="muted-line">No active construction.</small>}</div></section>
-      <section><div className="section-title">ORDER OF BATTLE</div><div className="oob-list">{blue.map(u=><button key={u.id} onClick={()=>{setSelected([u.id]);if(isMobile)setMobilePanel("unit")}} className={selected.includes(u.id)?"selected":""}><span className="oob-code">{UNIT_LABEL[u.kind]}</span><span><b>{u.name}</b><small>{pct(u.strength)} STR · {pct(u.organization)} ORG</small></span></button>)}</div></section>
+      <section><div className="section-title">ORDER OF BATTLE</div><div className="oob-list">{blue.filter(playerCanCommand).map(u=><button key={u.id} onClick={()=>{setSelected([u.id]);if(isMobile)setMobilePanel("unit")}} className={selected.includes(u.id)?"selected":""}><span className="oob-code">{UNIT_LABEL[u.kind]}</span><span><b>{u.name}</b><small>{pct(u.strength)} STR · {pct(u.organization)} ORG</small></span></button>)}</div></section>
     </aside>
 
     <div ref={viewport} className={pendingOrder||pendingPlan||pendingMassAttack||pendingDecoy||frontToolActive||pendingBuild||pendingStrategicBuild?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenuCapture={suppressNativeContextMenu} onContextMenu={issueTarget}>
@@ -2471,7 +2503,7 @@ export default function Home(){
           <rect width={mapW} height={mapH} fill="url(#sea)"/><path d={activeScenario.landPath} className="land-base"/>
           {activeScenario.terrainFeatures.map(f=><path key={f.id} d={f.path} className={"terrain-region "+f.terrain}/>)}
           <g className="territory-layer" clipPath="url(#landClip)">
-            {(["blue","red","green"] as Side[]).map(side=><g key={"zone-"+side} className={"territory-mass "+side}>
+            {ALL_SIDES.map(side=><g key={"zone-"+side} className={"territory-mass "+side}>
               <path d={territoryBoundaryPath(openWorld?openWorld.resourceNodes:theaterTerritory,side,openWorld?560:territoryStep)} fillRule="evenodd"/>
             </g>)}
             {(openWorld?openWorld.resourceNodes:theaterTerritory).filter(cell=>cell.contested>.7&&cell.control<.67).map(cell=><circle key={"uncertain-"+cell.x+"-"+cell.y} className="territory-disputed" cx={cell.x} cy={cell.y} r={openWorld?165:105} opacity={Math.min(.26,cell.contested*.24)}/>)}
@@ -2482,7 +2514,7 @@ export default function Home(){
           {openWorld?.structures.filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined).map(s=><path key={s.id} d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2} className="road"/>)}
           {emplacements.filter(e=>(e.kind==="trench"||e.kind==="barricade")&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined).map(e=><g key={e.id} className={"field-line "+e.kind+" "+e.side} opacity={.4+.6*e.strength/145}><path d={"M "+e.x+" "+e.y+" L "+e.x2+" "+e.y2}/></g>)}
           {openWorld?.structures.filter(s=>s.kind==="wall"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined).map(s=><g key={s.id} className={"built-wall "+s.side} opacity={.45+.55*s.strength/160}><path d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2}/><path className="wall-cap" d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2}/></g>)}
-          {cities.map(s=><g key={s.name} className={"site-label "+s.owner}><circle cx={s.x} cy={s.y} r="6" className="site-core"/><circle cx={s.x} cy={s.y} r="25" className="site-ring"/>{s.capture>0&&<circle cx={s.x} cy={s.y} r="30" className="capture-ring" pathLength="100" strokeDasharray={s.capture+" "+(100-s.capture)} transform={"rotate(-90 "+s.x+" "+s.y+")"}/>}<text x={s.x+11} y={s.y-11}>{s.name.toUpperCase()} · {s.owner==="blue"?"B":s.owner==="red"?"R":"G"}</text></g>)}
+          {cities.map(s=><g key={s.name} className={"site-label "+s.owner}><circle cx={s.x} cy={s.y} r="6" className="site-core"/><circle cx={s.x} cy={s.y} r="25" className="site-ring"/>{s.capture>0&&<circle cx={s.x} cy={s.y} r="30" className="capture-ring" pathLength="100" strokeDasharray={s.capture+" "+(100-s.capture)} transform={"rotate(-90 "+s.x+" "+s.y+")"}/>}<text x={s.x+11} y={s.y-11}>{s.name.toUpperCase()} · {s.owner[0].toUpperCase()}</text></g>)}
           <g className="supply-road-colors">
             {currentSupplyNetwork.roads.map(road=>{
               const friendlyA=localSides.has(road.a.owner),friendlyB=localSides.has(road.b.owner);
@@ -2521,7 +2553,7 @@ export default function Home(){
         {units.map(u=>{
           const visible=localSides.has(u.side)||isDetected(u,observerForces,cities,emplacements,activeScenario,playerSide);
           if(!visible)return null;
-          return <button key={u.id} className={"unit-counter "+u.side+" kind-"+u.kind+" "+(selected.includes(u.id)?"selected ":"")+(massTargets.includes(u.id)?"mass-target ":"")+(u.organization<30||(u.suppression??0)>50||(u.morale??82)<25?"shaken ":"")+(u.isolationHours&&u.isolationHours>6?" encircled ":"")+(u.order?.type==="retreat"?"retreating":"")+(AMMO_TYPES.has(u.kind)&&(u.ammo??100)<12?" low-ammo":"")} style={{left:u.x-16,top:u.y-16,background:"linear-gradient(90deg,"+(u.side==="blue"?"#5f8199":u.side==="red"?"#9c5f59":"#71846a")+" 0 50%,"+armyGroupColor(u.groupId)+" 50% 100%)"}} onPointerDown={e=>{if(e.button===2)e.preventDefault();e.stopPropagation()}} onClick={e=>selectUnit(e,u)} onContextMenuCapture={e=>e.preventDefault()} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{localSides.has(u.side)?u.groupId?.split("-").pop()??"·":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
+          return <button key={u.id} className={"unit-counter "+u.side+" kind-"+u.kind+" "+(selected.includes(u.id)?"selected ":"")+(massTargets.includes(u.id)?"mass-target ":"")+(u.organization<30||(u.suppression??0)>50||(u.morale??82)<25?"shaken ":"")+(u.isolationHours&&u.isolationHours>6?" encircled ":"")+(u.order?.type==="retreat"?"retreating":"")+(hasAlliedBots&&u.side===playerSide&&u.commanderSlot!==0?" allied-bot":"")+(AMMO_TYPES.has(u.kind)&&(u.ammo??100)<12?" low-ammo":"")} style={{left:u.x-16,top:u.y-16,background:"linear-gradient(90deg,"+(u.side==="blue"?"#5f8199":u.side==="red"?"#9c5f59":u.side==="green"?"#71846a":u.side==="yellow"?"#d1b45f":"#9975bf")+" 0 50%,"+armyGroupColor(u.groupId)+" 50% 100%)"}} onPointerDown={e=>{if(e.button===2)e.preventDefault();e.stopPropagation()}} onClick={e=>selectUnit(e,u)} title={hasAlliedBots&&u.side===playerSide&&u.commanderSlot!==0?"ALLIED BOT COMMAND":"FORMATION"} onContextMenuCapture={e=>e.preventDefault()} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{localSides.has(u.side)?u.groupId?.split("-").pop()??"·":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
         })}
         {revealedContacts.map(c=><div key={"contact-"+c.id} className="stale-contact" style={{left:c.x-17,top:c.y-17,opacity:Math.max(.2,c.confidence)}} title={"LAST CONTACT · "+Math.round((elapsedHoursRef.current-c.seenAt)*10)/10+"h AGO"}><b>?</b><small>{UNIT_LABEL[c.kind]}</small></div>)}
         {decoys.filter(d=>d.owner===playerSide||decoyVisibleTo(d,playerSide,units,activeScenario,elapsedHoursRef.current)).map(d=><div key={d.id} className={"deception-counter "+(d.owner===playerSide?"friendly":"enemy")} style={{left:d.x-16,top:d.y-16}} title={d.owner===playerSide?"Friendly deception marker":"Unconfirmed hostile formation"}><b>{d.owner===playerSide?"△":"INF"}</b><small>{d.owner===playerSide?"DECOY":"?"}</small></div>)}
@@ -2540,8 +2572,8 @@ export default function Home(){
 
       {selectionBox&&<div className="selection-box" style={{left:Math.min(selectionBox.x1,selectionBox.x2),top:Math.min(selectionBox.y1,selectionBox.y2),width:Math.abs(selectionBox.x2-selectionBox.x1),height:Math.abs(selectionBox.y2-selectionBox.y1)}}/>}
       {frontPreview&&<svg className="front-preview"><line x1={frontPreview.x1} y1={frontPreview.y1} x2={frontPreview.x2} y2={frontPreview.y2}/></svg>}
-      {(openWorld||mapW>WORLD_W)&&<div className="minimap"><svg viewBox={"0 0 "+mapW+" "+mapH}>{openWorld&&(["blue","red","green"] as Side[]).map(side=><path key={"mt-"+side} d={territoryBoundaryPath(openWorld.resourceNodes,side,560)} className={"territory-mini "+side}/>) }{cities.map(city=><circle key={"mc-"+city.name} cx={city.x} cy={city.y} r="52" className={city.owner}/>) }{units.map(u=><circle key={u.id} cx={u.x} cy={u.y} r="32" className={u.side}/>)}</svg></div>}
-      <div className="map-hud"><div><span className="dot friendly"/>FRIENDLY {blue.length}</div><div><span className="dot hostile"/>CONTACTS {enemy.filter(u=>isDetected(u,observerForces,cities,emplacements,activeScenario,playerSide)).length}</div><div>CITIES {blueCities}/{cities.length}</div><div>{hovered?TERRAIN_RULES[hovered.terrain].label.toUpperCase()+" · "+(hovered.road?"SUPPLY ROAD":"OFF ROAD"):activeScenario.location.toUpperCase()}</div><div>ZOOM {Math.round(zoom*100)}%</div></div>
+      {(openWorld||mapW>WORLD_W||activeScenario.presetId.startsWith("ffa-"))&&<div className="minimap"><svg viewBox={"0 0 "+mapW+" "+mapH}>{openWorld&&(["blue","red","green"] as Side[]).map(side=><path key={"mt-"+side} d={territoryBoundaryPath(openWorld.resourceNodes,side,560)} className={"territory-mini "+side}/>) }{cities.map(city=><circle key={"mc-"+city.name} cx={city.x} cy={city.y} r="52" className={city.owner}/>) }{units.map(u=><circle key={u.id} cx={u.x} cy={u.y} r="32" className={u.side}/>)}</svg></div>}
+      <div className="map-hud"><div><span className="dot friendly"/>FRIENDLY {blue.length}</div><div><span className="dot hostile"/>CONTACTS {enemy.filter(u=>isDetected(u,observerForces,cities,emplacements,activeScenario,playerSide)).length}</div><div>CITIES {blueCities}/{cities.length}</div><div>{hovered?TERRAIN_RULES[hovered.terrain].label.toUpperCase()+" · "+(hovered.road?"SUPPLY ROAD":"OFF ROAD"):activeScenario.location.toUpperCase()}</div>{activeScenario.presetId.startsWith("ffa-")&&<div>FFA · {[...new Set(cities.map(c=>c.owner))].length} FACTIONS HOLD CITIES</div>}<div>ZOOM {Math.round(zoom*100)}%</div></div>
       {pendingStrategicBuild&&<div className="target-banner">BUILD {pendingStrategicBuild.replaceAll("_"," ").toUpperCase()} · {(pendingStrategicBuild==="road"||pendingStrategicBuild==="wall")?(strategicBuildAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP":"RMB")+" LOCATION"} <button onClick={()=>{setPendingStrategicBuild(null);setStrategicBuildAnchor(null)}}>CANCEL</button></div>}
       {pendingBuild&&<div className="target-banner">{constructionLabel(pendingBuild)} · {isLinearConstruction(pendingBuild)?(constructionAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP CONSTRUCTION SITE":"RMB CONSTRUCTION SITE")} <button onClick={()=>{setPendingBuild(null);setConstructionAnchor(null)}}>CANCEL</button></div>}
       {pendingDecoy&&<div className="target-banner">RECON DECOY · PLACE WITHIN RECON RANGE <button onClick={()=>setPendingDecoy(false)}>CANCEL</button></div>}
