@@ -10,6 +10,7 @@ import AfterActionReport from "./after-action";
 import BrandMark from "./brand-mark";
 import MenuAtmosphere from "./menu-atmosphere";
 import MenuScore from "./menu-score";
+import {MapSelection,MapDeploymentBrief} from "./map-selection";
 import {useTerritoryView} from "@/app/hooks/use-territory-view";
 import {StaticLand,StaticRoutes} from "@/app/components/static-terrain";
 import {useViewportSize} from "@/app/hooks/use-viewport-size";
@@ -77,6 +78,7 @@ export default function Home(){
   const [tutorialStep,setTutorialStep]=useState(0);
   const [selectedPresetId,setSelectedPresetId]=useState("frontier");
   const [selectedGameMode,setSelectedGameMode]=useState<"scenario"|"openworld">("scenario");
+  const [setupStage,setSetupStage]=useState<"mode"|"maps">("mode");
   const [openWorld,setOpenWorld]=useState<OpenWorldState|null>(null);
   const [pendingStrategicBuild,setPendingStrategicBuild]=useState<OpenWorldBuildKind|null>(null);
   const [strategicBuildAnchor,setStrategicBuildAnchor]=useState<{x:number;y:number}|null>(null);
@@ -153,6 +155,7 @@ export default function Home(){
     if(!code)return;
     setPendingInviteCode(code);
     setSelectedGameMode("scenario");
+    setSetupStage("maps");
     window.history.replaceState(null,"",window.location.pathname+window.location.hash);
   },[]);
 
@@ -600,6 +603,7 @@ export default function Home(){
 
   function activateMultiplayer(session:MultiplayerSession){
     multiplayerRef.current=session;setMultiplayer(session);setPlayerSide(session.side);setSelectedPresetId(session.presetId);setSelectedGameMode("scenario");
+    setSetupStage("maps");
     setMultiplayerTeamSize(session.teamSize);setNickname(session.nickname);setPendingInviteCode("");
     setNetworkPhase("waiting");setNetworkError("");
     setInviteLink(session.kind==="invite"&&session.isHost?inviteUrl(session.code):"");
@@ -666,28 +670,75 @@ export default function Home(){
   const viewportSize=useViewportSize(viewport,Boolean(scenario));
 
   if(!scenario){
-    const presets=SCENARIO_PRESETS.filter(p=>setupCategory==="all"||
-      (setupCategory==="historical"&&p.historical)||(setupCategory==="fictional"&&!p.historical)||
-      (setupCategory==="mega"&&(p.mapScale??1)>=2)||(setupCategory==="guerrilla"&&p.warfare==="guerrilla"));
+    // Keep map selection scoped to modes that can actually launch them.
+    // Open-world currently supports the four fictional single-scale theaters.
+    const presets=SCENARIO_PRESETS.filter(p=>selectedGameMode==="openworld"
+      ?!p.historical&&(p.mapScale??1)===1
+      :setupCategory==="all"||
+        (setupCategory==="historical"&&p.historical)||(setupCategory==="fictional"&&!p.historical)||
+        (setupCategory==="mega"&&(p.mapScale??1)>=2)||(setupCategory==="guerrilla"&&p.warfare==="guerrilla"));
     const selectedPreset=SCENARIO_PRESETS.find(p=>p.id===selectedPresetId)??SCENARIO_PRESETS[0];
+    const chooseMode=(mode:"scenario"|"openworld")=>{
+      if(multiplayer)return;
+      setSelectedGameMode(mode);
+      setSetupCategory("all");
+      if(mode==="openworld"&&selectedPreset.historical)setSelectedPresetId("frontier");
+      setSetupStage("maps");
+    };
     return <main className="setup-shell">
       <MenuAtmosphere/>
-      <div className="setup-panel">
+      <div className={"setup-panel "+(setupStage==="mode"?"setup-mode-panel":"setup-maps-panel")}>
         <div className="setup-brand"><BrandMark/><div className="setup-brand-identity"><b>KSPIEL</b><small>OPERATIONAL COMMAND SIMULATION</small></div><div className="menu-brand-actions"><span className="menu-build-tag">THE WAR ROOM</span><MenuScore/></div></div>
+        {setupStage==="mode"?<section className="setup-mode-screen">
+          <div className="setup-mode-heading"><small>NEW CAMPAIGN / STEP 01 OF 02</small><h1>Choose your battlefield.</h1>
+            <p>Select how the war will unfold. The next screen shows detailed battlefield previews, starting forces and unit compositions before deployment.</p>
+          </div>
+          <div className="setup-mode-choices">
+            <button type="button" className="setup-mode-card" onClick={()=>chooseMode("scenario")}>
+              <div className="setup-mode-art scenario-art" aria-hidden="true"><span>◈</span><i>FRONTS · SUPPLY · WARFARE</i></div>
+              <div className="setup-mode-copy"><small>01 / TACTICAL OPERATIONS</small><h2>SCENARIO WAR</h2>
+                <p>Command an army across historical and fictional theaters. Defend supply lines, break fronts, capture objectives and dominate the map.</p>
+                <div className="setup-mode-chips"><span>SOLO</span><span>QUICK PLAY</span><span>PRIVATE ROOMS</span></div>
+                <strong>CHOOSE A MAP <span>→</span></strong>
+              </div>
+            </button>
+            <button type="button" className="setup-mode-card" onClick={()=>chooseMode("openworld")}>
+              <div className="setup-mode-art dominion-art" aria-hidden="true"><span>⚑</span><i>CONQUEST · RESOURCES · EMPIRES</i></div>
+              <div className="setup-mode-copy"><small>02 / STRATEGIC CONQUEST</small><h2>OPEN WORLD DOMINION</h2>
+                <p>Build settlements, recruit formations, extend roads and infrastructure, and conquer a persistent three-faction frontier.</p>
+                <div className="setup-mode-chips"><span>SOLO</span><span>3 FACTIONS</span><span>EXPANSION</span></div>
+                <strong>CHOOSE A MAP <span>→</span></strong>
+              </div>
+            </button>
+          </div>
+          <p className="setup-mode-footnote">Theater maps use live KSpiel scenario geometry. Maps and starting forces are previewed before the session is launched.</p>
+        </section>:<>
+        <nav className="theater-flow-nav" aria-label="Campaign setup progress">
+          <button type="button" className="theater-back" onClick={()=>{if(!multiplayer&&!pendingInviteCode)setSetupStage("mode")}}
+            disabled={Boolean(multiplayer)||Boolean(pendingInviteCode)}>← GAME MODES</button>
+          <div><span>01 / MODE</span><span className="active">02 / MAP SELECTION</span></div>
+          <span className="theater-flow-mode">{selectedGameMode==="openworld"?"OPEN WORLD DOMINION":"SCENARIO WAR"}</span>
+        </nav>
         <div className="setup-grid">
           <section className="setup-main">
-            <div className="setup-heading"><small>FIELD OPERATIONS / NEW CAMPAIGN</small><h1>{selectedGameMode==="openworld"?"Build a dominion":"Choose a theater"}</h1><p>{selectedGameMode==="openworld"?"Expand territory, exploit resources automatically, build infrastructure and raise new armies against multiple rivals.":"Terrain now changes the roster, mobility, visibility and logistics. Historical presets are stylized scenarios, not exact order-of-battle reconstructions."}</p></div>
-            <div className="setup-tabs"><button disabled={Boolean(multiplayer)} className={selectedGameMode==="scenario"?"active":""} onClick={()=>setSelectedGameMode("scenario")}>SCENARIO WAR</button><button disabled={Boolean(multiplayer)} className={selectedGameMode==="openworld"?"active":""} onClick={()=>{setSelectedGameMode("openworld");setSelectedPresetId("frontier")}}>OPEN WORLD</button></div>
-            <div className="setup-tabs"><button className={setupCategory==="all"?"active":""} onClick={()=>setSetupCategory("all")}>ALL</button><button className={setupCategory==="fictional"?"active":""} onClick={()=>setSetupCategory("fictional")}>FICTIONAL</button><button className={setupCategory==="historical"?"active":""} onClick={()=>setSetupCategory("historical")}>HISTORICAL</button><button className={setupCategory==="mega"?"active":""} onClick={()=>setSetupCategory("mega")}>MEGA MAPS</button><button className={setupCategory==="guerrilla"?"active":""} onClick={()=>setSetupCategory("guerrilla")}>GUERRILLA</button></div>
-            {selectedGameMode==="scenario"&&<div className="scenario-grid">{presets.map(preset=><button key={preset.id} disabled={Boolean(multiplayer)} className={"scenario-card theme-"+preset.theme+" "+(selectedPresetId===preset.id?"selected":"")} onClick={()=>{setSelectedPresetId(preset.id);setPlayerSide("blue")}}>
-              <span className="scenario-theme">{preset.warfare==="guerrilla"?"⚑ GUERRILLA · ": (preset.mapScale??1)>=2?"◈ MEGA MAP · ":""}{preset.theme.toUpperCase()} · {preset.era.replace("_"," ").toUpperCase()}</span><b>{preset.title}</b><small>{preset.location}{preset.year?" · "+preset.year:""}</small><p>{preset.subtitle}</p>
-              <span className="scenario-side-line"><span><Flag styleName={preset.sideFlags.blue}/>{preset.sideNames.blue}</span><i>VS</i><span><Flag styleName={preset.sideFlags.red}/>{preset.sideNames.red}</span></span>
-            </button>)}</div>}
-            {selectedGameMode==="openworld"&&<div className="openworld-intro"><b>OPEN WORLD DOMINION</b><p>Three rival powers. No fixed front. Territory itself is the objective.</p><span>Automatic regional resources · 3 barracks families · dynamic settlements · roads · walls · forts · generous supply · minimap</span></div>}
+            <div className="setup-heading"><small>FIELD OPERATIONS / THEATER SELECTION</small>
+              <h1>Choose your map</h1>
+              <p>Inspect real terrain previews, unit counts, battle rosters and tactical conditions. Select a theater to configure your forces and deploy.</p>
+            </div>
+            {selectedGameMode==="scenario"?<div className="setup-tabs theater-filters" role="group" aria-label="Filter theaters">
+              <button className={setupCategory==="all"?"active":""} onClick={()=>setSetupCategory("all")}>ALL</button>
+              <button className={setupCategory==="fictional"?"active":""} onClick={()=>setSetupCategory("fictional")}>FICTIONAL</button>
+              <button className={setupCategory==="historical"?"active":""} onClick={()=>setSetupCategory("historical")}>HISTORICAL</button>
+              <button className={setupCategory==="mega"?"active":""} onClick={()=>setSetupCategory("mega")}>MEGA MAPS</button>
+              <button className={setupCategory==="guerrilla"?"active":""} onClick={()=>setSetupCategory("guerrilla")}>GUERRILLA</button>
+            </div>:<div className="theater-mode-note">THREE FACTIONS · PROCEDURAL TERRITORY · BUILD AND EXPAND</div>}
+            <MapSelection presets={presets} selectedPresetId={selectedPresetId} mode={selectedGameMode}
+              onSelect={id=>{if(multiplayer||pendingInviteCode)return;setSelectedPresetId(id);setPlayerSide("blue")}}/>
           </section>
           <aside className="setup-side">
             <div className="section-title">{selectedGameMode==="openworld"?"WORLD RULESET":"SELECTED THEATER"}</div><h2>{selectedGameMode==="openworld"?"Open World Dominion":selectedPreset.title}</h2><p>{selectedGameMode==="openworld"?"Procedural continental theater · three factions":selectedPreset.location+(selectedPreset.year?" · "+selectedPreset.year:"")}</p>
             <div className="setup-facts"><span><small>THEME</small><b>{selectedPreset.theme.toUpperCase()}</b></span><span><small>ERA</small><b>{selectedPreset.era.replace("_"," ").toUpperCase()}</b></span><span><small>MAP</small><b>{Math.round(WORLD_W*(selectedPreset.mapScale??1))} × {Math.round(WORLD_H*(selectedPreset.mapScale??1))}</b></span><span><small>FOG</small><b>ENABLED</b></span></div>
+            <MapDeploymentBrief preset={selectedPreset} mode={selectedGameMode}/>
             <div className="section-title">{pendingInviteCode?"CHOOSE TEAM":"PLAY AS"}</div><div className="side-choice">
               {(["blue","red"] as Side[]).map(side=><button key={side} disabled={Boolean(multiplayer)} className={playerSide===side?"active":""} onClick={()=>setPlayerSide(side)}><Flag styleName={selectedPreset.sideFlags[side]??"generic-blue"}/><span><b>{pendingInviteCode?side.toUpperCase()+" TEAM":selectedPreset.sideNames[side]}</b><small>{pendingInviteCode?"Shared command of the entire "+side+" force":selectedPreset.warfare==="guerrilla"?(side==="blue"?"PARTISANS · MILITIA · RAIDERS":"GARRISONS · PATROLS · ARMOR"):selectedPreset.id==="spain-1937"?(side==="blue"?"REPUBLICAN COMMAND":"NATIONALIST COMMAND"):(side==="blue"?"BLUE THEATER COMMAND":"RED THEATER COMMAND")}</small></span></button>)}
             </div>
@@ -706,6 +757,7 @@ export default function Home(){
             <button className="launch-button" disabled={Boolean(multiplayer)||networkPhase==="matching"||Boolean(pendingInviteCode)} onClick={()=>startGame()}>{selectedGameMode==="openworld"?"FOUND DOMINION":"DEPLOY TO THEATER"}</button>
           </aside>
         </div>
+        </>}
       </div>
     </main>;
   }
