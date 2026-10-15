@@ -1359,7 +1359,7 @@ export default function Home(){
   const gunEffectsRef=useRef<GunEvent[]>([]);
   const initialCountRef=useRef<Record<Side,number>>({blue:0,red:0,green:0,yellow:0,purple:0});
   const elapsedHoursRef=useRef(0);
-  const lastReserveRef=useRef<Record<Side,number>>({blue:0,red:0,green:0});
+  const lastReserveRef=useRef<Record<Side,number>>({blue:0,red:0,green:0,yellow:0,purple:0});
   const reserveSerialRef=useRef(1);
   const emplacementsRef=useRef<Emplacement[]>([]);
   const projectsRef=useRef<ConstructionProject[]>([]);
