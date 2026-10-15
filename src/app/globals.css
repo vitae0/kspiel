@@ -835,3 +835,208 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
  .setup-mode-card,.theater-option{transition:none!important}
  .setup-mode-card:hover,.theater-option:hover{transform:none}
 }
+
+
+/* One-screen campaign menu. No page, panel or map-list scrollbars. */
+.setup-shell{
+  display:flex;flex-direction:column;
+  height:100dvh;min-height:0;max-height:100dvh;
+  overflow:hidden!important;
+  padding:clamp(8px,1.1vw,18px);
+}
+.setup-shell>.setup-panel{
+  height:100%;max-height:100%;min-height:0;width:100%;
+  margin:0 auto;display:flex;flex-direction:column;overflow:hidden!important;
+}
+.setup-shell .setup-brand{flex:0 0 clamp(52px,8vh,78px);height:auto;min-height:0}
+.setup-shell .setup-grid{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(275px,345px);
+  flex:1;min-height:0;height:auto;overflow:hidden;
+}
+.setup-shell .setup-main{
+  display:flex;flex-direction:column;min-width:0;min-height:0;
+  overflow:hidden;padding:clamp(10px,1.7vw,23px);
+}
+.setup-shell .setup-side{
+  display:flex;flex-direction:column;min-height:0;
+  overflow:hidden;padding:clamp(10px,1.6vw,20px);
+}
+.setup-shell .setup-heading{flex:none;padding-bottom:7px;margin-bottom:9px}
+.setup-shell .setup-heading>small{font-size:8px}
+.setup-shell .setup-heading h1{font-size:clamp(22px,2.7vw,34px);margin:6px 0 4px}
+.setup-shell .setup-heading p{font-size:9px;line-height:1.35;margin:0}
+.setup-shell .theater-filters{flex:none;margin-bottom:8px;gap:4px;flex-wrap:nowrap}
+.setup-shell .theater-filters button{padding:7px 6px;font-size:8px;white-space:nowrap}
+.setup-shell .theater-flow-nav{flex:none;min-height:40px;padding-block:5px}
+.setup-shell .theater-mode-note{flex:none;margin:2px 0 8px;padding:7px;font-size:8px}
+.setup-shell .theater-list{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden}
+.setup-shell .theater-picker{
+  display:grid;flex:1;min-height:0;height:0;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  grid-auto-rows:minmax(0,1fr);
+  gap:clamp(5px,.8vw,11px);margin:0;overflow:hidden;
+}
+.setup-shell .theater-option{
+  height:100%;min-height:0;overflow:hidden;
+  background:#13211da8;transform:none;
+}
+.setup-shell .theater-option-content{min-height:0;gap:3px;padding:clamp(7px,.8vw,11px)}
+.setup-shell .theater-thumb{
+  aspect-ratio:auto;height:auto;min-height:65px;
+  flex:1 1 45%;overflow:hidden;
+}
+.setup-shell .theater-thumb-svg{height:100%;width:100%}
+.setup-shell .theater-option-meta{font-size:7px}
+.setup-shell .theater-option-content>strong{font-size:clamp(13px,1.35vw,18px);margin:2px 0}
+.setup-shell .theater-option-content>p{
+  min-height:0;max-height:27px;overflow:hidden;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;
+  line-height:1.35;font-size:8px;margin:1px 0 3px;
+}
+.setup-shell .theater-option-force{gap:4px;margin:2px 0 4px;font-size:8px}
+.setup-shell .theater-option-force span{gap:3px;padding:3px 5px}
+.setup-shell .theater-option-force span b{font-size:12px}
+.setup-shell .theater-option-force .flag{width:20px;height:12px}
+.setup-shell .theater-option-unit-types{min-height:0;max-height:34px;overflow:hidden;gap:2px}
+.setup-shell .theater-option-unit-types span{font-size:7px;padding:2px 4px}
+.setup-shell .theater-option-footer{padding-top:5px;font-size:7px}
+.setup-shell .theater-pagination{
+  flex:none;min-height:35px;margin-top:6px;
+  display:flex;justify-content:space-between;align-items:center;gap:6px;
+  border:1px solid #aea37a6b;background:#10201bbb;
+}
+.setup-shell .theater-pagination button{
+  border:0;min-height:33px;padding:5px 11px;
+  background:#263a30b5;color:#f0dba5;cursor:pointer;font-weight:800;
+  font-size:9px;letter-spacing:.08em;
+}
+.setup-shell .theater-pagination button:hover:not(:disabled){background:#56674e}
+.setup-shell .theater-pagination button:disabled{cursor:default;opacity:.32}
+.setup-shell .theater-pagination>span{color:#dfd3a9;font-size:9px;font-weight:800;letter-spacing:.08em}
+.theater-thumb-control{pointer-events:none}
+.theater-thumb-control-area{fill-opacity:.31;stroke-width:65;stroke-opacity:.46;stroke-linejoin:round}
+.theater-thumb-control-area.blue{fill:#387add;stroke:#387add}
+.theater-thumb-control-area.red{fill:#df5650;stroke:#df5650}
+.theater-thumb-control-area.green{fill:#3abf73;stroke:#3abf73}
+.theater-thumb-flag{overflow:visible;pointer-events:none}
+.theater-thumb-flag-surface{display:block;width:100%;height:100%;filter:drop-shadow(0 2px 4px #000c)}
+.theater-thumb-flag .flag{display:block;width:100%;height:100%;border:2px solid #f5e8c6}
+.menu-mobile-switch{display:none}
+.menu-setup-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;flex:none;margin-bottom:7px}
+.menu-setup-tabs button{
+  min-width:0;padding:8px 2px;background:#17251e97;
+  color:#bfc7b4;border:1px solid #8f937459;font-size:8px;font-weight:800;
+  letter-spacing:.07em;cursor:pointer;
+}
+.menu-setup-tabs button.active{color:#f5e2a8;background:#7e714b66;border-color:#e2c587}
+.menu-selected-theater{flex:none;display:grid;gap:2px;margin-bottom:7px;padding:8px;border:1px solid #ab9a7265;background:#14221d92}
+.menu-selected-theater small{color:#d5c28e;letter-spacing:.12em;font-size:7px}
+.menu-selected-theater strong{font:700 17px/1.1 Georgia,serif;color:#f6e8c9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.menu-selected-theater>span{color:#c2c6b7;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.menu-setup-settings,.menu-forces-content,.menu-room-content{flex:1;min-height:0;overflow:hidden}
+.menu-setup-settings>.section-title:first-child,.menu-setup-settings>h2,.menu-setup-settings>p{display:none}
+.menu-setup-settings .setup-facts{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin:0 0 9px}
+.menu-setup-settings .setup-facts span{padding:5px 7px}
+.menu-setup-settings .setup-facts span small{font-size:7px}
+.menu-setup-settings .setup-facts span b{font-size:9px;overflow-wrap:anywhere}
+.menu-setup-settings>.section-title{font-size:8px;margin:4px 0 5px}
+.menu-setup-settings .side-choice{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin:0 0 9px}
+.menu-setup-settings .side-choice button{min-width:0;min-height:43px;padding:5px;gap:5px}
+.menu-setup-settings .side-choice button .flag{width:21px;height:13px}
+.menu-setup-settings .side-choice button span:last-child{min-width:0}
+.menu-setup-settings .side-choice button b{font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.menu-setup-settings .side-choice button small{display:none}
+.menu-setup-settings .nickname-field{margin-bottom:8px;gap:2px}
+.menu-setup-settings .nickname-field input{padding:6px 7px}
+.menu-setup-settings .nickname-field small{font-size:7px}
+.menu-setup-settings .team-size-choice{margin:0 0 8px}
+.menu-setup-settings .team-size-choice button{padding:5px}
+.menu-setup-settings .mode-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin:0}
+.menu-setup-settings .mode-list button{min-width:0;min-height:47px;padding:6px 4px;text-align:center}
+.menu-setup-settings .mode-list button b{font-size:8px;line-height:1.25}
+.menu-setup-settings .mode-list button small{display:none}
+.menu-setup-bottom{display:grid;flex:none;gap:5px;margin-top:auto;padding-top:8px;border-top:1px solid #a99e7154}
+.setup-shell .menu-setup-bottom .launch-button{min-height:38px;padding:8px}
+.menu-forces-link{background:none;border:0;color:#dbc78e;padding:4px;font-size:8px;cursor:pointer;letter-spacing:.12em}
+.menu-forces-content .theater-forces{margin:0;padding:0;border:0}
+.menu-forces-content .theater-forces-hint{margin-bottom:7px;font-size:8px}
+.menu-forces-content .theater-rosters{gap:5px}
+.menu-forces-content .theater-roster{padding:6px}
+.menu-forces-content .theater-roster header{margin-bottom:5px}
+.menu-forces-content .theater-roster-rows{gap:3px 6px}
+.menu-forces-content .theater-roster-rows>span{font-size:8px}
+.menu-forces-content .theater-roster .flag{width:21px;height:13px}
+.menu-room-content .invite-join-card{margin:0 0 9px}
+.menu-room-content .network-lobby{margin:0 0 9px}
+.menu-room-content .network-lobby small{font-size:8px;letter-spacing:0;overflow-wrap:anywhere}
+.setup-shell .setup-mode-screen{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;padding:clamp(15px,2.2vw,35px)}
+.setup-shell .setup-mode-heading{flex:none;margin-bottom:clamp(6px,1.6vh,20px)}
+.setup-shell .setup-mode-heading h1{font-size:clamp(26px,4vw,48px);margin:8px 0}
+.setup-shell .setup-mode-heading p{font-size:10px;line-height:1.35}
+.setup-shell .setup-mode-choices{flex:1;min-height:0;gap:clamp(8px,1.2vw,15px)}
+.setup-shell .setup-mode-card{height:100%;min-height:0}
+.setup-shell .setup-mode-art{flex:1;min-height:90px;height:auto}
+.setup-shell .setup-mode-copy{flex:none;padding:clamp(10px,1.6vw,20px)}
+.setup-shell .setup-mode-copy h2{font-size:clamp(19px,2vw,27px);margin:5px 0}
+.setup-shell .setup-mode-copy p{font-size:10px;line-height:1.4;margin:0 0 10px}
+.setup-shell .setup-mode-copy>strong{margin-top:10px;padding-top:10px}
+.setup-shell .setup-mode-footnote{flex:none;padding-top:7px;margin:0;font-size:8px}
+@media(max-width:960px){
+ .setup-shell .setup-grid{grid-template-columns:minmax(0,1fr) minmax(265px,310px)}
+ .setup-shell .setup-side{border-top:0}
+ .setup-shell .setup-main{border-right:1px solid #9d9b7152}
+}
+@media(max-width:900px){
+ .setup-shell{padding:0!important;height:100dvh!important;overflow:hidden!important}
+ .setup-shell>.setup-panel{min-height:0;height:100%;margin:0;border:0;overflow:hidden!important}
+ .setup-shell .setup-brand{flex:0 0 54px;position:relative;top:auto;padding:0 9px}
+ .setup-shell .setup-grid{display:block;flex:1;min-height:0;height:0;overflow:hidden}
+ .menu-mobile-switch{flex:none;display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #baa8736b}
+ .menu-mobile-switch button{background:#14251eac;color:#d0d4bc;border:0;padding:8px;cursor:pointer;font-size:10px;font-weight:800;letter-spacing:.13em}
+ .menu-mobile-switch button.active{background:#756c4975;color:#f6e3ab}
+ .setup-shell .menu-view-maps>.setup-side,.setup-shell .menu-view-setup>.setup-main{display:none}
+ .setup-shell .menu-view-setup>.setup-side,.setup-shell .menu-view-maps>.setup-main{display:flex;border:0;height:100%;min-height:0}
+ .setup-shell .setup-main{padding:8px}
+ .setup-shell .setup-side{padding:8px 12px 7px}
+ .setup-shell .theater-picker{grid-template-columns:1fr}
+ .setup-shell .setup-heading{margin-bottom:5px;padding-bottom:4px}
+ .setup-shell .setup-heading h1{font-size:23px;margin:3px 0}
+ .setup-shell .setup-heading p{display:none}
+ .setup-shell .theater-filters{overflow:hidden;padding:0;scrollbar-width:none;gap:3px}
+ .setup-shell .theater-filters button{flex:1 1 0;min-width:0;white-space:normal;padding:6px 2px;font-size:7px}
+ .setup-shell .theater-flow-nav{gap:6px;padding:4px 8px;min-height:35px;flex-wrap:nowrap}
+ .setup-shell .theater-flow-nav>div{display:none}
+ .setup-shell .theater-flow-mode{font-size:8px}
+ .setup-shell .theater-option-content>p{max-height:22px;-webkit-line-clamp:1}
+ .setup-shell .theater-option-content{padding:9px}
+ .setup-shell .theater-option-unit-types{max-height:26px}
+ .setup-shell .theater-thumb{min-height:80px}
+ .setup-shell .setup-mode-choices{grid-template-columns:1fr;gap:6px}
+ .setup-shell .setup-mode-art{height:35%;min-height:55px}
+ .setup-shell .setup-mode-copy{padding:9px}
+ .setup-shell .setup-mode-copy p{display:none}
+ .setup-shell .setup-mode-copy>strong{margin-top:6px;padding-top:5px}
+ .setup-shell .setup-mode-heading h1{font-size:29px}
+ .setup-shell .setup-mode-heading p{display:none}
+ .setup-shell .setup-mode-screen{padding:12px}
+ .setup-shell .setup-mode-footnote{display:none}
+}
+@media(max-height:700px){
+ .setup-shell .setup-brand{flex-basis:50px}
+ .setup-shell .theater-flow-nav{min-height:33px}
+ .setup-shell .theater-option-content>p{display:none}
+ .setup-shell .theater-option-unit-types{max-height:21px}
+ .setup-shell .theater-thumb{min-height:55px}
+ .setup-shell .menu-selected-theater{padding:5px;margin-bottom:5px}
+ .setup-shell .menu-selected-theater strong{font-size:15px}
+ .setup-shell .menu-setup-tabs{margin-bottom:5px}
+ .setup-shell .menu-setup-tabs button{padding:5px}
+ .menu-setup-settings .setup-facts{margin-bottom:4px}
+ .menu-setup-settings .setup-facts span{padding:3px}
+ .menu-setup-settings .side-choice{margin-bottom:5px}
+ .menu-setup-settings .nickname-field{margin-bottom:4px}
+ .menu-setup-settings .team-size-choice{margin-bottom:4px}
+ .menu-setup-settings>.section-title{margin:3px 0}
+ .menu-setup-settings .mode-list button{min-height:38px}
+ .setup-shell .menu-setup-bottom .launch-button{min-height:34px}
+}
