@@ -76,7 +76,7 @@ export default function AfterActionReport({history,winner,playerSide,onExit}:{hi
       <header className="aar-header"><div><small>KSPIEL // AFTER-ACTION REPORT</small><h1>{winner?(winner===playerSide?"VICTORY":"DEFEAT"):"SESSION CONCLUDED"}</h1><p>{history.title} · SEED #{history.seed.toString(16).toUpperCase()} · {format(duration,1)} SIMULATION HOURS</p></div><div><span className="aar-winner">{winner?winner.toUpperCase()+" VICTORIOUS":history.reason??"ENDED"}</span><button onClick={onExit}>RETURN TO MENU ×</button></div></header>
       <div className="aar-tabs" role="tablist">{TABS.map(t=><button role="tab" aria-selected={tab===t} className={tab===t?"active":""} key={t} onClick={()=>setTab(t)}>{t}</button>)}</div>
       <div className="aar-content">
-        <div className="aar-scoreboard" style={{gridTemplateColumns:"repeat("+Math.max(1,ranks.length)+", minmax(0,1fr))"}}>{ranks.map((r,i)=>{
+        <div className={"aar-scoreboard sides-"+ranks.length}>{ranks.map((r,i)=>{
           const snap=final.values[r.side],total=history.totals[r.side];
           return <div key={r.side} className={"aar-score "+r.side}><div className="aar-side"><i style={{background:COLORS[r.side]}}/><b>{r.side.toUpperCase()} COMMAND</b><small>#{i+1} / KSPIEL SCORE</small></div><strong>{format(r.score)}</strong>
             <div className="aar-kpis"><span>ARMY <b>{format(snap.units)}</b></span><span>CITIES <b>{format(snap.cities)}</b></span><span>DAMAGE <b>{format(total.damage,1)}</b></span><span>LOSSES <b>{format(total.losses)}</b></span></div></div>;
