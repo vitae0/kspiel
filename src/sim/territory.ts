@@ -8,7 +8,7 @@ const SIDES:Side[]=[...ALL_SIDES];
 export function scenarioTerritoryCells(scenario:Scenario,cities:CityState[],units:Formation[],step=360):TerritoryCell[]{
   const cells:TerritoryCell[]=[];
   const friendly:Record<Side,Formation[]>={blue:[],red:[],green:[],yellow:[],purple:[]};
-  const cityGroups:Record<Side,CityState[]>={blue:[],red:[],green:[]};
+  const cityGroups:Record<Side,CityState[]>={blue:[],red:[],green:[],yellow:[],purple:[]};
   for(const u of units)if(u.strength>8)friendly[u.side].push(u);
   for(const c of cities)cityGroups[c.owner].push(c);
   for(let y=step/2;y<scenario.worldHeight;y+=step)for(let x=step/2;x<scenario.worldWidth;x+=step){
