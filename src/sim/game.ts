@@ -767,7 +767,7 @@ function generateGeographicTheater(seed:number,preset:ScenarioPreset,rnd:()=>num
 
 export function generateScenario(seed:number,presetId="frontier"):Scenario{
   if(presetId==="ffa-triad"||presetId==="ffa-quadrant"||presetId==="ffa-pentagon")return generateFFAScenario(seed,presetId);
-  const preset=SCENARIO_PRESETS.find(p=>p.id===presetId)??SCENARIO_PRESETS[0];
+  const preset=SCENARIO_PRESETS.find(p=>p.id===presetId)??SCENARIO_PRESETS.find(p=>p.id==="frontier")!;
   const rnd=mulberry32(seed||1);
   if(preset.id==="spain-1937")return generateSpainScenario(seed,preset,rnd);
   const geographic=GEOGRAPHIC_THEATERS[preset.id];
