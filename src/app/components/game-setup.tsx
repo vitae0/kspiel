@@ -1,5 +1,5 @@
 "use client";
-import type {Dispatch,SetStateAction} from "react";
+import {useEffect,useState,type Dispatch,type SetStateAction} from "react";
 import {SCENARIO_PRESETS,WORLD_W,WORLD_H} from "@/sim/game";
 import type {Side} from "@/sim/types";
 import type {MultiplayerSession,MultiplayerTeamSize} from "@/lib/multiplayer";
@@ -33,6 +33,12 @@ selectedGameMode,setSelectedGameMode,playerSide,setPlayerSide,multiplayer,networ
 pendingInviteCode,setPendingInviteCode,inviteLink,nickname,setNickname,multiplayerTeamSize,setMultiplayerTeamSize,
 onlinePlayers,beginQuickPlay,beginPrivateMatch,joinPendingInvite,cancelMultiplayer,startGame,setNetworkError}:Props){
 
+    const [sideTab,setSideTab]=useState<"settings"|"forces"|"room">("settings");
+    const [mobileView,setMobileView]=useState<"maps"|"setup">("maps");
+    useEffect(()=>{
+      if(multiplayer||pendingInviteCode||networkPhase==="matching"||networkPhase==="error")setSideTab("room");
+    },[multiplayer,pendingInviteCode,networkPhase]);
+
     // Keep map selection scoped to modes that can actually launch them.
     // Open-world currently supports the four fictional single-scale theaters.
     const presets=SCENARIO_PRESETS.filter(p=>selectedGameMode==="openworld"
@@ -57,6 +63,8 @@ onlinePlayers,beginQuickPlay,beginPrivateMatch,joinPendingInvite,cancelMultiplay
       setSetupCategory("all");
       if(mode==="openworld"&&selectedPreset.historical)setSelectedPresetId("frontier");
       setSetupStage("maps");
+      setMobileView("maps");
+      setSideTab("settings");
     };
 
 return <main className="setup-shell">
@@ -93,7 +101,11 @@ return <main className="setup-shell">
           <div><span>01 / MODE</span><span className="active">02 / MAP SELECTION</span></div>
           <span className="theater-flow-mode">{selectedGameMode==="openworld"?"OPEN WORLD DOMINION":"SCENARIO WAR"}</span>
         </nav>
-        <div className="setup-grid">
+        <div className="menu-mobile-switch" role="group" aria-label="Map and battle setup">
+          <button type="button" className={mobileView==="maps"?"active":""} onClick={()=>setMobileView("maps")}>MAPS</button>
+          <button type="button" className={mobileView==="setup"?"active":""} onClick={()=>setMobileView("setup")}>BATTLE SETUP</button>
+        </div>
+        <div className={"setup-grid menu-view-"+mobileView}>
           <section className="setup-main">
             <div className="setup-heading"><small>FIELD OPERATIONS / THEATER SELECTION</small>
               <h1>Choose your map</h1>
@@ -111,6 +123,16 @@ return <main className="setup-shell">
               onSelect={id=>{if(multiplayer||pendingInviteCode)return;setSelectedPresetId(id);setPlayerSide("blue")}}/>
           </section>
           <aside className="setup-side">
+            <div className="menu-setup-tabs" role="group" aria-label="Battle setup sections">
+              <button type="button" className={sideTab==="settings"?"active":""} onClick={()=>setSideTab("settings")}>SETTINGS</button>
+              <button type="button" className={sideTab==="forces"?"active":""} onClick={()=>setSideTab("forces")}>FORCES</button>
+              <button type="button" className={sideTab==="room"?"active":""} onClick={()=>setSideTab("room")}>ROOM</button>
+            </div>
+            <div className="menu-selected-theater"><small>SELECTED THEATER</small>
+              <strong>{selectedPreset.title}</strong>
+              <span>{selectedPreset.location} · {selectedPreset.theme.toUpperCase()}</span>
+            </div>
+            {sideTab==="settings"&&<div className="menu-setup-settings">
             <div className="section-title">{selectedGameMode==="openworld"?"WORLD RULESET":"SELECTED THEATER"}</div><h2>{selectedPreset.title}</h2><p>{selectedGameMode==="openworld"?"Open World Dominion · three factions · "+selectedPreset.location:selectedPreset.location+(selectedPreset.year?" · "+selectedPreset.year:"")}</p>
             <div className="setup-facts"><span><small>THEME</small><b>{selectedPreset.theme.toUpperCase()}</b></span><span><small>ERA</small><b>{selectedPreset.era.replace("_"," ").toUpperCase()}</b></span><span><small>MAP</small><b>{Math.round(WORLD_W*(selectedPreset.mapScale??1))} × {Math.round(WORLD_H*(selectedPreset.mapScale??1))}</b></span><span><small>FOG</small><b>ENABLED</b></span></div>
             <div className="section-title">{pendingInviteCode?"CHOOSE TEAM":"PLAY AS"}</div><div className="side-choice">
@@ -124,12 +146,20 @@ return <main className="setup-shell">
               <button disabled={selectedGameMode==="openworld"||Boolean(multiplayer)||networkPhase==="matching"||!nickname.trim()} onClick={()=>void beginQuickPlay()}><b>QUICK PLAY · {multiplayerTeamSize}V{multiplayerTeamSize}</b><small>{selectedGameMode==="openworld"?"Scenario mode only":"Queue for "+multiplayerTeamSize+" commanders on each team"}</small></button>
               <button disabled={selectedGameMode==="openworld"||Boolean(multiplayer)||networkPhase==="matching"||!nickname.trim()} onClick={()=>void beginPrivateMatch()}><b>PRIVATE MATCH · {multiplayerTeamSize}V{multiplayerTeamSize}</b><small>{selectedGameMode==="openworld"?"Scenario mode only":"Create a room and share one link with every player"}</small></button>
             </div></>}
+            </div>}
+            {sideTab==="room"&&<div className="menu-room-content">
             {pendingInviteCode&&!multiplayer&&<div className="invite-join-card"><b>INVITE ROOM · {pendingInviteCode}</b><small>Pick a nickname and either team. Everyone on a team can command the full army.</small><div className="invite-actions"><button disabled={networkPhase==="matching"||!nickname.trim()} onClick={()=>void joinPendingInvite()}>JOIN ROOM</button><button onClick={()=>{setPendingInviteCode("");setNetworkError("")}}>DISMISS</button></div></div>}
             {multiplayer&&<div className={"network-lobby "+networkPhase}><div><span><b>{networkPhase==="connected"?"ALL COMMANDERS CONNECTED":networkPhase==="opponent-left"?"PLAYER DISCONNECTED":multiplayer.kind==="quickplay"?"QUICK PLAY QUEUE":"PRIVATE ROOM"}</b><small>ROOM {multiplayer.code} · {multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.nickname} · {multiplayer.side.toUpperCase()} TEAM</small></span><strong>{onlinePlayers.length}/{multiplayer.maxPlayers}</strong></div><div className="lobby-roster">{(["blue","red"] as Side[]).map(side=><div key={side}><b>{side.toUpperCase()} TEAM</b>{onlinePlayers.filter(player=>player.side===side).sort((a,b)=>a.slot-b.slot).map(player=><small key={player.token}>{player.slot}. {player.nickname}{player.token===multiplayer.playerToken?" · YOU":""}</small>)}{onlinePlayers.filter(player=>player.side===side).length<multiplayer.teamSize&&<small>Waiting for {multiplayer.teamSize-onlinePlayers.filter(player=>player.side===side).length}…</small>}</div>)}</div>{inviteLink&&<div className="invite-link"><input aria-label="Invite link" readOnly value={inviteLink}/><button onClick={()=>void navigator.clipboard.writeText(inviteLink)}>COPY LINK</button></div>}<button className="cancel-network" onClick={cancelMultiplayer}>CANCEL</button></div>}
             {networkPhase==="matching"&&<div className="network-lobby matching"><b>CONNECTING TO MATCHMAKING…</b><small>Preparing Supabase Realtime session.</small></div>}
             {networkError&&<div className="network-error">{networkError==="team_full"?"That team is full. Pick the other team.":networkError==="room_unavailable"?"That room is full, closed, or expired.":networkError}</div>}
-            <button className="launch-button" disabled={Boolean(multiplayer)||networkPhase==="matching"||Boolean(pendingInviteCode)} onClick={()=>startGame()}>{selectedGameMode==="openworld"?"FOUND DOMINION":"DEPLOY TO THEATER"}</button>
-            <MapDeploymentBrief preset={selectedPreset} mode={selectedGameMode}/>
+            </div>}
+            {sideTab==="forces"&&<div className="menu-forces-content">
+              <MapDeploymentBrief preset={selectedPreset} mode={selectedGameMode}/>
+            </div>}
+            <div className="menu-setup-bottom">
+              <button className="launch-button" disabled={Boolean(multiplayer)||networkPhase==="matching"||Boolean(pendingInviteCode)} onClick={()=>startGame()}>{selectedGameMode==="openworld"?"FOUND DOMINION":"DEPLOY TO THEATER"}</button>
+              {sideTab!=="forces"&&<button type="button" className="menu-forces-link" onClick={()=>setSideTab("forces")}>VIEW INITIAL FORCES →</button>}
+            </div>
           </aside>
         </div>
         </>}
