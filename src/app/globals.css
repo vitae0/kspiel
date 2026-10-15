@@ -464,3 +464,9 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 
 .unit-counter.encircled{outline:2px dashed #eaba7b;outline-offset:3px;box-shadow:inset 0 4px 0 #bd7450,0 0 13px #e3776870}
 .isolated-warning{padding:9px;margin:12px 0;border:1px solid #b97750;background:#3b2720;color:#f1c6a5;font-size:10px;font-weight:700;line-height:1.5}
+
+/* Irregular force identity and theater discovery */
+.irregular-doctrine{margin:10px 0 12px;padding:9px 10px;background:#292f20;color:#d4d9a3;border-left:3px solid #9bb36a;font-size:10px;line-height:1.55;letter-spacing:.015em}
+.scenario-card .scenario-theme{letter-spacing:.065em}
+.scenario-card:has(.scenario-theme) .scenario-side-line{flex-wrap:wrap}
+@media(max-width:780px){.irregular-doctrine{font-size:9px}}
