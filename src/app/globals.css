@@ -436,7 +436,9 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 /* Operational areas are connected territorial polygons with curved edges,
    instead of circles individually stamped around cities and divisions. */
 .territory-layer{mix-blend-mode:multiply;opacity:1}
-.territory-mass path{stroke-width:35;stroke-linejoin:round;stroke-linecap:round;opacity:.35}
+/* Zoomed-out strategic view emphasizes territorial color; the layer itself
+   fades on close zoom, without affecting minimap territory or the terrain. */
+.territory-mass path{stroke-width:35;stroke-linejoin:round;stroke-linecap:round;opacity:.7}
 .territory-mass.blue path{fill:#5888ff;stroke:#5888ff}
 .territory-mass.red path{fill:#e25c5c;stroke:#e25c5c}
 .territory-mass.green path{fill:#58b879;stroke:#58b879}

@@ -1884,6 +1884,13 @@ export default function Home(){
     setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setOpenWorld(null);openWorldRef.current=null;setPendingStrategicBuild(null);setStrategicBuildAnchor(null);
   }
 
+  // Logarithmic zoom mapping keeps the color change perceptible on both
+  // regular theaters and huge maps. At 0.1x territories are strong; at
+  // 1.5x they are barely visible so units and terrain remain readable.
+  const territoryZoomT=clamp(Math.log(Math.max(.1,zoom)/.1)/Math.log(15),0,1);
+  const territoryZoomEase=territoryZoomT*territoryZoomT*(3-2*territoryZoomT);
+  const territoryLayerOpacity=1-.88*territoryZoomEase;
+
   const territoryStep=scenario&&scenario.worldWidth>WORLD_W?560:360;
   const theaterTerritory=useMemo(()=>scenario&&!openWorld?scenarioTerritoryCells(scenario,cities,units,scenario.worldWidth>WORLD_W?560:360):[],[scenario,cities,units,openWorld]);
   const territoryCells=openWorld?.resourceNodes??theaterTerritory;
@@ -2478,7 +2485,7 @@ export default function Home(){
           <defs><linearGradient id="sea" x1="0" x2="1"><stop offset="0" stopColor="#1c313c"/><stop offset="1" stopColor="#29424b"/></linearGradient><linearGradient id="intelShade" x1="0" x2="1"><stop offset="0" stopColor="#71846a" stopOpacity=".08"/><stop offset=".55" stopColor="#151b18" stopOpacity=".22"/><stop offset="1" stopColor="#050806" stopOpacity=".68"/></linearGradient><clipPath id="landClip"><path d={activeScenario.landPath}/></clipPath><mask id="fogMask" maskUnits="userSpaceOnUse"><rect width={mapW} height={mapH} fill="white"/>{blue.map(u=><circle key={"fog-u-"+u.id} cx={u.x} cy={u.y} r={visionRange(u)} fill="black"/>)}{cities.filter(c=>localSides.has(c.owner)).map(c=><circle key={"fog-c-"+c.name} cx={c.x} cy={c.y} r="270" fill="black"/>)}{emplacements.filter(e=>localSides.has(e.side)&&e.kind==="observatory").map(e=><circle key={"fog-e-"+e.id} cx={e.x} cy={e.y} r={e.range} fill="black"/>)}</mask></defs>
           <rect width={mapW} height={mapH} fill="url(#sea)"/><path d={activeScenario.landPath} className="land-base"/>
           {activeScenario.terrainFeatures.map(f=><path key={f.id} d={f.path} className={"terrain-region "+f.terrain}/>)}
-          <g className="territory-layer" clipPath="url(#landClip)">
+          <g className="territory-layer" clipPath="url(#landClip)" style={{opacity:territoryLayerOpacity}}>
             {(["blue","red","green"] as Side[]).map(side=><g key={"zone-"+side} className={"territory-mass "+side}>
               <path d={territoryPaths[side]} fillRule="evenodd"/>
             </g>)}
