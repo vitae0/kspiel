@@ -14,7 +14,7 @@ type Point={x:number;y:number};
 type Props={
  mobilePanel:Panel;setMobilePanel:Dispatch<SetStateAction<Panel>>;
  armyGroups:ArmyGroup[];blue:Formation[];selected:string[];selectGroup:(groupId:string)=>void;
- unitSymbols:boolean;
+ unitSymbols:boolean;setUnitSymbols:Dispatch<SetStateAction<boolean>>;
  pendingMassAttack:boolean;setPendingMassAttack:Dispatch<SetStateAction<boolean>>;
  setMassTargets:Dispatch<SetStateAction<string[]>>;setPendingOrder:Dispatch<SetStateAction<OrderType|null>>;
  setPendingPlan:Dispatch<SetStateAction<boolean>>;massTargets:string[];launchGroupAttack:()=>void;
@@ -35,9 +35,15 @@ export function LeftSidebar({mobilePanel,setMobilePanel,armyGroups,blue,selected
 pendingMassAttack,setPendingMassAttack,setMassTargets,setPendingOrder,setPendingPlan,massTargets,
 launchGroupAttack,frontDirectives,playerSide,units,changeFrontMode,attackPlans,setSelected,executePlan,
 cancelPlan,openWorld,pendingStrategicBuild,setPendingStrategicBuild,setStrategicBuildAnchor,
-setPendingBuild,setConstructionAnchor,localSides,constructionProjects,isMobile,IRREGULAR_TRAITS,onRecruit,unitSymbols}:Props){
+setPendingBuild,setConstructionAnchor,localSides,constructionProjects,isMobile,IRREGULAR_TRAITS,onRecruit,unitSymbols,setUnitSymbols}:Props){
  return <aside className={"left-panel "+(mobilePanel==="forces"?"mobile-open":"")}>
       <button className="mobile-panel-close" onClick={()=>setMobilePanel("none")}>CLOSE</button>
+      <section className="nato-display-settings"><div className="section-title">UNIT DISPLAY</div>
+        <button type="button" className={"nato-display-switch "+(unitSymbols?"active":"")}
+          aria-pressed={unitSymbols} onClick={()=>setUnitSymbols(value=>!value)}>
+          {unitSymbols?"☑ NATO SYMBOLS":"□ NATO SYMBOLS"} <small>{unitSymbols?"SYMBOLS":"TEXT LABELS"}</small>
+        </button>
+      </section>
       <section><div className="section-title">ARMY GROUPS · CTRL+1…6 ASSIGN</div><div className="army-group-grid">{armyGroups.map(g=><button key={g.id} onClick={()=>selectGroup(g.id)} style={{borderLeft:"4px solid "+armyGroupColor(g.id)}}><b>{g.hotkey||"·"}</b><span>{g.name}<small>{blue.filter(u=>u.groupId===g.id).length} formations</small></span></button>)}</div></section>
       <section className="combined-order"><div className="section-title">COORDINATED GROUP ATTACK</div>
         <button className={pendingMassAttack?"active":""} disabled={!selected.length} onClick={()=>{setPendingMassAttack(true);setMassTargets([]);setPendingOrder(null);setPendingPlan(false)}}>H · MARK MULTIPLE ENEMIES</button>
