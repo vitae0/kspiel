@@ -4,6 +4,7 @@ import {type CityState,type Emplacement,type Formation,type Scenario,type Side} 
 import {clamp,segmentContact,segmentsIntersect,segmentIntersectionPoint,nearestCityTo,cityAtPoint,routePosition} from "@/sim/geometry";
 import {DIRECT_COMBAT_KINDS} from "@/sim/rules";
 import {SpatialGrid} from "@/sim/spatial-grid";
+import {territoryOwnerAt} from "@/sim/territory";
 
 export function roadControlPower(u:Formation){
   const role=u.kind==="tank"||u.kind==="armor"||u.kind==="mechanized"?1.2
@@ -293,6 +294,9 @@ export function computeLogisticsLinks(scenario:Scenario,units:Formation[],cities
 
 export function supplyAccess(scenario:Scenario,u:Pick<Formation,"id"|"side"|"kind"|"x"|"y">,units:Formation[],cities:CityState[],network=computeSupplyNetwork(scenario,units,cities),emplacements:Emplacement[]=[],logisticsGraph=computeLogisticsLinks(scenario,units,cities,network,emplacements),openWorld:OpenWorldState|null=null){
   // Newly founded Dominion cities are also real supply hubs.
+  // Encirclement overrides friendly-colored pockets and even nearby depots.
+  const isolated=units.find(unit=>unit.id===u.id)?.isolationHours??0;
+  if(isolated>0)return{level:0,label:"ENCIRCLED · CORRIDOR CUT",supplyPerHour:0,fuelPerHour:0,range:0};
   const city=cityAtPoint(cities,u.x,u.y,70);
   const generatedRoadLink=roadSupplyAccess(u,network);
   const builtRoadLink=builtRoadSupplyAccess(u,units,cities,network,emplacements,openWorld);
@@ -324,6 +328,8 @@ export function supplyAccess(scenario:Scenario,u:Pick<Formation,"id"|"side"|"kin
     return{level:Math.max(1,roadLink.capacity),label:(roadLink.capacity===1?"LOCAL ROAD":"CONNECTED ROAD ×"+roadLink.capacity)+" · "+roadLink.source.name,supplyPerHour:.34+throughput*.38,fuelPerHour:.22+throughput*.27,range:68};
   }
   if(relay)return{level:1,label:"MOBILE LOGISTICS RELAY",supplyPerHour:.34,fuelPerHour:.22,range:relay.range};
+  if(territoryOwnerAt(scenario,cities,units,u.x,u.y)===u.side)
+    return{level:2,label:"SECURE CONTROLLED TERRITORY",supplyPerHour:3.5,fuelPerHour:1.65,range:0};
   return{level:0,label:city?"HOSTILE SUPPLY NODE":"SUPPLY LINE CUT",supplyPerHour:0,fuelPerHour:0,range:0};
 }
 
