@@ -1,4 +1,5 @@
 import {terrainAt,WORLD_H,WORLD_W} from "./game";
+import {groupNearbyFormations} from "./operations";
 import type {CityState,Formation,Scenario,Side,UnitKind} from "./types";
 
 export type OpenWorldBuildKind="infantry_barracks"|"mobile_barracks"|"support_barracks"|"road"|"wall"|"fort"|"city";
@@ -113,7 +114,7 @@ export function createOpenWorldState(scenario:Scenario,units:Formation[],cities:
   }
   return{state:{resources:{
     blue:{manpower:650,materials:500,fuel:280},red:{manpower:650,materials:500,fuel:280},green:{manpower:650,materials:500,fuel:280}
-  },structures,recruitment:[],resourceNodes,territoryClock:0,serial:100},units:[...blue,...red,...green],cities:nextCities};
+  },structures,recruitment:[],resourceNodes,territoryClock:0,serial:100},units:[...groupNearbyFormations(blue,"blue"),...groupNearbyFormations(red,"red"),...groupNearbyFormations(green,"green")],cities:nextCities};
 }
 
 export function queueRecruitment(state:OpenWorldState,side:Side,kind:UnitKind,barracksId:string):OpenWorldState{
@@ -180,12 +181,15 @@ export function advanceOpenWorld(scenario:Scenario,state:OpenWorldState,units:Fo
     });
 
     const scores=state.resourceNodes.map(cell=>{
+      const localTerrain=terrainAt(scenario,cell.x,cell.y).terrain;
+      const terrainReach=localTerrain==="mountain"||localTerrain==="highmountain"?.54:localTerrain==="forest"?.76:localTerrain==="marsh"?.62:1;
+      const terrainFort=localTerrain==="mountain"||localTerrain==="highmountain"?1.25:localTerrain==="urban"?1.15:1;
       const out:Record<Side,number>={blue:0,red:0,green:0};
       for(const side of SIDES){
         let score=0;
 
         for(const city of citiesBySide[side]){
-          const d=Math.hypot(city.x-cell.x,city.y-cell.y),radius=1250;
+          const d=Math.hypot(city.x-cell.x,city.y-cell.y),radius=1250*terrainReach;
           if(d<radius){
             const falloff=1-d/radius;
             score+=3.25*falloff*falloff*(1-Math.min(.55,city.capture/180));
@@ -193,12 +197,12 @@ export function advanceOpenWorld(scenario:Scenario,state:OpenWorldState,units:Fo
         }
 
         for(const unit of unitsBySide[side]){
-          const radius=unitRadius(unit.kind),d=Math.hypot(unit.x-cell.x,unit.y-cell.y);
+          const radius=unitRadius(unit.kind)*terrainReach,d=Math.hypot(unit.x-cell.x,unit.y-cell.y);
           if(d>=radius)continue;
           const falloff=1-d/radius;
           const combatState=(unit.strength/100)*(.3+.7*unit.organization/100)*(.45+.55*unit.supply/100)*(.55+.45*unit.readiness/100);
           const entrenchment=1+Math.min(.22,unit.entrenchment/360);
-          score+=unitRole(unit.kind)*combatState*entrenchment*1.55*falloff*falloff;
+          score+=unitRole(unit.kind)*combatState*entrenchment*terrainFort*1.55*falloff*falloff;
         }
 
         for(const structure of structuresBySide[side]){
@@ -218,7 +222,10 @@ export function advanceOpenWorld(scenario:Scenario,state:OpenWorldState,units:Fo
           if(d<850)score+=(1-d/850)*neighbor.control*.34;
         }
 
-        out[side]=score;
+        // Influence disconnected from a friendly rear city is expensive to maintain.
+        const rear=citiesBySide[side].length?Math.min(...citiesBySide[side].map(c=>Math.hypot(c.x-cell.x,c.y-cell.y))):Infinity;
+        const reach=Number.isFinite(rear)?Math.max(.22,1-rear/5400):.2;
+        out[side]=score*(.45+.55*reach);
       }
       return out;
     });
@@ -247,7 +254,7 @@ export function advanceOpenWorld(scenario:Scenario,state:OpenWorldState,units:Fo
         const superiority=(leader.v-incumbent)/(leader.v+incumbent+.08);
         if(leader.v>.38&&superiority>.06){
           control-=elapsed*(.055+.16*Math.min(1,superiority))*Math.max(.35,pressure);
-          if(control<=.12){owner=leader.side;control=.22+Math.min(.14,pressure*.12)}
+          if(control<=.12&&superiority>.17){owner=leader.side;control=.22+Math.min(.14,pressure*.12)}
         }else{
           const target=Math.max(.18,.42-contested*.16);
           control+=(target-control)*Math.min(1,elapsed*.08);
