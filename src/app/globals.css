@@ -517,7 +517,7 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
   transition:opacity 2.6s ease-in-out;will-change:opacity;
 }
 .menu-theater-scene.is-active{opacity:1}
-.menu-map-art{display:block;width:100%;height:100%;filter:blur(2.3px) saturate(.79) contrast(1.11);transform:scale(1.12)}
+.menu-map-art{display:block;width:100%;height:100%;filter:blur(.7px) saturate(1.16) contrast(1.1) brightness(1.06);transform:scale(1.12)}
 .menu-theater-scene.is-active .menu-map-art{animation:menuTheaterDrift 22s linear forwards}
 @keyframes menuTheaterDrift{
   from{transform:scale(1.17) translate3d(2.6%,1.5%,0)}
@@ -541,9 +541,9 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .menu-atmosphere-wash{
   position:absolute;inset:0;
   background:
-    radial-gradient(ellipse at 53% 28%,#050b0908 3%,#030b0a5c 75%),
-    linear-gradient(90deg,#06100cc9 0%,#0c17139a 32%,#08110ea6 78%,#06100bd7 100%),
-    linear-gradient(180deg,#080e0ab3,transparent 30%,#080d0bc6 100%);
+    radial-gradient(ellipse at 53% 28%,#050b0908 3%,#030b0a18 75%),
+    linear-gradient(90deg,#06100c35 0%,#0c17131c 32%,#08110e19 78%,#06100b4a 100%),
+    linear-gradient(180deg,#080e0a3d,transparent 30%,#080d0b48 100%);
 }
 .menu-map-index{
   position:fixed;bottom:14px;left:clamp(15px,2.5vw,40px);right:clamp(15px,2.5vw,40px);
@@ -557,17 +557,17 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
   position:relative;z-index:1;
   max-width:1510px;margin:0 auto 35px;
   overflow:hidden;
-  background:#0b120ec4;
-  background:linear-gradient(125deg,#0f1a16bd,#101a16ad);
+  background:#0b120e26;
+  background:linear-gradient(125deg,#0f1a162d,#101a1620);
   border:1px solid #aeac815c;
-  box-shadow:0 24px 95px #010705c9,0 0 0 1px #ffffff09 inset;
-  backdrop-filter:blur(13px) saturate(.83);
+  box-shadow:0 18px 65px #01070570,0 0 0 1px #ffffff09 inset;
+  backdrop-filter:blur(1.5px) saturate(1.05);
   -webkit-backdrop-filter:blur(13px) saturate(.83);
 }
 .setup-shell .setup-brand{
   min-height:88px;height:88px;
   gap:15px;
-  background:linear-gradient(90deg,#111d1aab,#10171392);
+  background:linear-gradient(90deg,#111d1a55,#10171336);
   border-bottom:1px solid #ae9b655e;
   padding-inline:clamp(16px,2.6vw,34px);
 }
@@ -607,12 +607,12 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
   min-width:0;
   padding:clamp(20px,3.1vw,40px);
   border-right:1px solid #9d9b7152;
-  background:linear-gradient(90deg,#111b17b2,#111b17a4);
+  background:linear-gradient(90deg,#111b1742,#111b172a);
 }
 .setup-shell .setup-side{
   min-width:0;
   padding:clamp(20px,2.4vw,31px);
-  background:linear-gradient(145deg,#101913da,#101a15be);
+  background:linear-gradient(145deg,#10191375,#101a1562);
 }
 .setup-shell .setup-heading{padding:0 0 12px;border-bottom:1px solid #b3ac7240;margin-bottom:20px}
 .setup-shell .setup-heading>small{
@@ -625,7 +625,7 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .setup-shell .setup-heading p{color:#c5cbbc;max-width:710px;line-height:1.7;font-size:11px}
 .setup-shell .setup-tabs{gap:7px}
 .setup-shell .setup-tabs button{
-  border-color:#9f9b7450;background:#19272099;
+  border-color:#9f9b7450;background:#19272060;
   color:#bfc8b9;
   font-weight:800;font-size:9px;letter-spacing:.06em;
   padding:9px 12px;
@@ -634,7 +634,7 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .setup-shell .setup-tabs button:hover:not(:disabled){background:#3a4737bd;color:#f5edda}
 .setup-shell .setup-tabs button.active{background:#8a794634;border-color:#c7b27d;color:#f5e7bb}
 .setup-shell .scenario-card{
-  background:linear-gradient(145deg,#1e3029e3,#101b17c9);
+  background:linear-gradient(145deg,#1e302976,#101b1760);
   border:1px solid #a4a88355;
   min-height:165px;padding:17px;
   box-shadow:inset 0 1px #ffffff0b;
@@ -642,11 +642,11 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 }
 .setup-shell .scenario-card:hover:not(:disabled){
   transform:translateY(-2px);
-  background:linear-gradient(145deg,#2f4236e8,#18251cdf);
+  background:linear-gradient(145deg,#2f423698,#18251c80);
   border-color:#b6b186;
 }
 .setup-shell .scenario-card.selected{
-  border-color:#d8c487;background:linear-gradient(145deg,#38402bdc,#262b20db);
+  border-color:#d8c487;background:linear-gradient(145deg,#38402ba3,#262b208e);
   box-shadow:inset 0 0 0 1px #d4be7866,0 4px 20px #0005;
 }
 .setup-shell .scenario-card>b{font:700 20px/1.2 Georgia,"Times New Roman",serif;color:#f3ead3}
@@ -654,10 +654,10 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .setup-shell .scenario-theme{border-color:#b2ac795c;background:#1e2a2091;color:#c7c8ad}
 .setup-shell .setup-facts span,.setup-shell .side-choice button,
 .setup-shell .mode-list button,.setup-shell .nickname-field input{
-  background:#17251eb8;border-color:#acaa7859;
+  background:#17251e7d;border-color:#acaa7859;
 }
 .setup-shell .side-choice button.active,.setup-shell .mode-list button.active{
-  background:#55573b58;border-color:#d0ba7b;
+  background:#55573b72;border-color:#d0ba7b;
 }
 .setup-shell .launch-button{
   border:1px solid #e1cb89;
@@ -669,7 +669,7 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 }
 .setup-shell .launch-button:hover:not(:disabled){background:linear-gradient(110deg,#a98e58,#82683c)}
 .setup-shell .launch-button:disabled{filter:grayscale(.65);cursor:not-allowed}
-.setup-shell .openworld-intro{background:#16251dba;border-color:#9b98755e}
+.setup-shell .openworld-intro{background:#16251d70;border-color:#9b98755e}
 .game-shell .brand .command-sigil{width:36px;height:36px}
 @media(max-width:960px){
   .setup-shell .setup-grid{grid-template-columns:1fr}
@@ -704,8 +704,17 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
   .setup-shell .scenario-grid{grid-template-columns:1fr}
   .setup-shell .scenario-card{min-height:140px}
   .menu-map-index{bottom:7px;left:10px;right:10px;font-size:7px;letter-spacing:.09em}
-  .menu-atmosphere-wash{background:linear-gradient(90deg,#06110db8,#0a130fc9),linear-gradient(#06110ba8,#06110b8a)}
+  .menu-atmosphere-wash{background:linear-gradient(90deg,#06110d30,#0a130f40),linear-gradient(#06110b28,#06110b28)}
 }
 @media(prefers-reduced-motion:reduce){
   .menu-theater-scene,.menu-map-art,.setup-shell .scenario-card{animation:none!important;transition:none!important}
 }
+
+/* Map-first war-room glass: high-contrast typography, minimal color obscuration. */
+.setup-shell .setup-heading h1,.setup-shell .scenario-card>b,.setup-shell .setup-side h2,.setup-shell .section-title,.setup-shell .setup-tabs button,.setup-shell .mode-list button,.setup-shell .side-choice button,.setup-shell .setup-facts b{text-shadow:0 1px 4px #000e,0 2px 12px #000a}
+.setup-shell .setup-heading p,.setup-shell .scenario-card>p,.setup-shell .mode-list small{text-shadow:0 1px 5px #000e}
+.menu-sfx-toggle{display:flex;align-items:center;justify-content:center;gap:7px;min-width:92px;padding:10px;border:1px solid #9b90655e;background:#1d292485;color:#e8d8ab;cursor:pointer;font-size:9px;letter-spacing:.09em;font-weight:800}
+.menu-sfx-toggle>span:first-child{font-size:17px;line-height:1}
+.menu-sfx-toggle:hover{background:#34403699;border-color:#c4ad73}
+.menu-sfx-toggle:not(.is-enabled){opacity:.7}
+@media(max-width:760px),(pointer:coarse) and (max-width:1100px){.menu-sfx-toggle{min-width:39px;width:39px;height:39px;padding:4px}.menu-sfx-toggle>span:last-child{display:none}}
