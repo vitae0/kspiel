@@ -1129,3 +1129,24 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 @media(prefers-reduced-motion:reduce){
   .setup-shell .theater-picker.theater-carousel{scroll-behavior:auto}
 }
+
+
+/* Opt-in NATO-style branch insignia. Keeps the faction and army-group colors. */
+.nato-unit-icon{display:inline-block;width:25px;height:18px;color:#f4f3e9;vertical-align:middle;flex:none;filter:drop-shadow(0 1px 1px #111a)}
+.unit-top>.nato-unit-icon{width:24px;height:17px;max-width:calc(100% - 12px)}
+.oob-code>.nato-unit-icon{width:32px;height:23px}
+.big-counter>.nato-unit-icon{width:46px;height:32px}
+.recruit-grid .nato-unit-icon{width:32px;height:22px}
+.nato-toggle{
+  border:1px solid #a49a6b;
+  background:#223127;
+  color:#c6d0be;
+  padding:6px 8px;
+  font-size:9px;
+  font-weight:800;
+  letter-spacing:.08em;
+  cursor:pointer;
+  white-space:nowrap;
+}
+.nato-toggle.active{border-color:#e1c780;color:#ffe2a0;background:#45452c}
+.nato-toggle:hover{border-color:#e0c881;background:#3e4935}
