@@ -5,7 +5,7 @@ export const AMMO_TYPES=new Set<Formation["kind"]>(["mortar","artillery","heavy_
 export const AMMO_BURN:Partial<Record<Formation["kind"],number>>={mortar:8,artillery:6,heavy_artillery:4.8};
 export const SHELL_INTERVAL:Partial<Record<Formation["kind"],number>>={mortar:.34,artillery:.55,heavy_artillery:.82};
 export type GunEvent={
-  id:string;kind:"mortar"|"artillery"|"heavy_artillery";side:Formation["side"];
+  id:string;kind:"rifle"|"mortar"|"artillery"|"heavy_artillery";side:Formation["side"];
   fromX:number;fromY:number;x:number;y:number;birth:number;
 };
 /** Refill is slow away from the network and rapid only with a real supply connection.
@@ -69,4 +69,13 @@ export function marchSlots(units:Formation[],goal:{x:number;y:number},shape:Form
     slots.set(u.id,{x:goal.x+across.x*lateral+forward.x*depth,y:goal.y+across.y*lateral+forward.y*depth});
   });
   return slots;
+}
+
+/** Turns remaining physical material into actual construction progress.
+ * Work that would overshoot the completed building is never charged.
+ */
+export function constructionWork(materials:number|undefined,hours:number,skill:number,budget:number){
+  const stock=clamp(materials??100,0,100);
+  const work=Math.max(0,Math.min(hours*skill,budget,stock/1.65));
+  return{work,remaining:clamp(stock-work*1.65,0,100)};
 }
