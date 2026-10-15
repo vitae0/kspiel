@@ -40,6 +40,35 @@ export function scenarioTerritoryCells(scenario:Scenario,cities:CityState[],unit
   return cells;
 }
 
+/** The same influence-field ownership test used by the colored territory cells,
+ * sampled at an individual unit rather than recomputing the entire map grid.
+ * Gameplay uses this for supply so control is no longer a purely visual layer. */
+export function territoryOwnerAt(scenario:Scenario,cities:CityState[],units:Formation[],x:number,y:number):Side|null{
+  const terrain=terrainAt(scenario,x,y).terrain;
+  if(terrain==="water")return null;
+  const rough=terrain==="mountain"||terrain==="highmountain"?.62:
+    terrain==="forest"||terrain==="marsh"?.82:1;
+  const scores:Record<Side,number>={blue:0,red:0,green:0};
+  for(const city of cities){
+    const d=Math.hypot(city.x-x,city.y-y),radius=1370*rough;
+    if(d<radius)scores[city.owner]+=2.85*Math.pow(1-d/radius,2)*(1-Math.min(.7,city.capture/130));
+  }
+  for(const unit of units){
+    if(unit.strength<=8)continue;
+    const radius=(unit.kind==="recon"?510:unit.kind==="tank"||unit.kind==="armor"||unit.kind==="mechanized"?465:375)*rough;
+    const d=Math.hypot(unit.x-x,unit.y-y);
+    if(d>=radius)continue;
+    const occupying=unit.kind==="logistics"?.14:
+      unit.kind==="artillery"||unit.kind==="heavy_artillery"||unit.kind==="mortar"?.22:
+      unit.kind==="recon"?.55:unit.kind==="tank"||unit.kind==="armor"?.95:1.1;
+    scores[unit.side]+=occupying*Math.pow(1-d/radius,2)*(unit.strength/100)*
+      (.4+.6*unit.organization/100)*(.35+.65*unit.supply/100);
+  }
+  const ranked=SIDES.map(side=>({side,score:scores[side]})).sort((a,b)=>b.score-a.score);
+  const leader=ranked[0],runner=ranked[1],margin=(leader.score-runner.score)/(leader.score+runner.score+.06);
+  return leader.score>.1&&margin>.065?leader.side:null;
+}
+
 type Point={x:number;y:number};
 type Edge={from:Point;to:Point;used:boolean};
 /** Union adjacent ownership cells and round the outline corners. Clip result to land. */
