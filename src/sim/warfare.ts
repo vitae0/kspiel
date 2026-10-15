@@ -50,7 +50,7 @@ export function applyEncirclement(units:Formation[],cities:CityState[],hours:num
       u.morale=clamp((u.morale??82)-hours*(.34+duration/160),0,100);
     }
     // A long-isolated force with no stores or cohesion eventually surrenders.
-    return !(duration>72&&u.supply<5&&u.organization<6&&u.morale<12);
+    return !(duration>72&&u.supply<5&&u.organization<6&&(u.morale??80)<12);
   });
 }
 
