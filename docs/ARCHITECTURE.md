@@ -1,0 +1,23 @@
+# KSpiel code architecture
+
+The simulation has been extracted from the original monolithic `src/app/page.tsx` without altering its rules.
+
+| Module | Responsibility |
+| --- | --- |
+| `src/sim/geometry.ts` | Geometry, path sampling, distances and point helpers |
+| `src/sim/rules.ts` | Static gameplay parameters, combat and movement modifiers |
+| `src/sim/navigation.ts` | Road planning, travel costs and unit routes |
+| `src/sim/logistics.ts` | Supply connectivity, road interdiction, relays, depots |
+| `src/sim/strategy.ts` | Enemy command AI and city capture |
+| `src/sim/simulation.ts` | Tick simulation, combat resolution and unit updates |
+| `src/sim/construction.ts` | Building projects and emplaced weapons |
+| `src/app/ui-utils.ts` | Presentation-only formatting and labels |
+| `src/app/page.tsx` | Match orchestration, React state, input and view |
+
+## Rules for future work
+- Simulation modules must not import React or browser DOM APIs.
+- Modules must avoid circular imports. `geometry` and `rules` are low-level dependencies.
+- Terrain and spatial indexes must preserve the original proximity semantics.
+- Optimize hot paths with benchmarks before changing tactical outcomes.
+- Run `node scripts/smoke-theaters.cjs`, `node scripts/smoke-attrition.cjs`, and `npm run build` on every behavior-affecting change.
+- Treat all performance targets as hypotheses until measured in a production browser profile.
