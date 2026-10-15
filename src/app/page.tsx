@@ -1689,7 +1689,7 @@ export default function Home(){
             const x=rear.x+Math.cos(angle)*radius,y=rear.y+Math.sin(angle)*radius;
             if(terrainAt(scenario,x,y).objective!==rear.name)continue;
             if(nextUnits.some(u=>u.side!==side&&Math.hypot(u.x-x,u.y-y)<170))continue;
-            const nearest=nextUnits.filter(u=>u.side===side&&u.groupId).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0];
+            const nearest=nextUnits.filter(u=>u.side===side&&u.commanderSlot===template.commanderSlot&&u.groupId).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0];
             reserves.push({...template,id:side[0]+"-reserve-"+reserveSerialRef.current+"-"+i,name:"Reserve "+template.name,commanderSlot:template.commanderSlot,
               x,y,groupId:nearest?.groupId??template.groupId,strength:100,supply:94,organization:85,fuel:94,entrenchment:0,order:{type:"defend"}});
           }
@@ -1819,7 +1819,9 @@ export default function Home(){
       const assigned=new Map<Side,number>();
       generated={...generated,formations:generated.formations.map(u=>{
         const index=assigned.get(u.side)??0;assigned.set(u.side,index+1);
-        return{...u,commanderSlot:index%botTeamSize};
+        const commanderSlot=index%botTeamSize;
+        const groupsPerCommander=6/botTeamSize;
+        return{...u,commanderSlot,groupId:u.side+"-army-"+(1+commanderSlot*groupsPerCommander+(Math.floor(index/botTeamSize)%groupsPerCommander))};
       })};
     }
     if(gameMode==="openworld")generated={...generated,presetId:"open-world",title:"Open World Dominion",historical:false,sideNames:{blue:"Blue Dominion",red:"Red Dominion",green:"Green Dominion"},sideFlags:{blue:"generic-blue",red:"generic-red",green:"generic-blue"}};
