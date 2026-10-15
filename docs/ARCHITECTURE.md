@@ -34,3 +34,6 @@ The simulation has been extracted from the original monolithic `src/app/page.tsx
 - Static geography paths are separately memoized. Offscreen army counter DOM nodes are skipped without changing simulation, fog, or minimap rules.
 
 - Tactical supply interdiction queries reuse a spatial hash for nearby units, with an exact baseline parity smoke test that checks nonempty road cuts and preserves accumulation order.
+
+- Open World influence neighbor topology is precomputed and reused until the resource-node geometry changes.
+- Run `npm run bench:sim` for 100/300/500 unit simulation/network CPU timings (not FPS). CI runs a non-gating 100-unit baseline sample.

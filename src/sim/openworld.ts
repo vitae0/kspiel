@@ -1,5 +1,6 @@
 import {terrainAt,WORLD_H,WORLD_W} from "./game";
 import {groupNearbyFormations} from "./operations";
+import {resourceNeighborhoods} from "./territory-neighbors";
 import type {CityState,Formation,Scenario,Side,UnitKind} from "./types";
 
 export type OpenWorldBuildKind="infantry_barracks"|"mobile_barracks"|"support_barracks"|"road"|"wall"|"fort"|"city";
@@ -187,7 +188,8 @@ export function advanceOpenWorld(scenario:Scenario,state:OpenWorldState,units:Fo
       return a&&b&&a.owner===b.owner?a.owner:null;
     });
 
-    const scores=state.resourceNodes.map(cell=>{
+    const neighborhoods=resourceNeighborhoods(scenario,state.resourceNodes);
+    const scores=state.resourceNodes.map((cell,cellIndex)=>{
       const localTerrain=terrainAt(scenario,cell.x,cell.y).terrain;
       const terrainReach=localTerrain==="mountain"||localTerrain==="highmountain"?.54:localTerrain==="forest"?.76:localTerrain==="marsh"?.62:1;
       const terrainFort=localTerrain==="mountain"||localTerrain==="highmountain"?1.25:localTerrain==="urban"?1.15:1;
@@ -223,10 +225,10 @@ export function advanceOpenWorld(scenario:Scenario,state:OpenWorldState,units:Fo
           if(d<170)score+=(1-d/170)*.42;
         }
 
-        for(const neighbor of state.resourceNodes){
-          if(neighbor.id===cell.id||neighbor.owner!==side||neighbor.control<=.08)continue;
-          const d=Math.hypot(neighbor.x-cell.x,neighbor.y-cell.y);
-          if(d<850)score+=(1-d/850)*neighbor.control*.34;
+        for(const {index,distance} of neighborhoods[cellIndex]){
+          const neighbor=state.resourceNodes[index];
+          if(neighbor.owner!==side||neighbor.control<=.08)continue;
+          score+=(1-distance/850)*neighbor.control*.34;
         }
 
         // Influence disconnected from a friendly rear city is expensive to maintain.
