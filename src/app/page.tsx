@@ -3,7 +3,7 @@
 import {useEffect,useMemo,useRef,useState,type MouseEvent as ReactMouseEvent,type PointerEvent as ReactPointerEvent,type WheelEvent as ReactWheelEvent} from "react";
 import {generateScenario,polylinePath,SCENARIO_PRESETS,terrainAt,TERRAIN_RULES,UNIT_LABEL,WORLD_H,WORLD_W} from "@/sim/game";
 import {armyGroupColor,roadVisualPieces} from "@/sim/operations";
-import {AMMO_TYPES,SHELL_INTERVAL,fireBudget,marchPaces,marchSlots,replenish,type GunEvent} from "@/sim/attrition";
+import {AMMO_TYPES,SHELL_INTERVAL,constructionWork,fireBudget,marchPaces,marchSlots,replenish,type GunEvent} from "@/sim/attrition";
 import {advanceDirective,applyEncirclement,decoyVisibleTo,frontAssignments,isDetected,updateContacts,type FrontDirective,type FrontMode,type LastSeenContact,type DecoyContact} from "@/sim/warfare";
 import {startHistory,updateHistory,finishHistory,addBattleEvent,type BattleHistory} from "@/sim/telemetry";
 import AfterActionReport from "./after-action";
@@ -1083,6 +1083,23 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       const aLoss=(bPower*bPosture/Math.max(20,a.defense*aDef+a.entrenchment*(a.kind==="tank"?.45:1.35)))*hours*2.15*(aRetreat?1.2:1);
       const bLoss=(aPower*aPosture/Math.max(20,b.defense*bDef+b.entrenchment*(b.kind==="tank"?.45:1.35)))*hours*2.15*(bRetreat?1.2:1);
       const actualALoss=Math.min(a.strength,aLoss),actualBLoss=Math.min(b.strength,bLoss);
+      // Small-arms skirmishes are visible too, but use quick tracers rather than artillery blasts.
+      if(aPower>0&&aCan){
+        a.shotClock=(a.shotClock??0)+hours;
+        if(a.shotClock>=.27){
+          a.shotClock-=.27;
+          effects?.push({id:a.id+"-rifle-"+b.id+"-"+now,kind:"rifle",side:a.side,
+            fromX:a.x,fromY:a.y,x:b.x,y:b.y,birth:now});
+        }
+      }
+      if(bPower>0&&bCan){
+        b.shotClock=(b.shotClock??0)+hours;
+        if(b.shotClock>=.27){
+          b.shotClock-=.27;
+          effects?.push({id:b.id+"-rifle-"+a.id+"-"+now,kind:"rifle",side:b.side,
+            fromX:b.x,fromY:b.y,x:a.x,y:a.y,birth:now});
+        }
+      }
       a.damageDealt=(a.damageDealt??0)+actualBLoss;
       b.damageDealt=(b.damageDealt??0)+actualALoss;
       a.strength=clamp(a.strength-aLoss,0,100);b.strength=clamp(b.strength-bLoss,0,100);
@@ -1171,7 +1188,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
   return result.filter(u=>u.strength>1);
 }
 
-function applyEmplacementFire(units:Formation[],emplacements:Emplacement[],cities:CityState[],hours:number){
+function applyEmplacementFire(units:Formation[],emplacements:Emplacement[],cities:CityState[],hours:number,effects?:GunEvent[],now=0){
   const result=units.map(u=>({...u,order:u.order?{...u.order}:undefined}));
   for(const emplacement of emplacements){
     if(emplacement.strength<=0)continue;
@@ -1196,9 +1213,19 @@ function applyEmplacementFire(units:Formation[],emplacements:Emplacement[],citie
       .sort((a,b)=>Math.hypot(a.x-emplacement.x,a.y-emplacement.y)-Math.hypot(b.x-emplacement.x,b.y-emplacement.y))[0];
     if(!target)continue;
     const supplied=cities.some(c=>c.owner===emplacement.side&&Math.hypot(c.x-emplacement.x,c.y-emplacement.y)<1150);
+    emplacement.ammo=replenish(emplacement.ammo,supplied?2:0,supplied?100:8,supplied?3:0,hours,"ammo");
+    const volley=fireBudget(emplacement.ammo,"artillery",hours);
+    if(volley.spent<=0)continue;
+    emplacement.ammo=volley.remaining;
     const fireFactor=supplied?1:.32;
-    target.strength=clamp(target.strength-hours*.34*fireFactor,0,100);
-    target.organization=clamp(target.organization-hours*.92*fireFactor,0,100);
+    target.strength=clamp(target.strength-hours*volley.ratio*.34*fireFactor,0,100);
+    target.organization=clamp(target.organization-hours*volley.ratio*.92*fireFactor,0,100);
+    emplacement.shotClock=(emplacement.shotClock??0)+hours*volley.ratio;
+    if(emplacement.shotClock>=.6){
+      emplacement.shotClock-=.6;
+      effects?.push({id:emplacement.id+"-"+now,kind:"artillery",side:emplacement.side,
+        fromX:emplacement.x,fromY:emplacement.y,x:target.x,y:target.y,birth:now});
+    }
   }
   return result.filter(u=>u.strength>1);
 }
@@ -1216,10 +1243,9 @@ function advanceConstruction(projects:ConstructionProject[],emplacements:Emplace
     for(const builder of active){
       if(workBudget<=0||progress>=project.requiredHours)break;
       const skill=builder.kind==="engineer"?4:builder.kind==="logistics"&&project.kind==="road"?1.35:1;
-      const stock=clamp(builder.materials??100,0,100);
-      const work=Math.min(hours*skill,workBudget,project.requiredHours-progress,stock/1.65);
+      const {work,remaining}=constructionWork(builder.materials,hours,skill,Math.min(workBudget,project.requiredHours-progress));
       if(work<=0)continue;
-      builder.materials=clamp(stock-work*1.65,0,100);
+      builder.materials=remaining;
       builder.supply=clamp(builder.supply-work*(project.kind==="fixed_artillery"?.095:project.kind==="supply_depot"?.08:.06),0,100);
       progress+=work;workBudget-=work;
     }
@@ -1227,6 +1253,7 @@ function advanceConstruction(projects:ConstructionProject[],emplacements:Emplace
       nextEmplacements.push({
         id:"em-"+project.id,kind:project.kind,side:project.side,x:project.x,y:project.y,x2:project.x2,y2:project.y2,
         strength:project.kind==="barricade"?145:project.kind==="trench"?125:100,
+        ammo:project.kind==="fixed_artillery"?100:undefined,shotClock:0,
         range:project.kind==="observatory"?1100:project.kind==="fixed_artillery"?860:project.kind==="field_fortification"?125:project.kind==="supply_depot"?540:project.kind==="trench"?85:project.kind==="barricade"?75:0
       });
     }else nextProjects.push({...project,progress});
@@ -1655,7 +1682,12 @@ export default function Home(){
         if(ow.spawned.length)nextUnits=[...nextUnits,...ow.spawned];
         if(ow.newCities.length){citiesRef.current=[...citiesRef.current,...ow.newCities];setCities(citiesRef.current)}
       }
-      nextUnits=applyEmplacementFire(nextUnits,emplacementsRef.current,citiesRef.current,simHours);
+      const batteryEffects:GunEvent[]=[];
+      nextUnits=applyEmplacementFire(nextUnits,emplacementsRef.current,citiesRef.current,simHours,batteryEffects,now);
+      if(batteryEffects.length){
+        gunEffectsRef.current=[...gunEffectsRef.current,...batteryEffects].slice(-100);
+        setGunEffects(gunEffectsRef.current);
+      }
       const built=advanceConstruction(projectsRef.current,emplacementsRef.current,nextUnits,simHours);
       projectsRef.current=built.projects;emplacementsRef.current=built.emplacements;
       setConstructionProjects(built.projects);setEmplacements(built.emplacements);
@@ -2465,7 +2497,7 @@ export default function Home(){
         {units.map(u=>{
           const visible=localSides.has(u.side)||isDetected(u,observerForces,cities,emplacements,activeScenario,playerSide);
           if(!visible)return null;
-          return <button key={u.id} className={"unit-counter "+u.side+" kind-"+u.kind+" "+(selected.includes(u.id)?"selected ":"")+(massTargets.includes(u.id)?"mass-target ":"")+(u.organization<30||(u.suppression??0)>50||(u.morale??82)<25?"shaken ":"")+(u.isolationHours&&u.isolationHours>6?" encircled ":"")+(u.order?.type==="retreat"?"retreating":"")} style={{left:u.x-16,top:u.y-16,background:"linear-gradient(90deg,"+(u.side==="blue"?"#5f8199":u.side==="red"?"#9c5f59":"#71846a")+" 0 50%,"+armyGroupColor(u.groupId)+" 50% 100%)"}} onPointerDown={e=>{if(e.button===2)e.preventDefault();e.stopPropagation()}} onClick={e=>selectUnit(e,u)} onContextMenuCapture={e=>e.preventDefault()} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{localSides.has(u.side)?u.groupId?.split("-").pop()??"·":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
+          return <button key={u.id} className={"unit-counter "+u.side+" kind-"+u.kind+" "+(selected.includes(u.id)?"selected ":"")+(massTargets.includes(u.id)?"mass-target ":"")+(u.organization<30||(u.suppression??0)>50||(u.morale??82)<25?"shaken ":"")+(u.isolationHours&&u.isolationHours>6?" encircled ":"")+(u.order?.type==="retreat"?"retreating":"")+(AMMO_TYPES.has(u.kind)&&(u.ammo??100)<12?" low-ammo":"")} style={{left:u.x-16,top:u.y-16,background:"linear-gradient(90deg,"+(u.side==="blue"?"#5f8199":u.side==="red"?"#9c5f59":"#71846a")+" 0 50%,"+armyGroupColor(u.groupId)+" 50% 100%)"}} onPointerDown={e=>{if(e.button===2)e.preventDefault();e.stopPropagation()}} onClick={e=>selectUnit(e,u)} onContextMenuCapture={e=>e.preventDefault()} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{localSides.has(u.side)?u.groupId?.split("-").pop()??"·":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
         })}
         {revealedContacts.map(c=><div key={"contact-"+c.id} className="stale-contact" style={{left:c.x-17,top:c.y-17,opacity:Math.max(.2,c.confidence)}} title={"LAST CONTACT · "+Math.round((elapsedHoursRef.current-c.seenAt)*10)/10+"h AGO"}><b>?</b><small>{UNIT_LABEL[c.kind]}</small></div>)}
         {decoys.filter(d=>d.owner===playerSide||decoyVisibleTo(d,playerSide,units,activeScenario,elapsedHoursRef.current)).map(d=><div key={d.id} className={"deception-counter "+(d.owner===playerSide?"friendly":"enemy")} style={{left:d.x-16,top:d.y-16}} title={d.owner===playerSide?"Friendly deception marker":"Unconfirmed hostile formation"}><b>{d.owner===playerSide?"△":"INF"}</b><small>{d.owner===playerSide?"DECOY":"?"}</small></div>)}
@@ -2521,6 +2553,8 @@ export default function Home(){
         {IRREGULAR_TRAITS[primary.kind]&&<div className="irregular-doctrine">{IRREGULAR_TRAITS[primary.kind]}</div>}
         <div className="stat-grid"><Stat label="Strength" value={primary.strength}/><Stat label="Organization" value={primary.organization}/><Stat label="Supply" value={primary.supply}/><Stat label="Fuel" value={primary.fuel}/>{AMMO_TYPES.has(primary.kind)&&<Stat label="Ammunition" value={primary.ammo??100}/>}<Stat label="Materials" value={primary.materials??100}/><Stat label="Entrenchment" value={primary.entrenchment}/><Stat label="Readiness" value={primary.readiness}/><Stat label="Morale" value={primary.morale??82}/><Stat label="Suppression" value={primary.suppression??0}/><Stat label="Isolation" value={Math.min(100,(primary.isolationHours??0)*1.15)}/></div>
         <div className="section-title">COMBAT MODEL</div><div className="numbers"><Row k="Manpower" v={primary.manpower.toLocaleString()}/><Row k="Soft attack" v={String(primary.softAttack)}/><Row k="Hard attack" v={String(primary.hardAttack)}/><Row k="Defense" v={String(primary.defense)}/><Row k="Breakthrough" v={String(primary.breakthrough)}/><Row k="Recon" v={String(primary.recon)}/><Row k="Speed" v={primary.speed+" km/h"}/></div>
+        {AMMO_TYPES.has(primary.kind)&&(primary.ammo??100)<8&&<div className="isolated-warning">AMMUNITION DEPLETED · WAIT FOR SUPPLY DELIVERIES BEFORE FIRING AGAIN</div>}
+        {(primary.materials??100)<8&&<div className="isolated-warning">CONSTRUCTION MATERIALS DEPLETED · REPLENISH AT A SUPPLY HUB</div>}
         {(primary.isolationHours??0)>6&&<div className="isolated-warning">ENCIRCLEMENT · {Math.round(primary.isolationHours??0)} HOURS WITHOUT A SAFE CORRIDOR</div>}
         <div className="section-title">SUPPLY ACCESS</div>{primaryAccess&&<div className={"supply-access level-"+primaryAccess.level}><b>{primaryAccess.label}</b><span>{primaryAccess.range>0?"Relay range "+Math.round(primaryAccess.range):primaryAccess.level===0?"Resupply severely limited":"Automatic resupply active"}</span></div>}
         <div className="section-title">FIELD CONSTRUCTION</div><div className="build-controls">
