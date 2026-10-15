@@ -32,6 +32,8 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Scenario runtime smoke test
+        run: node scripts/smoke-theaters.cjs
       - name: Build static site
         run: npm run build
 
