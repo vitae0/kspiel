@@ -17,7 +17,7 @@ export function applyEmplacementFire(units:Formation[],emplacements:Emplacement[
     }
     if(emplacement.kind==="trench"){
       for(const u of result)if(u.side===emplacement.side&&structureSegmentDistance(emplacement,u.x,u.y)<=85){
-        u.entrenchment=clamp(u.entrenchment+hours*.34,0,100);
+        u.entrenchment=clamp(u.entrenchment+hours*.92,0,100);
         u.organization=clamp(u.organization+hours*.08,0,100);
       }
       continue;
@@ -54,11 +54,11 @@ export function advanceConstruction(projects:ConstructionProject[],emplacements:
     const workY=project.y2===undefined?project.y:(project.y+project.y2)*.5;
     const builders=units.filter(u=>project.builderIds.includes(u.id)&&u.side===project.side&&u.strength>8&&(project.kind!=="road"||u.kind==="logistics"));
     const active=builders.filter(u=>Math.hypot(u.x-workX,u.y-workY)<92&&u.supply>12&&!isInCombat(u,units));
-    let workBudget=hours*12;
+    let workBudget=hours*(project.kind==="trench"?27:12);
     let progress=project.progress;
     for(const builder of active){
       if(workBudget<=0||progress>=project.requiredHours)break;
-      const skill=builder.kind==="engineer"?4:builder.kind==="logistics"&&project.kind==="road"?1.35:1;
+      const skill=(builder.kind==="engineer"?4:builder.kind==="logistics"&&project.kind==="road"?1.35:1)*(project.kind==="trench"?2.1:1);
       const {work,remaining}=constructionWork(builder.materials,hours,skill,Math.min(workBudget,project.requiredHours-progress));
       if(work<=0)continue;
       builder.materials=remaining;
