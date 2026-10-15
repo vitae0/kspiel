@@ -7,6 +7,22 @@ export const WORLD_H=5600;
 
 export const SCENARIO_PRESETS:ScenarioPreset[]=[
   {
+    id:"ffa-triad",title:"Triad Basin · 3 Factions",subtitle:"Three equal mountain-ring approaches with distinct supplied headquarters",theme:"steppe",era:"modern",historical:false,
+    location:"Symmetric FFA theater",sideNames:{blue:"Blue Command",red:"Red Command",green:"Green Command"},sideFlags:{blue:"generic-blue",red:"generic-red",green:"generic-green"},
+    cityNames:[]
+  },
+  {
+    id:"ffa-quadrant",title:"Four Crossroads · 4 Factions",subtitle:"Four equal roads into a central contested crossroads",theme:"forest",era:"modern",historical:false,
+    location:"Symmetric FFA theater",sideNames:{blue:"Blue Command",red:"Red Command",green:"Green Command",yellow:"Yellow Command"},sideFlags:{blue:"generic-blue",red:"generic-red",green:"generic-green",yellow:"generic-yellow"},
+    cityNames:[]
+  },
+  {
+    id:"ffa-pentagon",title:"Pentagon Marches · 5 Factions",subtitle:"Five-sided balanced map with independent supply strongholds",theme:"mountain",era:"modern",historical:false,
+    location:"Symmetric FFA theater",sideNames:{blue:"Blue Command",red:"Red Command",green:"Green Command",yellow:"Yellow Command",purple:"Purple Command"},sideFlags:{blue:"generic-blue",red:"generic-red",green:"generic-green",yellow:"generic-yellow",purple:"generic-purple"},
+    cityNames:[]
+  },
+
+  {
     id:"frontier",title:"Frontier War",subtitle:"Balanced fictional operational theater",theme:"mixed",era:"modern",historical:false,
     location:"Fictional continental frontier",sideNames:{blue:"Blue Coalition",red:"Red Coalition"},sideFlags:{blue:"generic-blue",red:"generic-red"},
     cityNames:["Varen","Orlov","Karsen","Drey","Helmstadt","Serev","Vesta","Belgor","Rovina","Tarsk","Miren","Ostrel","Karvin","Dunava","Brask","Velin","Sodra","Narev"]
@@ -750,6 +766,7 @@ function generateGeographicTheater(seed:number,preset:ScenarioPreset,rnd:()=>num
 }
 
 export function generateScenario(seed:number,presetId="frontier"):Scenario{
+  if(presetId==="ffa-triad"||presetId==="ffa-quadrant"||presetId==="ffa-pentagon")return generateFFAScenario(seed,presetId);
   const preset=SCENARIO_PRESETS.find(p=>p.id===presetId)??SCENARIO_PRESETS[0];
   const rnd=mulberry32(seed||1);
   if(preset.id==="spain-1937")return generateSpainScenario(seed,preset,rnd);
@@ -771,5 +788,77 @@ export function generateScenario(seed:number,presetId="frontier"):Scenario{
   for(let y=0;y<=WORLD_H;y+=70)pts.push({x:coastX(coast,y),y});
   shell.landPath="M "+WORLD_W+" 0 L "+coastX(coast,0)+" 0 "+pts.slice(1).map(p=>"L "+p.x.toFixed(1)+" "+p.y).join(" ")+" L "+WORLD_W+" "+WORLD_H+" Z";
   shell.formations=[...makeFormations("blue",shell,rnd),...makeFormations("red",shell,rnd)];
+  return shell;
+}
+
+
+/** Balanced multilateral maps: 3, 4 and 5 independent armies with four supply cities each. */
+export function generateFFAScenario(seed:number,presetId:"ffa-triad"|"ffa-quadrant"|"ffa-pentagon"):Scenario{
+  const count=presetId==="ffa-triad"?3:presetId==="ffa-quadrant"?4:5;
+  const factions:Side[]=["blue","red","green","yellow","purple"].slice(0,count) as Side[];
+  const preset=SCENARIO_PRESETS.find(p=>p.id===presetId)!;
+  const rnd=mulberry32(seed||1);
+  const width=WORLD_W,height=WORLD_H;
+  const center={x:width*.5,y:height*.5};
+  const coast:Scenario["coast"]={base:-1200,amp1:0,amp2:0,amp3:0,f1:0,f2:0,f3:0,p1:0,p2:0};
+  const cities:CityState[]=[];
+  const relief:TerrainFeature[]=[];
+  const roadRoutes:Scenario["roadRoutes"]=[];
+  const angleOffset=-Math.PI/2;
+  const radialOffsets=[
+    {forward:0,lateral:0,label:"Citadel"},
+    {forward:-380,lateral:-340,label:"West Depot"},
+    {forward:-380,lateral:340,label:"East Depot"},
+    {forward:430,lateral:0,label:"Forward Post"}
+  ];
+  const centers:Array<{x:number;y:number}>=[];
+  for(let index=0;index<count;index++){
+    const angle=angleOffset+index*2*Math.PI/count;
+    const ux=Math.cos(angle),uy=Math.sin(angle),tx=-uy,ty=ux;
+    const anchor={x:center.x+2550*ux,y:center.y+1720*uy};
+    centers.push(anchor);
+    const owned:CityState[]=[];
+    for(let n=0;n<radialOffsets.length;n++){
+      const offset=radialOffsets[n];
+      const x=anchor.x+offset.forward*ux+offset.lateral*tx;
+      const y=anchor.y+offset.forward*uy+offset.lateral*ty;
+      const city:CityState={name:(index+1)+"-"+offset.label,x,y,owner:factions[index],capture:0};
+      cities.push(city);owned.push(city);
+    }
+    // A local, intact supply mesh to compensate for having several competing neighbors.
+    for(let j=1;j<owned.length;j++)roadRoutes.push(routeBetween(owned[0],owned[j],rnd));
+    roadRoutes.push(routeBetween(owned[1],owned[2],rnd));
+    roadRoutes.push([{x:owned[3].x,y:owned[3].y},{x:center.x+ux*1000,y:center.y+uy*760},{x:center.x,y:center.y}]);
+    const patches:Array<[TerrainFeature["terrain"],number,number,number,number]>=[
+      ["forest",-750,550,350,300],["hills",-900,-540,490,260],["forest",650,-530,320,250],
+      [presetId==="ffa-pentagon"?"mountain":"hills",-1190,0,290,440]
+    ];
+    for(let j=0;j<patches.length;j++){
+      const [kind,forward,lateral,rx,ry]=patches[j];
+      const x=anchor.x+forward*ux+lateral*tx;
+      const y=anchor.y+forward*uy+lateral*ty;
+      const rotation=angle*180/Math.PI+90;
+      relief.push({id:"ffa-"+index+"-"+j,terrain:kind,cx:x,cy:y,rx,ry,rotation,seed:j+1,
+        path:blobPath(x,y,rx,ry,rotation,j+1)});
+    }
+  }
+  // Connect the outer periphery without privileging any faction.
+  for(let i=0;i<count;i++)roadRoutes.push(routeBetween(centers[i],centers[(i+1)%count],rnd));
+  relief.push({id:"ffa-center",terrain:"hills",cx:center.x,cy:center.y,rx:350,ry:280,rotation:0,seed:21,
+    path:blobPath(center.x,center.y,350,280,0,21)});
+  const shell:Scenario={
+    seed,presetId,title:preset.title,theme:preset.theme,era:preset.era,historical:false,
+    location:preset.location,sideNames:preset.sideNames,sideFlags:preset.sideFlags,
+    worldWidth:width,worldHeight:height,coast,
+    landPath:"M 0 0 H "+width+" V "+height+" H 0 Z",
+    terrainFeatures:relief,cities,
+    roadNodes:cities.map((city,i)=>({id:"ffa-road-"+i,x:city.x,y:city.y,cityName:city.name})),
+    roadRoutes,riverRoutes:[],formations:[]
+  };
+  shell.formations=factions.flatMap(side=>{
+    // Even-numbered slices preserve each class and prevent five-way battles from becoming CPU-bound.
+    const roster=makeFormations(side,shell,rnd).filter((_,i)=>i%2===0);
+    return roster.map((unit,i)=>({...unit,groupId:side+"-army-"+(i%6+1)}));
+  });
   return shell;
 }
