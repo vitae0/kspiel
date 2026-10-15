@@ -1,5 +1,6 @@
 import type {CityState,Formation,Scenario,ScenarioPreset,ScenarioTheme,Side,TerrainFeature,TerrainKind,TerrainSample,UnitKind} from "./types";
 import {groupNearbyFormations} from "./operations";
+import {GEOGRAPHIC_THEATERS,type GeographicTheater} from "./theaters";
 
 export const WORLD_W=8400;
 export const WORLD_H=5600;
@@ -56,6 +57,41 @@ export const SCENARIO_PRESETS:ScenarioPreset[]=[
     cityNames:["A Coruña","Vigo","Santiago","Lugo","Ourense","Pontevedra","Oviedo","Gijón","León","Santander","Bilbao","San Sebastián","Pamplona","Logroño","Burgos","Palencia","Valladolid","Zamora","Salamanca","Segovia","Ávila","Soria","Madrid","Toledo","Guadalajara","Cuenca","Ciudad Real","Cáceres","Badajoz","Mérida","Huelva","Sevilla","Cádiz","Córdoba","Jaén","Granada","Málaga","Almería","Murcia","Cartagena","Albacete","Alicante","Valencia","Castellón","Teruel","Zaragoza","Huesca","Lleida","Tarragona","Barcelona","Girona"]
   },
   {
+    id:"eastern-front-1943",title:"Eastern Front · Dnieper 1943",
+    subtitle:"ENORMOUS 5.8×-area operational theater: Kursk, Kharkiv, the Donbas and the Dnieper. Stylized frontline, rail corridors and deep reserves.",
+    theme:"steppe",era:"modern",historical:true,year:1943,mapScale:2.4,location:"Ukraine and western Russia",
+    sideNames:{blue:"Soviet Fronts",red:"German Army Groups"},sideFlags:{blue:"ussr",red:"germany-ww2"},
+    cityNames:GEOGRAPHIC_THEATERS["eastern-front-1943"].cities.map(city=>city[0])
+  },
+  {
+    id:"balkans-1944",title:"The Balkans · Autumn 1944",
+    subtitle:"ENORMOUS 5×-area theater: Adriatic coast, partisan-held mountain pockets, Serbia and Bulgaria. Fictionalized control lines.",
+    theme:"mountain",era:"modern",historical:true,year:1944,mapScale:2.25,location:"The Balkans",
+    sideNames:{blue:"Allied and Partisan Commands",red:"Axis Commands"},sideFlags:{blue:"generic-blue",red:"axis"},
+    cityNames:GEOGRAPHIC_THEATERS["balkans-1944"].cities.map(city=>city[0])
+  },
+  {
+    id:"italy-1944",title:"Italian Campaign · 1944",
+    subtitle:"Massive peninsula-wide offensive: Gothic Line, Apennine passes and Adriatic/Tyrrhenian routes. Stylized dispositions.",
+    theme:"mixed",era:"modern",historical:true,year:1944,mapScale:2.1,location:"Italian Peninsula",
+    sideNames:{blue:"Allied Forces",red:"German and RSI Forces"},sideFlags:{blue:"britain",red:"germany-ww2"},
+    cityNames:GEOGRAPHIC_THEATERS["italy-1944"].cities.map(city=>city[0])
+  },
+  {
+    id:"yugoslav-partisans-1943",title:"Partisan War · Yugoslavia 1943",
+    subtitle:"GUERRILLA THEATER: mountain sanctuaries, dispersed partisan columns, city garrisons and contested forest roads. Historically inspired, not exact troop dispositions.",
+    theme:"mountain",era:"modern",historical:true,year:1943,mapScale:1.8,warfare:"guerrilla",location:"Yugoslavia",
+    sideNames:{blue:"Yugoslav Partisans",red:"Axis Occupation Forces"},sideFlags:{blue:"generic-blue",red:"germany-ww2"},
+    cityNames:GEOGRAPHIC_THEATERS["yugoslav-partisans-1943"].cities.map(city=>city[0])
+  },
+  {
+    id:"central-highlands-1968",title:"Central Highlands · 1968",
+    subtitle:"GUERRILLA THEATER: patrols, concealed forest columns, militia village defense and exposed supply highways. Fictionalized tactical deployments.",
+    theme:"forest",era:"modern",historical:true,year:1968,mapScale:1.8,warfare:"guerrilla",location:"Central Highlands, Vietnam",
+    sideNames:{blue:"Highlands Insurgents",red:"Government and Allied Forces"},sideFlags:{blue:"generic-blue",red:"usa"},
+    cityNames:GEOGRAPHIC_THEATERS["central-highlands-1968"].cities.map(city=>city[0])
+  },
+  {
     id:"stalingrad-1942",title:"Stalingrad 1942",subtitle:"Urban attritional warfare along the Volga with dense objectives and brutal logistics",theme:"urban",era:"modern",historical:true,year:1942,
     location:"Stalingrad, Soviet Union",sideNames:{blue:"Soviet 62nd Army",red:"German Sixth Army"},sideFlags:{blue:"ussr",red:"germany-ww2"},
     cityNames:["Mamayev Kurgan","Central Station","Grain Elevator","Red October","Barrikady","Tractor Factory","Spartakovka","Rynok","Orlovka","Gumrak","Tsaritsa","Volga Landing","Kuporosnoye","Beketovka","Krasny Oktyabr"]
@@ -90,7 +126,7 @@ export const TERRAIN_RULES:Record<TerrainKind,{label:string;move:number;attack:n
 };
 
 export const UNIT_LABEL:Record<UnitKind,string>={
-  infantry:"INF",mechanized:"MECH",armor:"ARM",tank:"TNK",cavalry:"CAV",mountaineer:"MNT",special_forces:"SOF",
+  infantry:"INF",militia:"MIL",partisan:"PRT",raider:"RDR",mechanized:"MECH",armor:"ARM",tank:"TNK",cavalry:"CAV",mountaineer:"MNT",special_forces:"SOF",
   mortar:"MTR",artillery:"ART",heavy_artillery:"HART",recon:"REC",engineer:"ENG",logistics:"LOG"
 };
 
@@ -337,6 +373,9 @@ function makeRivers(rnd:()=>number,theme:ScenarioTheme){
 function unitBase(kind:UnitKind):Pick<Formation,"manpower"|"hardness"|"softAttack"|"hardAttack"|"defense"|"breakthrough"|"speed"|"recon">{
   const base:Record<UnitKind,Pick<Formation,"manpower"|"hardness"|"softAttack"|"hardAttack"|"defense"|"breakthrough"|"speed"|"recon">>={
     infantry:{manpower:9800,hardness:.12,softAttack:54,hardAttack:18,defense:68,breakthrough:30,speed:4,recon:34},
+    militia:{manpower:3900,hardness:.04,softAttack:29,hardAttack:5,defense:48,breakthrough:14,speed:4.2,recon:26},
+    partisan:{manpower:2600,hardness:.035,softAttack:39,hardAttack:11,defense:58,breakthrough:38,speed:5.5,recon:73},
+    raider:{manpower:1850,hardness:.035,softAttack:32,hardAttack:8,defense:35,breakthrough:55,speed:7.6,recon:84},
     mechanized:{manpower:8200,hardness:.56,softAttack:72,hardAttack:44,defense:64,breakthrough:63,speed:7,recon:48},
     armor:{manpower:6200,hardness:.82,softAttack:68,hardAttack:78,defense:48,breakthrough:88,speed:6,recon:38},
     tank:{manpower:5900,hardness:.88,softAttack:76,hardAttack:86,defense:52,breakthrough:96,speed:6.4,recon:40},
@@ -371,7 +410,34 @@ function unit(id:string,name:string,side:Side,kind:UnitKind,x:number,y:number,rn
 
 function repeated(kind:UnitKind,count:number){return Array.from({length:count},()=>kind)}
 
-function rosterForScenario(scenario:Scenario):UnitKind[]{
+function rosterForScenario(scenario:Scenario,side:Side):UnitKind[]{
+  if(scenario.presetId==="yugoslav-partisans-1943"||scenario.presetId==="central-highlands-1968"){
+    if(side==="blue")return[
+      ...repeated("partisan",23),...repeated("militia",13),...repeated("raider",11),
+      ...repeated("mountaineer",3),...repeated("mortar",3),...repeated("recon",4),...repeated("logistics",3)
+    ];
+    return[
+      ...repeated("infantry",32),...repeated("militia",11),...repeated("mechanized",7),
+      ...repeated("tank",5),...repeated("mortar",7),...repeated("artillery",6),
+      ...repeated("recon",5),...repeated("engineer",4),...repeated("logistics",7)
+    ];
+  }
+  if(scenario.presetId==="eastern-front-1943")return[
+    ...repeated("infantry",45),...repeated("militia",8),...repeated("tank",13),...repeated("mechanized",8),
+    ...repeated("mortar",9),...repeated("artillery",11),...repeated("heavy_artillery",4),
+    ...repeated("recon",6),...repeated("engineer",6),...repeated("logistics",8)
+  ];
+  if(scenario.presetId==="balkans-1944")return[
+    ...repeated("infantry",32),...repeated("militia",9),...repeated("partisan",8),...repeated("raider",5),
+    ...repeated("mountaineer",9),...repeated("cavalry",6),...repeated("tank",5),
+    ...repeated("mortar",8),...repeated("artillery",8),...repeated("recon",6),
+    ...repeated("engineer",5),...repeated("logistics",7)
+  ];
+  if(scenario.presetId==="italy-1944")return[
+    ...repeated("infantry",38),...repeated("militia",6),...repeated("mountaineer",11),...repeated("tank",7),
+    ...repeated("mechanized",7),...repeated("mortar",10),...repeated("artillery",10),
+    ...repeated("heavy_artillery",3),...repeated("recon",5),...repeated("engineer",6),...repeated("logistics",7)
+  ];
   if(scenario.presetId==="spain-1937")return[
     ...repeated("infantry",42),...repeated("mountaineer",8),...repeated("cavalry",6),...repeated("armor",3),
     ...repeated("mortar",8),...repeated("artillery",9),...repeated("heavy_artillery",2),...repeated("recon",4),...repeated("engineer",5),...repeated("logistics",6)
@@ -444,10 +510,10 @@ function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>numbe
 }
 
 function makeFormations(side:Side,scenario:Scenario,rnd:()=>number){
-  const kinds=rosterForScenario(scenario);
+  const kinds=rosterForScenario(scenario,side);
   if(!scenario.cities.some(c=>c.owner===side))return [];
   const labels:Record<UnitKind,string>={
-    infantry:"Infantry",mechanized:"Mechanized",armor:"Armored",tank:"Tank",cavalry:"Cavalry",mountaineer:"Mountain",special_forces:"Special Forces",
+    infantry:"Infantry",militia:"Militia",partisan:"Partisans",raider:"Raiders",mechanized:"Mechanized",armor:"Armored",tank:"Tank",cavalry:"Cavalry",mountaineer:"Mountain",special_forces:"Special Forces",
     mortar:"Mortar",artillery:"Field Artillery",heavy_artillery:"Heavy Artillery",recon:"Recon",engineer:"Engineers",logistics:"Logistics"
   };
   const formations=kinds.map((kind,i)=>{
@@ -594,10 +660,93 @@ function generateSpainScenario(seed:number,preset:ScenarioPreset,rnd:()=>number)
   return shell;
 }
 
+
+function geographicPoint(theater:GeographicTheater,longitude:number,latitude:number,width:number,height:number){
+  const [west,east,south,north]=theater.bounds;
+  const marginX=width*.042,marginY=height*.054;
+  return{x:marginX+(longitude-west)/(east-west)*(width-2*marginX),y:marginY+(north-latitude)/(north-south)*(height-2*marginY)};
+}
+function generateGeographicTheater(seed:number,preset:ScenarioPreset,rnd:()=>number,theater:GeographicTheater):Scenario{
+  const worldWidth=WORLD_W*(preset.mapScale??2),worldHeight=WORLD_H*(preset.mapScale??2);
+  const landPolygon=theater.outline.map(([lon,lat])=>geographicPoint(theater,lon,lat,worldWidth,worldHeight));
+  const canPlace=(x:number,y:number)=>pointInPolygon(x,y,landPolygon);
+  const rawCities=theater.cities.map(([name,longitude,latitude,owner])=>({
+    name,...geographicPoint(theater,longitude,latitude,worldWidth,worldHeight),owner,capture:0
+  }));
+  const relief:TerrainFeature[]=[];let index=0;
+  const add=(terrain:TerrainFeature["terrain"],center:{x:number;y:number},rx:number,ry:number,rotation:number)=>{
+    const s=Math.floor(rnd()*100000);
+    relief.push({id:"regional-"+index++,terrain,cx:center.x,cy:center.y,rx,ry,rotation,seed:s,
+      path:blobPath(center.x,center.y,rx,ry,rotation,s)});
+  };
+  const [west,east,south,north]=theater.bounds;
+  for(const [type,longitude,latitude,radiusLon,radiusLat,rotation] of theater.relief){
+    const center=geographicPoint(theater,longitude,latitude,worldWidth,worldHeight);
+    const rx=Math.max(180,radiusLon/(east-west)*worldWidth*.84),ry=Math.max(180,radiusLat/(north-south)*worldHeight*.83);
+    add(type,center,rx,ry,rotation);
+  }
+  const specs:Record<GeographicTheater["cover"],Array<[TerrainFeature["terrain"],number]>>={
+    forest:[["forest",42],["hills",14],["marsh",6],["mountain",8]],
+    mountain:[["forest",29],["hills",25],["mountain",21],["highmountain",3]],
+    steppe:[["hills",22],["forest",11],["marsh",5]],
+    desert:[["hills",24],["mountain",9]],
+    mixed:[["hills",19],["forest",20],["mountain",12],["marsh",3]]
+  };
+  for(const [type,count] of specs[theater.cover]){
+    for(let i=0;i<Math.round(count*theater.density);i++){
+      let center:{x:number;y:number}|null=null;
+      for(let trial=0;trial<16;trial++){
+        const test={x:worldWidth*(.07+rnd()*.86),y:worldHeight*(.07+rnd()*.86)};
+        if(canPlace(test.x,test.y)){center=test;break}
+      }
+      if(!center)continue;
+      const rx=(type==="highmountain"?210:300)+(rnd()*(type==="forest"?570:680));
+      const ry=(type==="highmountain"?190:290)+rnd()*490;
+      add(type,center,rx,ry,-60+rnd()*120);
+    }
+  }
+  const cities=relocateCitiesOffMountains(rawCities,relief,worldWidth,worldHeight,canPlace);
+  const roadNetwork=makeSpainRoadNetwork(cities,rnd);
+  const extra=new Set(roadNetwork.routes.map(route=>{
+    const a=cities.find(c=>Math.hypot(c.x-route[0].x,c.y-route[0].y)<2);
+    const b=cities.find(c=>Math.hypot(c.x-route[route.length-1].x,c.y-route[route.length-1].y)<2);
+    return [a?.name,b?.name].sort().join("::");
+  }));
+  const byName=new Map(cities.map(c=>[c.name,c]));
+  for(const [nameA,nameB] of theater.trunks){
+    const key=[nameA,nameB].sort().join("::");
+    if(extra.has(key))continue;
+    const a=byName.get(nameA),b=byName.get(nameB);
+    if(a&&b){roadNetwork.routes.push(routeBetween(a,b,rnd));extra.add(key)}
+  }
+  // Ensure all road endpoints use the relocated city locations; keeps logistics consistent.
+  const sourceByName=new Map(rawCities.map(c=>[c.name,c]));
+  for(const route of roadNetwork.routes){
+    for(const endpoint of [0,route.length-1]){
+      const pt=route[endpoint];
+      const source=rawCities.find(city=>Math.hypot(city.x-pt.x,city.y-pt.y)<2);
+      const moved=source?byName.get(source.name):null;
+      if(moved)route[endpoint]={x:moved.x,y:moved.y};
+    }
+  }
+  const rivers=theater.rivers.map(line=>line.map(([lon,lat])=>geographicPoint(theater,lon,lat,worldWidth,worldHeight)));
+  const shell:Scenario={
+    seed,presetId:preset.id,title:preset.title,theme:preset.theme,era:preset.era,historical:preset.historical,year:preset.year,
+    location:preset.location,sideNames:preset.sideNames,sideFlags:preset.sideFlags,worldWidth,worldHeight,
+    landPolygon,coast:{base:-999,amp1:0,amp2:0,amp3:0,f1:0,f2:0,f3:0,p1:0,p2:0},cities,
+    terrainFeatures:relief,roadNodes:cities.map((city,i)=>({id:"road-"+i,x:city.x,y:city.y,cityName:city.name})),
+    roadRoutes:roadNetwork.routes,riverRoutes:rivers,formations:[],landPath:"M "+landPolygon.map(pt=>pt.x.toFixed(1)+" "+pt.y.toFixed(1)).join(" L ")+" Z"
+  };
+  shell.formations=[...makeFormations("blue",shell,rnd),...makeFormations("red",shell,rnd)];
+  return shell;
+}
+
 export function generateScenario(seed:number,presetId="frontier"):Scenario{
   const preset=SCENARIO_PRESETS.find(p=>p.id===presetId)??SCENARIO_PRESETS[0];
   const rnd=mulberry32(seed||1);
   if(preset.id==="spain-1937")return generateSpainScenario(seed,preset,rnd);
+  const geographic=GEOGRAPHIC_THEATERS[preset.id];
+  if(geographic)return generateGeographicTheater(seed,preset,rnd,geographic);
   const coast=coastForTheme(preset.theme,rnd);
   const rawCities=makeCities(rnd,preset);
   const terrainFeatures=makeFeatures(rnd,preset.theme);

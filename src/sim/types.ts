@@ -5,7 +5,7 @@ export type TerrainKind="water"|"plains"|"forest"|"hills"|"mountain"|"highmounta
 export type ScenarioTheme="mixed"|"mountain"|"forest"|"desert"|"winter"|"steppe"|"urban";
 export type Era="medieval"|"early_modern"|"napoleonic"|"industrial"|"modern";
 export type FlagStyle="generic-blue"|"generic-red"|"ussr"|"germany-ww2"|"ottoman"|"crusader"|"sweden"|"imperial"|"france"|"austria"|"russia"|"german-empire"|"britain"|"axis"|"usa"|"spain-republic"|"spain-nationalist";
-export type UnitKind="infantry"|"mechanized"|"armor"|"tank"|"cavalry"|"mountaineer"|"special_forces"|"mortar"|"artillery"|"heavy_artillery"|"recon"|"engineer"|"logistics";
+export type UnitKind="infantry"|"militia"|"partisan"|"raider"|"mechanized"|"armor"|"tank"|"cavalry"|"mountaineer"|"special_forces"|"mortar"|"artillery"|"heavy_artillery"|"recon"|"engineer"|"logistics";
 export type Side="blue"|"red"|"green";
 export type OrderType="move"|"defend"|"assault"|"probe"|"fire"|"resupply"|"dig"|"relieve"|"retreat";
 export type OverlayMode="terrain"|"supply"|"intel";
@@ -31,6 +31,7 @@ export type ScenarioPreset={
   sideFlags:{blue:FlagStyle;red:FlagStyle;green?:FlagStyle};
   cityNames:string[];
   mapScale?:number;
+  warfare?:"conventional"|"guerrilla";
 };
 
 export type CityState={name:string;x:number;y:number;owner:Side;capture:number};
