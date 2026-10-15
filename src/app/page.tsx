@@ -102,6 +102,10 @@ export default function Home(){
   const longPressTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   const suppressContextMenu=useRef(false);
   const viewport=useRef<HTMLDivElement>(null);
+  // Derived view caches avoid conditional React hooks after the setup early return.
+  const networkViewRef=useRef<{scenario:Scenario;units:Formation[];cities:CityState[];value:SupplyNetwork}|null>(null);
+  const linksViewRef=useRef<{network:SupplyNetwork;units:Formation[];cities:CityState[];emplacements:Emplacement[];value:ReturnType<typeof computeLogisticsLinks>}|null>(null);
+  const scoutViewRef=useRef<{scenario:Scenario;units:Formation[];cities:CityState[];emplacements:Emplacement[];side:Side;friendly:Formation[];ids:Set<string>}|null>(null);
   const lastPointerSample=useRef(0);
   const unitsRef=useRef<Formation[]>([]);
   const frontsRef=useRef<FrontDirective[]>([]);
@@ -704,7 +708,10 @@ export default function Home(){
   }
   const activeScenario:Scenario=scenario;
   const mapW=activeScenario.worldWidth,mapH=activeScenario.worldHeight;
-  const currentSupplyNetwork=useMemo(()=>computeSupplyNetwork(activeScenario,units,cities),[activeScenario,units,cities]);
+  const savedNetwork=networkViewRef.current;
+  const currentSupplyNetwork=savedNetwork&&savedNetwork.scenario===activeScenario&&savedNetwork.units===units&&savedNetwork.cities===cities
+    ?savedNetwork.value:computeSupplyNetwork(activeScenario,units,cities);
+  networkViewRef.current={scenario:activeScenario,units,cities,value:currentSupplyNetwork};
 
   function mapPoint(clientX:number,clientY:number){
     const rect=viewport.current?.getBoundingClientRect();if(!rect)return null;
@@ -1200,13 +1207,20 @@ export default function Home(){
     return u.order.type.toUpperCase();
   }
 
-  const currentLogisticsGraph=useMemo(()=>computeLogisticsLinks(activeScenario,units,cities,currentSupplyNetwork,emplacements),[activeScenario,units,cities,currentSupplyNetwork,emplacements]);
+  const savedLinks=linksViewRef.current;
+  const currentLogisticsGraph=savedLinks&&savedLinks.network===currentSupplyNetwork&&savedLinks.units===units&&savedLinks.cities===cities&&savedLinks.emplacements===emplacements
+    ?savedLinks.value:computeLogisticsLinks(activeScenario,units,cities,currentSupplyNetwork,emplacements);
+  linksViewRef.current={network:currentSupplyNetwork,units,cities,emplacements,value:currentLogisticsGraph};
   const primaryAccess=primary?supplyAccess(activeScenario,primary,units,cities,currentSupplyNetwork,emplacements,currentLogisticsGraph,openWorld):null;
   const canRetreat=selectedUnits.some(u=>isInCombat(u,units));
   const activeFront=primary?.groupId?frontDirectives.find(f=>f.groupId===primary.groupId):undefined;
-  const observerForces=useMemo(()=>units.filter(u=>u.side===playerSide),[units,playerSide]);
-  const detectedEnemies=useMemo(()=>new Set(units.filter(u=>u.side!==playerSide&&isDetected(u,observerForces,cities,emplacements,activeScenario,playerSide)).map(u=>u.id)),
-    [units,observerForces,cities,emplacements,activeScenario,playerSide]);
+  const savedScout=scoutViewRef.current;
+  const scoutFresh=savedScout&&savedScout.scenario===activeScenario&&savedScout.units===units&&savedScout.cities===cities
+    &&savedScout.emplacements===emplacements&&savedScout.side===playerSide;
+  const observerForces=scoutFresh?savedScout!.friendly:units.filter(u=>u.side===playerSide);
+  const detectedEnemies=scoutFresh?savedScout!.ids:new Set(units.filter(u=>u.side!==playerSide
+    &&isDetected(u,observerForces,cities,emplacements,activeScenario,playerSide)).map(u=>u.id));
+  scoutViewRef.current={scenario:activeScenario,units,cities,emplacements,side:playerSide,friendly:observerForces,ids:detectedEnemies};
   const revealedContacts=contacts.filter(c=>!detectedEnemies.has(c.id));
 
   return <main className={"game-shell theme-"+activeScenario.theme}>
