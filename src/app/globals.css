@@ -432,3 +432,13 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .guide-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:24px}
 .guide-actions button,.guide-toggle{border:1px solid #746d50;background:#2e3124;padding:7px 10px;cursor:pointer}
 .guide-actions button:disabled{opacity:.35}
+
+/* Operational areas are connected territorial polygons with curved edges,
+   instead of circles individually stamped around cities and divisions. */
+.territory-layer{mix-blend-mode:multiply;opacity:1}
+.territory-mass path{stroke-width:35;stroke-linejoin:round;stroke-linecap:round;opacity:.35}
+.territory-mass.blue path{fill:#5888ff;stroke:#5888ff}
+.territory-mass.red path{fill:#e25c5c;stroke:#e25c5c}
+.territory-mass.green path{fill:#58b879;stroke:#58b879}
+.territory-disputed{fill:#e4d1a4;stroke:#e4d1a4;stroke-width:18;stroke-dasharray:16 12;pointer-events:none}
+.minimap path.territory-mini{stroke:none;opacity:.22}
