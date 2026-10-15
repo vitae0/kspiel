@@ -27,8 +27,8 @@ const SIM_TICK_MS=100;
 const AI_COMMAND_INTERVAL_SECONDS=1.05;
 const MOVEMENT_SCALE=4.2;
 const RETREAT_SUPPLY_MIN=0;
-const DIRECT_COMBAT_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","armor","tank","cavalry","mountaineer","special_forces","recon","engineer"]);
-const CAPTURE_KINDS=new Set<Formation["kind"]>(["infantry","mechanized","tank","cavalry","mountaineer","special_forces","engineer"]);
+const DIRECT_COMBAT_KINDS=new Set<Formation["kind"]>(["infantry","militia","partisan","raider","mechanized","armor","tank","cavalry","mountaineer","special_forces","recon","engineer"]);
+const CAPTURE_KINDS=new Set<Formation["kind"]>(["infantry","militia","partisan","mechanized","tank","cavalry","mountaineer","special_forces","engineer"]);
 const ARTILLERY_KINDS=new Set<Formation["kind"]>(["mortar","artillery","heavy_artillery"]);
 const GUN_ARTILLERY_KINDS=new Set<Formation["kind"]>(["artillery","heavy_artillery"]);
 const MORTAR_BASE_RANGE=980;
@@ -132,7 +132,7 @@ function mortarDispersion(scenario:Scenario,x:number,y:number,rangeRatio=.5){
 function movementSupplyFactor(u:Formation){
   const s=clamp(u.supply/100,0,1);
   if(u.kind==="special_forces")return .9+.1*Math.sqrt(s);
-  if(u.kind==="infantry"||u.kind==="mountaineer"||u.kind==="engineer")return .72+.28*Math.sqrt(s);
+  if(u.kind==="infantry"||u.kind==="mountaineer"||u.kind==="engineer"||u.kind==="militia"||u.kind==="partisan"||u.kind==="raider")return .72+.28*Math.sqrt(s);
   if(u.kind==="cavalry")return .62+.38*Math.sqrt(s);
   if(ARTILLERY_KINDS.has(u.kind))return .38+.62*s;
   if(MOTORIZED_KINDS.has(u.kind))return .42+.58*s;
@@ -183,6 +183,7 @@ function dedupeRoutePoints(points:Array<{x:number;y:number}>){
 function roadControlPower(u:Formation){
   const role=u.kind==="tank"||u.kind==="armor"||u.kind==="mechanized"?1.2
     :u.kind==="infantry"||u.kind==="mountaineer"||u.kind==="special_forces"||u.kind==="engineer"?1
+    :u.kind==="partisan"||u.kind==="raider"?1.2:u.kind==="militia"?.78
     :u.kind==="cavalry"||u.kind==="recon"?.82:.45;
   return role*(u.strength/100)*(u.organization/100)*(.45+u.readiness/180)*(.5+u.supply/200);
 }
@@ -227,6 +228,7 @@ function movementTerrainFactor(u:Formation,terrain:TerrainSample["terrain"]){
   if(terrain==="highmountain"&&u.kind==="mountaineer")return .78;
   if(u.kind==="mountaineer"&&(terrain==="mountain"||terrain==="hills"))return base*1.45;
   if(u.kind==="cavalry"&&(terrain==="plains"||terrain==="desert"))return base*1.28;
+  if((u.kind==="partisan"||u.kind==="raider")&&(terrain==="forest"||terrain==="hills"||terrain==="mountain"))return Math.min(1.04,base*1.52);
   return base;
 }
 
@@ -666,7 +668,7 @@ function updateCities(cities:CityState[],units:Formation[],hours:number):CitySta
 
     const [attackingSide,force]=ranked[0];
     const avgReadiness=force.reduce((sum,u)=>sum+u.readiness,0)/force.length;
-    const infantryWeight=force.reduce((sum,u)=>sum+(u.kind==="infantry"?1.25:u.kind==="engineer"?1.4:1),0);
+    const infantryWeight=force.reduce((sum,u)=>sum+(u.kind==="infantry"?1.25:u.kind==="militia"?1.05:u.kind==="partisan"?1.22:u.kind==="engineer"?1.4:1),0);
     const capture=city.capture+hours*(10+4*Math.sqrt(infantryWeight))*(.5+avgReadiness/210);
     return capture>=100?{...city,owner:attackingSide,capture:0}:{...city,capture};
   });
@@ -695,7 +697,7 @@ function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],side:Sid
     const defenders=hostilePressure(c.x,c.y);
     const support=friendlyPressure(c.x,c.y);
     const crowd=friendly.filter(v=>v.id!==u.id&&v.order?.targetX!==undefined&&v.order?.targetY!==undefined&&Math.hypot(v.order.targetX-c.x,v.order.targetY-c.y)<110).length;
-    const roleBias=u.kind==="recon"?1.18:u.kind==="cavalry"||u.kind==="mechanized"||u.kind==="tank"?1.08:1;
+    const roleBias=u.kind==="recon"?1.18:u.kind==="raider"?.7:u.kind==="partisan"?.91:u.kind==="cavalry"||u.kind==="mechanized"||u.kind==="tank"?1.08:1;
     const stick=current?.name===c.name?1.42:1;
     const spread=1/(1+crowd*.17);
     return roleBias*stick*spread*(1+support*.0045)/(1+d/950)/(1+defenders*.007);
@@ -705,6 +707,14 @@ function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],side:Sid
     if(u.side!==side)return u;
     const nearestHostile=hostile.map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
     if(!nearestHostile)return u;
+    // Irregulars prioritize isolated convoys and vulnerable artillery instead of open-field clashes.
+    if(u.kind==="partisan"||u.kind==="raider"){
+      const rearTarget=hostile.filter(v=>v.kind==="logistics"||ARTILLERY_KINDS.has(v.kind))
+        .map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y)})).filter(v=>v.d<660).sort((a,b)=>a.d-b.d)[0];
+      if(rearTarget&&u.supply>22&&u.organization>34&&nearestHostile.d>250){
+        return{...u,order:{type:"probe",targetUnitId:rearTarget.v.id}};
+      }
+    }
     // Limited deception: only a subset of regular formations diverts to an unverified decoy.
     const isScout=u.kind==="recon";
     const lure=decoys.filter(d=>d.owner!==side&&d.expiresAt>elapsed&&Math.hypot(d.x-u.x,d.y-u.y)<950)
@@ -857,6 +867,16 @@ function resolveReliefs(units:Formation[],cities:CityState[]):Formation[]{
 
 function forageSupply(u:Formation,terrain:TerrainSample["terrain"],inCombat:boolean){
   if(inCombat)return 0;
+  if(u.kind==="partisan"||u.kind==="raider"||u.kind==="militia"){
+    const rate={
+      forest:u.kind==="partisan"?.46:u.kind==="raider"?.37:.15,
+      hills:u.kind==="partisan"?.38:u.kind==="raider"?.29:.12,
+      mountain:u.kind==="partisan"?.32:u.kind==="raider"?.22:.07,
+      highmountain:.08,marsh:u.kind==="partisan"?.28:.11,plains:u.kind==="partisan"?.14:.08,
+      desert:.035,urban:.16,water:0
+    }[terrain];
+    return rate;
+  }
   if(u.kind==="special_forces"){
     const rate={forest:.42,hills:.38,mountain:.34,highmountain:.22,marsh:.28,plains:.18,desert:.08,urban:.12,water:0}[terrain];
     return rate;
@@ -891,7 +911,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     }
 
     const inCombat=isInCombat(u,units);
-    const baselineBurn=(u.kind==="tank"||u.kind==="armor"?1.12:u.kind==="mechanized"?.86:u.kind==="heavy_artillery"?.96:u.kind==="artillery"?.72:u.kind==="mortar"?.62:u.kind==="logistics"?.58:u.kind==="special_forces"?.26:u.kind==="cavalry"?.38:u.kind==="infantry"?.375:.5);
+    const baselineBurn=(u.kind==="tank"||u.kind==="armor"?1.12:u.kind==="mechanized"?.86:u.kind==="heavy_artillery"?.96:u.kind==="artillery"?.72:u.kind==="mortar"?.62:u.kind==="logistics"?.58:u.kind==="special_forces"?.26:u.kind==="partisan"?.19:u.kind==="raider"?.24:u.kind==="militia"?.29:u.kind==="cavalry"?.38:u.kind==="infantry"?.375:.5);
     const harshClimate=sample.terrain==="desert"&&(MOTORIZED_KINDS.has(u.kind)||u.kind==="infantry")?1.16:sample.terrain==="mountain"&&MOTORIZED_KINDS.has(u.kind)?1.22:sample.terrain==="marsh"&&["mechanized","tank","armor"].includes(u.kind)?1.17:1;
     const supplyBurn=baselineBurn*harshClimate*(inCombat?1.72:1)*(scenario.presetId==="open-world"?.55:1);
     n.supply=clamp(n.supply-hours*supplyBurn/Math.max(.38,terrain.supply),0,100);
@@ -944,6 +964,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
         const terrainMove=(sample.terrain==="highmountain"&&u.kind==="mountaineer")?.78
           :(u.kind==="mountaineer"&&(sample.terrain==="mountain"||sample.terrain==="hills"))?terrain.move*1.45
           :(u.kind==="cavalry"&&(sample.terrain==="plains"||sample.terrain==="desert"))?terrain.move*1.28
+          :((u.kind==="partisan"||u.kind==="raider")&&["forest","hills","mountain"].includes(sample.terrain))?Math.min(1.04,terrain.move*1.52)
           :terrain.move;
         const supplyMove=n.order.type==="retreat"?Math.max(.72,movementSupplyFactor(n)):movementSupplyFactor(n);
         const travel=Math.min(dist,u.speed*terrainMove*roadBonus*posture*supplyMove*hours*MOVEMENT_SCALE);
@@ -986,7 +1007,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     }
 
     const special=u.kind==="special_forces";
-    const foot=u.kind==="infantry"||u.kind==="mountaineer"||u.kind==="engineer";
+    const foot=u.kind==="infantry"||u.kind==="mountaineer"||u.kind==="engineer"||u.kind==="militia"||u.kind==="partisan"||u.kind==="raider";
     if(n.supply<25)n.organization=clamp(n.organization-hours*(special?.08:foot?.34:.78),0,100);
     n.organization=clamp(n.organization-hours*(n.suppression??0)*.006,0,100);
     if((n.morale??80)<12&&n.order?.type!=="retreat")n.organization=clamp(n.organization-hours*.7,0,100);
@@ -1024,11 +1045,19 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
         }
         return factor;
       };
-      const aDef=TERRAIN_RULES[terrainAt(scenario,a.x,a.y).terrain].defense*aWall*fieldDefense(a,b);
-      const bDef=TERRAIN_RULES[terrainAt(scenario,b.x,b.y).terrain].defense*bWall*fieldDefense(b,a);
+      const aTerrain=terrainAt(scenario,a.x,a.y).terrain,bTerrain=terrainAt(scenario,b.x,b.y).terrain;
+      const irregularCover=(u:Formation,t:TerrainSample["terrain"])=>
+        u.kind==="partisan"?(["forest","hills","mountain","marsh"].includes(t)?1.33:.82)
+        :u.kind==="raider"?(["forest","hills","mountain"].includes(t)?1.15:.76)
+        :u.kind==="militia"?(t==="urban"?1.38:t==="forest"?1.13:1):1;
+      const irregularAmbush=(u:Formation,t:TerrainSample["terrain"],target:Formation)=>
+        (u.kind==="partisan"||u.kind==="raider")&&["forest","hills","mountain","marsh"].includes(t)
+        ?(u.kind==="partisan"?1.36:1.52)*(target.recon>65?.8:1):1;
+      const aDef=TERRAIN_RULES[aTerrain].defense*aWall*fieldDefense(a,b)*irregularCover(a,aTerrain);
+      const bDef=TERRAIN_RULES[bTerrain].defense*bWall*fieldDefense(b,a)*irregularCover(b,bTerrain);
       const aRetreat=a.order?.type==="retreat",bRetreat=b.order?.type==="retreat";
-      const aPower=aCan&&!aRetreat?(a.softAttack*(1-b.hardness)+a.hardAttack*b.hardness)*(a.organization/100)*(a.supply/100)*(1-(a.suppression??0)*.006)*(0.6+(a.morale??82)/205):0;
-      const bPower=bCan&&!bRetreat?(b.softAttack*(1-a.hardness)+b.hardAttack*a.hardness)*(b.organization/100)*(b.supply/100)*(1-(b.suppression??0)*.006)*(0.6+(b.morale??82)/205):0;
+      const aPower=aCan&&!aRetreat?(a.softAttack*(1-b.hardness)+a.hardAttack*b.hardness)*(a.organization/100)*(a.supply/100)*(1-(a.suppression??0)*.006)*(0.6+(a.morale??82)/205)*irregularAmbush(a,aTerrain,b):0;
+      const bPower=bCan&&!bRetreat?(b.softAttack*(1-a.hardness)+b.hardAttack*a.hardness)*(b.organization/100)*(b.supply/100)*(1-(b.suppression??0)*.006)*(0.6+(b.morale??82)/205)*irregularAmbush(b,bTerrain,a):0;
       const aPosture=a.order?.type==="assault"?1.22:a.order?.type==="probe"?.76:1;
       const bPosture=b.order?.type==="assault"?1.22:b.order?.type==="probe"?.76:1;
       const aLoss=(bPower*bPosture/Math.max(20,a.defense*aDef+a.entrenchment*(a.kind==="tank"?.45:1.35)))*hours*2.15*(aRetreat?1.2:1);
@@ -1037,7 +1066,9 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       a.damageDealt=(a.damageDealt??0)+actualBLoss;
       b.damageDealt=(b.damageDealt??0)+actualALoss;
       a.strength=clamp(a.strength-aLoss,0,100);b.strength=clamp(b.strength-bLoss,0,100);
+      if(irregularAmbush(b,bTerrain,a)>1)a.suppression=clamp((a.suppression??0)+actualALoss*1.7,0,100);
       a.morale=clamp((a.morale??82)-actualALoss*.38,0,100);
+      if(irregularAmbush(a,aTerrain,b)>1)b.suppression=clamp((b.suppression??0)+actualBLoss*1.7,0,100);
       b.morale=clamp((b.morale??82)-actualBLoss*.38,0,100);
       a.organization=clamp(a.organization-aLoss*1.9,0,100);b.organization=clamp(b.organization-bLoss*1.9,0,100);
     }
@@ -1187,7 +1218,7 @@ export default function Home(){
   const [openWorld,setOpenWorld]=useState<OpenWorldState|null>(null);
   const [pendingStrategicBuild,setPendingStrategicBuild]=useState<OpenWorldBuildKind|null>(null);
   const [strategicBuildAnchor,setStrategicBuildAnchor]=useState<{x:number;y:number}|null>(null);
-  const [setupCategory,setSetupCategory]=useState<"all"|"fictional"|"historical">("all");
+  const [setupCategory,setSetupCategory]=useState<"all"|"fictional"|"historical"|"mega"|"guerrilla">("all");
   const [playerSide,setPlayerSide]=useState<Side>("blue");
   const [emplacements,setEmplacements]=useState<Emplacement[]>([]);
   const [constructionProjects,setConstructionProjects]=useState<ConstructionProject[]>([]);
@@ -1745,7 +1776,9 @@ export default function Home(){
   const theaterTerritory=useMemo(()=>scenario&&!openWorld?scenarioTerritoryCells(scenario,cities,units,scenario.worldWidth>WORLD_W?560:360):[],[scenario,cities,units,openWorld]);
 
   if(!scenario){
-    const presets=SCENARIO_PRESETS.filter(p=>setupCategory==="all"||setupCategory==="historical"===p.historical);
+    const presets=SCENARIO_PRESETS.filter(p=>setupCategory==="all"||
+      (setupCategory==="historical"&&p.historical)||(setupCategory==="fictional"&&!p.historical)||
+      (setupCategory==="mega"&&(p.mapScale??1)>=2)||(setupCategory==="guerrilla"&&p.warfare==="guerrilla"));
     const selectedPreset=SCENARIO_PRESETS.find(p=>p.id===selectedPresetId)??SCENARIO_PRESETS[0];
     return <main className="setup-shell">
       <div className="setup-panel">
@@ -1754,9 +1787,9 @@ export default function Home(){
           <section className="setup-main">
             <div className="setup-heading"><small>CREATE GAME</small><h1>{selectedGameMode==="openworld"?"Build a dominion":"Choose a theater"}</h1><p>{selectedGameMode==="openworld"?"Expand territory, exploit resources automatically, build infrastructure and raise new armies against multiple rivals.":"Terrain now changes the roster, mobility, visibility and logistics. Historical presets are stylized scenarios, not exact order-of-battle reconstructions."}</p></div>
             <div className="setup-tabs"><button disabled={Boolean(multiplayer)} className={selectedGameMode==="scenario"?"active":""} onClick={()=>setSelectedGameMode("scenario")}>SCENARIO WAR</button><button disabled={Boolean(multiplayer)} className={selectedGameMode==="openworld"?"active":""} onClick={()=>{setSelectedGameMode("openworld");setSelectedPresetId("frontier")}}>OPEN WORLD</button></div>
-            <div className="setup-tabs"><button className={setupCategory==="all"?"active":""} onClick={()=>setSetupCategory("all")}>ALL</button><button className={setupCategory==="fictional"?"active":""} onClick={()=>setSetupCategory("fictional")}>FICTIONAL</button><button className={setupCategory==="historical"?"active":""} onClick={()=>setSetupCategory("historical")}>HISTORICAL</button></div>
+            <div className="setup-tabs"><button className={setupCategory==="all"?"active":""} onClick={()=>setSetupCategory("all")}>ALL</button><button className={setupCategory==="fictional"?"active":""} onClick={()=>setSetupCategory("fictional")}>FICTIONAL</button><button className={setupCategory==="historical"?"active":""} onClick={()=>setSetupCategory("historical")}>HISTORICAL</button><button className={setupCategory==="mega"?"active":""} onClick={()=>setSetupCategory("mega")}>MEGA MAPS</button><button className={setupCategory==="guerrilla"?"active":""} onClick={()=>setSetupCategory("guerrilla")}>GUERRILLA</button></div>
             {selectedGameMode==="scenario"&&<div className="scenario-grid">{presets.map(preset=><button key={preset.id} disabled={Boolean(multiplayer)} className={"scenario-card theme-"+preset.theme+" "+(selectedPresetId===preset.id?"selected":"")} onClick={()=>{setSelectedPresetId(preset.id);setPlayerSide("blue")}}>
-              <span className="scenario-theme">{preset.theme.toUpperCase()} · {preset.era.replace("_"," ").toUpperCase()}</span><b>{preset.title}</b><small>{preset.location}{preset.year?" · "+preset.year:""}</small><p>{preset.subtitle}</p>
+              <span className="scenario-theme">{preset.warfare==="guerrilla"?"⚑ GUERRILLA · ": (preset.mapScale??1)>=2?"◈ MEGA MAP · ":""}{preset.theme.toUpperCase()} · {preset.era.replace("_"," ").toUpperCase()}</span><b>{preset.title}</b><small>{preset.location}{preset.year?" · "+preset.year:""}</small><p>{preset.subtitle}</p>
               <span className="scenario-side-line"><span><Flag styleName={preset.sideFlags.blue}/>{preset.sideNames.blue}</span><i>VS</i><span><Flag styleName={preset.sideFlags.red}/>{preset.sideNames.red}</span></span>
             </button>)}</div>}
             {selectedGameMode==="openworld"&&<div className="openworld-intro"><b>OPEN WORLD DOMINION</b><p>Three rival powers. No fixed front. Territory itself is the objective.</p><span>Automatic regional resources · 3 barracks families · dynamic settlements · roads · walls · forts · generous supply · minimap</span></div>}
@@ -2297,7 +2330,7 @@ export default function Home(){
         </div>)}{!frontDirectives.some(f=>f.side===playerSide)&&<small className="muted-line">Draw a front using CTRL + drag to create a persistent army command.</small>}</div>
       </section>
       <section><div className="section-title">ATTACK PLANS · B THEN RMB</div><div className="plan-list">{attackPlans.length?attackPlans.map(p=><div className={"plan-row "+p.status} key={p.id}><button onClick={()=>setSelected(p.formationIds)}><b>{p.name}</b><small>{p.formationIds.length} formations · {p.status}</small></button>{p.status==="draft"&&<button onClick={()=>executePlan(p.id)}>GO</button>}<button onClick={()=>cancelPlan(p.id)}>×</button></div>):<small className="muted-line">No plans drafted.</small>}</div></section>
-      {openWorld&&<section className="openworld-panel"><div className="section-title">DOMINION</div><div className="resource-strip"><b>MP {Math.floor(openWorld.resources[playerSide].manpower)}</b><b>MAT {Math.floor(openWorld.resources[playerSide].materials)}</b><b>FUEL {Math.floor(openWorld.resources[playerSide].fuel)}</b></div><div className="section-title">RAISE FORMATIONS</div><div className="recruit-grid">{(["infantry","mountaineer","special_forces","engineer","cavalry","recon","mechanized","tank","mortar","artillery","heavy_artillery","logistics"] as Formation["kind"][]).map(kind=>{const cost=UNIT_COST[kind];const barracks=openWorld.structures.find(b=>b.side===playerSide&&b.kind===cost?.family);return <button key={kind} disabled={!cost||!barracks} onClick={()=>{if(!cost||!barracks)return;const next=queueRecruitment(openWorldRef.current!,playerSide,kind,barracks.id);openWorldRef.current=next;setOpenWorld(next)}}><b>{UNIT_LABEL[kind]}</b><small>{cost?cost.manpower+" MP · "+cost.materials+" MAT · "+cost.fuel+" F":"—"}</small></button>})}</div><div className="section-title">BUILD</div><div className="strategic-build-grid">{(["infantry_barracks","mobile_barracks","support_barracks","city","fort","wall"] as OpenWorldBuildKind[]).map(kind=><button key={kind} className={pendingStrategicBuild===kind?"active":""} onClick={()=>{setPendingStrategicBuild(kind);setStrategicBuildAnchor(null);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);setConstructionAnchor(null)}}>{kind.replaceAll("_"," ").toUpperCase()}</button>)}</div><small className="muted-line">Roads are built by logistics formations. Owned territory yields resources automatically.</small></section>}
+      {openWorld&&<section className="openworld-panel"><div className="section-title">DOMINION</div><div className="resource-strip"><b>MP {Math.floor(openWorld.resources[playerSide].manpower)}</b><b>MAT {Math.floor(openWorld.resources[playerSide].materials)}</b><b>FUEL {Math.floor(openWorld.resources[playerSide].fuel)}</b></div><div className="section-title">RAISE FORMATIONS</div><div className="recruit-grid">{(["infantry","militia","partisan","raider","mountaineer","special_forces","engineer","cavalry","recon","mechanized","tank","mortar","artillery","heavy_artillery","logistics"] as Formation["kind"][]).map(kind=>{const cost=UNIT_COST[kind];const barracks=openWorld.structures.find(b=>b.side===playerSide&&b.kind===cost?.family);return <button key={kind} disabled={!cost||!barracks} onClick={()=>{if(!cost||!barracks)return;const next=queueRecruitment(openWorldRef.current!,playerSide,kind,barracks.id);openWorldRef.current=next;setOpenWorld(next)}}><b>{UNIT_LABEL[kind]}</b><small>{cost?cost.manpower+" MP · "+cost.materials+" MAT · "+cost.fuel+" F":"—"}</small></button>})}</div><div className="section-title">BUILD</div><div className="strategic-build-grid">{(["infantry_barracks","mobile_barracks","support_barracks","city","fort","wall"] as OpenWorldBuildKind[]).map(kind=><button key={kind} className={pendingStrategicBuild===kind?"active":""} onClick={()=>{setPendingStrategicBuild(kind);setStrategicBuildAnchor(null);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);setConstructionAnchor(null)}}>{kind.replaceAll("_"," ").toUpperCase()}</button>)}</div><small className="muted-line">Roads are built by logistics formations. Owned territory yields resources automatically.</small></section>}
       <section><div className="section-title">FIELD WORKS</div><div className="construction-list">{constructionProjects.length?constructionProjects.filter(p=>localSides.has(p.side)).map(project=><div className="construction-row" key={project.id}><b>{constructionLabel(project.kind)}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span><i><em style={{width:Math.min(100,project.progress/project.requiredHours*100)+"%"}}/></i></div>):<small className="muted-line">No active construction.</small>}</div></section>
       <section><div className="section-title">ORDER OF BATTLE</div><div className="oob-list">{blue.map(u=><button key={u.id} onClick={()=>{setSelected([u.id]);if(isMobile)setMobilePanel("unit")}} className={selected.includes(u.id)?"selected":""}><span className="oob-code">{UNIT_LABEL[u.kind]}</span><span><b>{u.name}</b><small>{pct(u.strength)} STR · {pct(u.organization)} ORG</small></span></button>)}</div></section>
     </aside>

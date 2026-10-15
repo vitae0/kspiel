@@ -55,7 +55,7 @@ export function applyEncirclement(units:Formation[],cities:CityState[],hours:num
 }
 
 export function reconRange(u:Formation,scenario:Scenario){
-  const kind=u.kind==="recon"?1080:u.kind==="special_forces"?760:u.kind==="cavalry"?600:u.kind==="artillery"||u.kind==="heavy_artillery"?340:470;
+  const kind=u.kind==="recon"?1080:u.kind==="raider"?770:u.kind==="partisan"?740:u.kind==="special_forces"?760:u.kind==="cavalry"?600:u.kind==="artillery"||u.kind==="heavy_artillery"?340:470;
   const sample=terrainAt(scenario,u.x,u.y).terrain;
   const terrainFactor=sample==="forest"?.7:sample==="mountain"?.84:sample==="highmountain"?.9:sample==="marsh"?.7:1;
   return kind*terrainFactor*(.55+.45*u.organization/100)*(u.supply<12?.7:1);
@@ -64,7 +64,7 @@ export function isDetected(enemy:Formation,friendly:Formation[],cities:CityState
   if(enemy.side===side)return true;
   const terrain=terrainAt(scenario,enemy.x,enemy.y).terrain;
   const conceal=terrain==="forest"?.68:terrain==="marsh"?.73:terrain==="mountain"?.85:1;
-  const concealKind=enemy.kind==="special_forces"?.74:enemy.kind==="recon"?.9:1;
+  const concealKind=enemy.kind==="partisan"?.48:enemy.kind==="raider"?.62:enemy.kind==="militia"?.96:enemy.kind==="special_forces"?.74:enemy.kind==="recon"?.9:1;
   if(friendly.some(u=>u.side===side&&u.strength>6&&dist(u,enemy)<reconRange(u,scenario)*conceal*concealKind))return true;
   if(cities.some(c=>c.owner===side&&dist(c,enemy)<230*conceal))return true;
   return emplacements.some(e=>e.side===side&&e.kind==="observatory"&&e.strength>0&&dist(e,enemy)<e.range*conceal);

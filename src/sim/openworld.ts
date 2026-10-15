@@ -40,6 +40,9 @@ function safeSpawnNear(scenario:Scenario,x:number,y:number,hasSupply:(x:number,y
 
 export const UNIT_COST:Partial<Record<UnitKind,{family:"infantry_barracks"|"mobile_barracks"|"support_barracks";manpower:number;materials:number;fuel:number;hours:number}>>={
   infantry:{family:"infantry_barracks",manpower:90,materials:35,fuel:0,hours:10},
+  militia:{family:"infantry_barracks",manpower:42,materials:15,fuel:0,hours:4},
+  partisan:{family:"infantry_barracks",manpower:64,materials:26,fuel:0,hours:8},
+  raider:{family:"infantry_barracks",manpower:52,materials:38,fuel:0,hours:7},
   mountaineer:{family:"infantry_barracks",manpower:105,materials:45,fuel:0,hours:13},
   special_forces:{family:"infantry_barracks",manpower:120,materials:65,fuel:5,hours:18},
   engineer:{family:"infantry_barracks",manpower:80,materials:55,fuel:0,hours:12},
@@ -60,6 +63,9 @@ const WORLD_FALLBACK_X=WORLD_W*.5, WORLD_FALLBACK_Y=WORLD_H*.5;
 function mkUnit(kind:UnitKind,side:Side,x:number,y:number,id:string):Formation{
   const base={
     infantry:[100,18,4,22,12,5,.08,18,8],
+    militia:[72,12,2,18,9,5,.04,16,8],
+    partisan:[58,19,5,26,18,7,.04,55,11],
+    raider:[45,17,4,16,26,10,.035,66,12],
     mountaineer:[95,19,5,24,14,5,.08,20,10],
     special_forces:[85,24,10,22,18,6,.12,28,14],
     engineer:[80,15,5,20,11,5,.08,16,8],
