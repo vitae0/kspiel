@@ -1,4 +1,5 @@
 import type {ArmyGroup,GameCommand,MatchConfig,MatchMode,Side} from "./types";
+import {recommendedArmyGroupCount} from "./operations";
 
 export const LOCAL_PLAYER_ID="local";
 
@@ -37,8 +38,10 @@ export function canPlayerCommand(config:MatchConfig,playerId:string,side:Side){
 export function commandIsAuthorized(config:MatchConfig,command:GameCommand){
   return canPlayerCommand(config,command.playerId,command.side);
 }
-export function defaultArmyGroups(side:Side):ArmyGroup[]{
-  return Array.from({length:6},(_,i)=>({id:side+"-army-"+(i+1),name:(i+1)+ordinal(i+1)+" Army",side,hotkey:i+1}));
+export function defaultArmyGroups(side:Side,unitCount=96):ArmyGroup[]{
+  return Array.from({length:recommendedArmyGroupCount(unitCount)},(_,i)=>({
+    id:side+"-army-"+(i+1),name:(i+1)+ordinal(i+1)+" Army",side,hotkey:i<6?i+1:0
+  }));
 }
 function ordinal(n:number){
   const mod100=n%100;if(mod100>=11&&mod100<=13)return"th";
