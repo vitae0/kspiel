@@ -16,7 +16,7 @@ type Props={
  marchShape:FormationShape;setMarchShape:Dispatch<SetStateAction<FormationShape>>;
  armyGroups:ArmyGroup[];assignGroup:(groupId:string)=>void;
  frontToolActive:boolean;setFrontToolActive:Dispatch<SetStateAction<boolean>>;
- setPendingMassAttack:Dispatch<SetStateAction<boolean>>;setPendingOrder:Dispatch<SetStateAction<OrderType|null>>;
+ setPendingMassAttack:Dispatch<SetStateAction<boolean>>;pendingOrder:OrderType|null;setPendingOrder:Dispatch<SetStateAction<OrderType|null>>;
  activeFront:FrontDirective|undefined;changeFrontMode:(groupId:string,mode:FrontMode|"stop")=>void;
  pendingDecoy:boolean;setPendingDecoy:Dispatch<SetStateAction<boolean>>;
  setPendingPlan:Dispatch<SetStateAction<boolean>>;
@@ -28,7 +28,7 @@ type Props={
 /** Selected unit details and command controls, isolated from map renderer internals. */
 export function UnitInspector({openWorld,primary,cities,playerSide,orderLabel,primaryAccess,selectedUnits,
 pendingBuild,armConstruction,marchShape,setMarchShape,armyGroups,assignGroup,frontToolActive,
-setFrontToolActive,setPendingMassAttack,setPendingOrder,activeFront,changeFrontMode,pendingDecoy,
+setFrontToolActive,setPendingMassAttack,pendingOrder,setPendingOrder,activeFront,changeFrontMode,pendingDecoy,
 setPendingDecoy,setPendingPlan,pendingMassAttack,setMassTargets,pendingPlan,startOrder,canRetreat,
 arrangeFormation,IRREGULAR_TRAITS}:Props){
  return <aside className="right-panel">

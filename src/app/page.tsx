@@ -1321,7 +1321,7 @@ export default function Home(){
     <UnitInspector {...{
       openWorld,primary,cities,playerSide,orderLabel,primaryAccess,selectedUnits,
       pendingBuild,armConstruction,marchShape,setMarchShape,armyGroups,assignGroup,
-      frontToolActive,setFrontToolActive,setPendingMassAttack,setPendingOrder,
+      frontToolActive,setFrontToolActive,setPendingMassAttack,pendingOrder,setPendingOrder,
       activeFront,changeFrontMode,pendingDecoy,setPendingDecoy,setPendingPlan,
       pendingMassAttack,setMassTargets,pendingPlan,startOrder,canRetreat,arrangeFormation,
       IRREGULAR_TRAITS
