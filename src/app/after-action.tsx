@@ -10,7 +10,8 @@ const METRICS:Record<NumericMetric,{label:string;unit?:string}>={
   supply:{label:"Average supply",unit:"%"},organization:{label:"Army organization",unit:"%"},morale:{label:"Average morale",unit:"%"},
   isolated:{label:"Encircled formations"},territory:{label:"Controlled territory index"},dealt:{label:"Combat damage inflicted"},
   losses:{label:"Formations lost"},casualties:{label:"Estimated personnel casualties"},reinforcements:{label:"Formations reinforced"},
-  captures:{label:"City captures"},construction:{label:"Completed fieldworks"},resources:{label:"Resource stockpiles"},
+  captures:{label:"City captures"},construction:{label:"Completed fieldworks"},resources:{label:"Total resource stockpiles"},
+  manpowerStock:{label:"Manpower reserves"},materialsStock:{label:"Construction materials"},fuelStock:{label:"Fuel reserves"},
   shortage:{label:"Formations short on supply"}
 };
 const TABS=["OVERVIEW","MILITARY","LOGISTICS","TERRITORY","TIMELINE"] as const;
@@ -18,7 +19,7 @@ type Tab=typeof TABS[number];
 const CHARTS:Record<Exclude<Tab,"TIMELINE">,NumericMetric[]>={
   OVERVIEW:["effectiveStrength","cities","units","dealt"],
   MILITARY:["units","effectiveStrength","dealt","casualties","organization","morale","losses","reinforcements"],
-  LOGISTICS:["supply","shortage","isolated","resources","morale","reinforcements"],
+  LOGISTICS:["supply","shortage","isolated","morale","reinforcements","resources","manpowerStock","materialsStock","fuelStock"],
   TERRITORY:["territory","cities","captures","construction"]
 };
 const SIDES:Side[]=["blue","red","green"];
@@ -73,15 +74,22 @@ export default function AfterActionReport({history,winner,playerSide,onExit}:{hi
         {tab==="MILITARY"&&<><section className="aar-table-wrap"><h2>MILITARY LOSSES & COMBAT PERFORMANCE</h2><table className="aar-table"><thead><tr><th>FACTION</th><th>PERSONNEL CASUALTIES*</th><th>FORMATIONS LOST</th><th>REINFORCEMENTS</th><th>DAMAGE INFLICTED</th><th>SUPPRESSION INFLICTED</th></tr></thead><tbody>
           {SIDES.map(side=><tr key={side}><td>{side.toUpperCase()}</td><td>{format(history.totals[side].casualties)}</td><td>{history.totals[side].losses}</td><td>{history.totals[side].reinforcements}</td><td>{format(history.totals[side].damage,1)}</td><td>{format(history.totals[side].suppression,1)}</td></tr>)}
         </tbody></table><small>* Estimates, not audited casualty counts. Damage uses accumulated formation-strength points.</small></section>
-        <section className="aar-table-wrap"><h2>TOP FORMATIONS BY INFLICTED DAMAGE</h2><table className="aar-table"><thead><tr><th>FORMATION</th><th>FACTION</th><th>TYPE</th><th>DAMAGE</th><th>SUPPRESSION</th><th>STATUS</th></tr></thead><tbody>{leaders.map(u=><tr key={u.id}><td>{u.name}</td><td>{u.side.toUpperCase()}</td><td>{u.kind.toUpperCase()}</td><td>{format(u.damage,1)}</td><td>{format(u.suppression,1)}</td><td>{u.active?"SURVIVED":"LOST"}</td></tr>)}</tbody></table></section></>}
-        {tab==="LOGISTICS"&&<section className="aar-table-wrap"><h2>SUPPLY, MORALE & REAR AREAS</h2><table className="aar-table"><thead><tr><th>FACTION</th><th>AVG SUPPLY</th><th>SHORTAGE UNIT-HOURS</th><th>ENCIRCLED UNIT-HOURS</th><th>AVG MORALE</th><th>RESOURCE STOCK</th></tr></thead><tbody>
-          {SIDES.map(side=><tr key={side}><td>{side.toUpperCase()}</td><td>{format(final.values[side].supply,1)}%</td><td>{format(history.totals[side].shortageHours,1)}</td><td>{format(history.totals[side].isolatedHours,1)}</td><td>{format(final.values[side].morale,1)}%</td><td>{format(final.values[side].resources)}</td></tr>)}
+        <section className="aar-table-wrap"><h2>TOP FORMATIONS BY INFLICTED DAMAGE</h2><table className="aar-table"><thead><tr><th>FORMATION</th><th>FACTION</th><th>TYPE</th><th>DAMAGE</th><th>SUPPRESSION</th><th>STATUS</th></tr></thead><tbody>{leaders.map(u=><tr key={u.id}><td>{u.name}</td><td>{u.side.toUpperCase()}</td><td>{u.kind.toUpperCase()}</td><td>{format(u.damage,1)}</td><td>{format(u.suppression,1)}</td><td>{u.active?"SURVIVED":"LOST"}</td></tr>)}</tbody></table></section>
+        <section className="aar-table-wrap"><h2>FORMATION-TYPE PERFORMANCE</h2><table className="aar-table">
+          <thead><tr><th>TYPE</th><th>DEPLOYED</th><th>LOST</th><th>DAMAGE</th><th>SUPPRESSION</th></tr></thead>
+          <tbody>{[...new Set(history.records.map(u=>u.kind))].sort().map(kind=>{
+            const roster=history.records.filter(u=>u.kind===kind);
+            return <tr key={kind}><td>{kind.toUpperCase()}</td><td>{roster.length}</td><td>{roster.filter(u=>!u.active).length}</td>
+              <td>{format(roster.reduce((s,u)=>s+u.damage,0),1)}</td><td>{format(roster.reduce((s,u)=>s+u.suppression,0),1)}</td></tr>
+          })}</tbody></table></section></>}
+        {tab==="LOGISTICS"&&<section className="aar-table-wrap"><h2>SUPPLY, MORALE & REAR AREAS</h2><table className="aar-table"><thead><tr><th>FACTION</th><th>AVG SUPPLY</th><th>SHORTAGE UNIT-HOURS</th><th>ENCIRCLED UNIT-HOURS</th><th>AVG MORALE</th><th>MP</th><th>MAT</th><th>FUEL</th></tr></thead><tbody>
+          {SIDES.map(side=><tr key={side}><td>{side.toUpperCase()}</td><td>{format(final.values[side].supply,1)}%</td><td>{format(history.totals[side].shortageHours,1)}</td><td>{format(history.totals[side].isolatedHours,1)}</td><td>{format(final.values[side].morale,1)}%</td><td>{format(final.values[side].manpowerStock)}</td><td>{format(final.values[side].materialsStock)}</td><td>{format(final.values[side].fuelStock)}</td></tr>)}
         </tbody></table></section>}
         {tab==="TERRITORY"&&<section className="aar-table-wrap"><h2>CONTROL & INFRASTRUCTURE</h2><table className="aar-table"><thead><tr><th>FACTION</th><th>INITIAL CITIES</th><th>FINAL CITIES</th><th>CAPTURES</th><th>TERRITORY INDEX</th><th>FIELDWORKS</th></tr></thead><tbody>
           {SIDES.map(side=><tr key={side}><td>{side.toUpperCase()}</td><td>{history.startingCities[side]}</td><td>{final.values[side].cities}</td><td>{history.totals[side].captures}</td><td>{format(final.values[side].territory,1)}</td><td>{history.totals[side].construction}</td></tr>)}
         </tbody></table></section>}
         {tab==="TIMELINE"?<section className="aar-table-wrap aar-event-section"><h2>CHRONICLE OF THE BATTLE ({history.events.length} EVENTS)</h2>{history.events.length?history.events.slice().reverse().map((event,i)=><div key={i} className="aar-event"><time>{format(event.hour,1)}H</time><span style={{color:COLORS[event.side]}}>{event.side.toUpperCase()}</span><b>{event.title}</b><small>{event.kind.toUpperCase()}</small></div>):<p>No major events recorded.</p>}</section>
-        :<div className="aar-charts">{CHARTS[tab].filter(metric=>metric!=="resources"||SIDES.some(side=>final.values[side].resources>0)).map(metric=><TrendChart key={metric} history={history} metric={metric} sides={visible}/>)}</div>}
+        :<div className="aar-charts">{CHARTS[tab].filter(metric=>!["resources","manpowerStock","materialsStock","fuelStock"].includes(metric)||SIDES.some(side=>final.values[side].resources>0)).map(metric=><TrendChart key={metric} history={history} metric={metric} sides={visible}/>)}</div>}
         <footer className="aar-footer"><small>Score is a KSpiel comparative index, not the Age of Empires scoring formula. Events and trend data were recorded during play.</small><button onClick={onExit}>CLOSE REPORT / MAIN MENU</button></footer>
       </div>
     </div>

@@ -4,7 +4,7 @@ import {SIDES} from "./warfare";
 
 export type StatSide={side:Side;units:number;effectiveStrength:number;cities:number;supply:number;organization:number;morale:number;isolated:number;
   territory:number;dealt:number;losses:number;casualties:number;reinforcements:number;captures:number;construction:number;
-  resources:number;shortage:number;};
+  resources:number;manpowerStock:number;materialsStock:number;fuelStock:number;shortage:number;};
 export type BattleSample={hour:number;values:Record<Side,StatSide>};
 export type BattleEvent={hour:number;side:Side;kind:"capture"|"lost"|"reinforcements"|"front"|"construction"|"surrender"|"intel";title:string};
 export type UnitRecord={id:string;name:string;side:Side;kind:UnitKind;damage:number;suppression:number;initialStrength:number;lastStrength:number;active:boolean};
@@ -35,7 +35,8 @@ export function appendSample(history:BattleHistory,hour:number,units:Formation[]
       territory:openWorld?.resourceNodes.filter(c=>c.owner===side).reduce((s,c)=>s+c.control,0)??cities.filter(c=>c.owner===side).length,
       dealt:totals.damage,losses:totals.losses,casualties:totals.casualties,reinforcements:totals.reinforcements,captures:totals.captures,
       construction:totals.construction,resources:openWorld?Object.values(openWorld.resources[side]).reduce((s,n)=>s+n,0):0,
-      shortage:own.filter(u=>u.supply<20).length};
+      manpowerStock:openWorld?.resources[side].manpower??0,materialsStock:openWorld?.resources[side].materials??0,
+      fuelStock:openWorld?.resources[side].fuel??0,shortage:own.filter(u=>u.supply<20).length};
   }
   history.samples.push({hour,values});history.lastSampleHour=hour;
   // Keep an actual time series without unbounded memory growth in long Dominion sessions.

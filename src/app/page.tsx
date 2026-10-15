@@ -1239,7 +1239,12 @@ export default function Home(){
   const snapshotSeqRef=useRef(0);
   const latestSnapshotRef=useRef<MultiplayerSnapshot|null>(null);
   latestSnapshotRef.current={seq:0,units,cities,attackPlans,emplacements,constructionProjects,hour,day,running,speed,warResult,
-    frontDirectives,decoys,battleHistory:battleReport??undefined};
+    frontDirectives,decoys,battleHistory:battleReport?{
+      ...battleReport,
+      samples:battleReport.samples.filter((_,i)=>i===battleReport.samples.length-1||i%Math.max(1,Math.ceil(battleReport.samples.length/120))===0),
+      events:battleReport.events.slice(-100),
+      records:[...battleReport.records].sort((a,b)=>b.damage-a.damage).slice(0,120)
+    }:undefined};
 
   useEffect(()=>{
     const saved=window.localStorage.getItem("kspiel.nickname");
