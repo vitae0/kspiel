@@ -597,6 +597,7 @@ export default function Home(){
     setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setMobilePanel("none");
     if(gameMode==="openworld"){
       const ow=createOpenWorldState(generated,generated.formations,generated.cities);openWorldRef.current=ow.state;setOpenWorld(ow.state);
+      initialCountRef.current={blue:ow.units.filter(u=>u.side==="blue").length,red:ow.units.filter(u=>u.side==="red").length,green:ow.units.filter(u=>u.side==="green").length};
       setScenario(generated);setUnits(ow.units);unitsRef.current=ow.units;setCities(ow.cities);citiesRef.current=ow.cities;
       historyRef.current=startHistory(generated.title,seed,ow.units,ow.cities,ow.state);
     }else{
