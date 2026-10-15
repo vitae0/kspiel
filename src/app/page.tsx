@@ -1461,10 +1461,53 @@ export default function Home(){
       const realSeconds=Math.min(MAX_FRAME_SECONDS,Math.max(0,(now-last)/1000));last=now;aiElapsed+=realSeconds;
       const simHours=realSeconds*SIM_HOURS_PER_REAL_SECOND*SPEED_MULTIPLIER[speed];
 
+      const beforeUnits=unitsRef.current,beforeCities=citiesRef.current,beforeEmplacements=emplacementsRef.current;
       let working=unitsRef.current;
       if(aiElapsed>=AI_COMMAND_INTERVAL_SECONDS){for(const side of botSides)working=enemyAI(scenario,working,citiesRef.current,side);aiElapsed=0}
       let nextUnits=simulate(scenario,working,simHours,citiesRef.current,emplacementsRef.current,openWorldRef.current);
       elapsedHoursRef.current+=simHours;
+      if(elapsedHoursRef.current-lastEncirclementRef.current>=1.0){
+        nextUnits=applyEncirclement(nextUnits,citiesRef.current,elapsedHoursRef.current-lastEncirclementRef.current);
+        lastEncirclementRef.current=elapsedHoursRef.current;
+      }
+      if(elapsedHoursRef.current-lastOperationalRef.current>=3.5&&frontsRef.current.length){
+        const nextPlans:FrontDirective[]=[];
+        const ordered=new Map<string,Formation>();
+        for(const front of frontsRef.current){
+          const moved=advanceDirective(front,elapsedHoursRef.current-lastOperationalRef.current,nextUnits,citiesRef.current,scenario);
+          nextPlans.push({...moved,lastIssued:elapsedHoursRef.current});
+          const assignments=frontAssignments(moved,nextUnits,citiesRef.current,scenario);
+          for(const assignment of assignments){
+            const unit=nextUnits.find(u=>u.id===assignment.unitId);
+            if(!unit||unit.order?.type==="retreat"||unit.organization<16||unit.strength<10)continue;
+            const objective={x:assignment.x,y:assignment.y};
+            const targetEnemies=nextUnits.filter(u=>u.side!==unit.side&&u.strength>5);
+            const range=unit.kind==="heavy_artillery"?820:unit.kind==="artillery"?540:unit.kind==="mortar"?mortarMaxRange(scenario,unit):0;
+            const shooting=range>0?targetEnemies.filter(e=>Math.hypot(unit.x-e.x,unit.y-e.y)<range*.94)
+              .sort((a,b)=>Math.hypot(unit.x-a.x,unit.y-a.y)-Math.hypot(unit.x-b.x,unit.y-b.y))[0]:undefined;
+            if(shooting){ordered.set(unit.id,{...unit,order:unit.kind==="mortar"?{type:"fire",targetX:shooting.x,targetY:shooting.y}:{type:"fire",targetUnitId:shooting.id}});continue}
+            const gap=Math.hypot(unit.x-objective.x,unit.y-objective.y);
+            const oldGoal=unit.order?.waypoints?.length?unit.order.waypoints[unit.order.waypoints.length-1]:unit.order;
+            if(gap<60){if(assignment.role==="line"&&moved.mode==="hold")ordered.set(unit.id,{...unit,order:{type:"dig"}});continue}
+            if(oldGoal?.targetX!==undefined&&oldGoal?.targetY!==undefined&&Math.hypot(oldGoal.targetX-objective.x,oldGoal.targetY-objective.y)<95)continue;
+            const route=movementRoutePlan(scenario,citiesRef.current,unit,{x:unit.x,y:unit.y},objective,emplacementsRef.current,openWorldRef.current,
+              moved.mode==="retreat"?[]:nextUnits.filter(u=>u.side!==unit.side));
+            const [first,...rest]=route;
+            ordered.set(unit.id,{...unit,order:first?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest}:{type:"move",targetX:objective.x,targetY:objective.y}});
+          }
+        }
+        if(ordered.size)nextUnits=nextUnits.map(unit=>ordered.get(unit.id)??unit);
+        frontsRef.current=nextPlans;setFrontDirectives(nextPlans);
+        lastOperationalRef.current=elapsedHoursRef.current;
+      }
+      if(elapsedHoursRef.current-lastIntelRef.current>=.8){
+        const nextContacts=updateContacts(contactsRef.current,nextUnits,citiesRef.current,emplacementsRef.current,scenario,
+          multiplayerRef.current?.side??playerSide,elapsedHoursRef.current);
+        contactsRef.current=nextContacts;setContacts(nextContacts);
+        const activeDecoys=decoysRef.current.filter(decoy=>decoy.expiresAt>elapsedHoursRef.current);
+        if(activeDecoys.length!==decoysRef.current.length){decoysRef.current=activeDecoys;setDecoys(activeDecoys)}
+        lastIntelRef.current=elapsedHoursRef.current;
+      }
       if(!openWorldRef.current&&elapsedHoursRef.current>=96){
         for(const side of ["blue","red"] as Side[]){
           const original=initialCountRef.current[side];
@@ -1512,11 +1555,17 @@ export default function Home(){
       projectsRef.current=built.projects;emplacementsRef.current=built.emplacements;
       setConstructionProjects(built.projects);setEmplacements(built.emplacements);
       const nextCities=updateCities(citiesRef.current,nextUnits,simHours);
+      if(historyRef.current){
+        const previousIds=new Set(beforeEmplacements.map(e=>e.id));
+        const constructed=built.emplacements.filter(e=>!previousIds.has(e.id)).map(e=>({side:e.side,kind:e.kind}));
+        updateHistory(historyRef.current,beforeUnits,nextUnits,beforeCities,nextCities,elapsedHoursRef.current,simHours,openWorldRef.current,constructed);
+      }
       unitsRef.current=nextUnits;citiesRef.current=nextCities;setUnits(nextUnits);setCities(nextCities);
 
       const owners=new Set(nextCities.map(c=>c.owner));
       if(!openWorldRef.current&&nextCities.length>0&&owners.size===1&&!warResultRef.current){
         const winner=nextCities[0].owner;warResultRef.current=winner;setWarResult(winner);setRunning(false);
+        if(historyRef.current)setBattleReport(finishHistory(historyRef.current,elapsedHoursRef.current,nextUnits,nextCities,openWorldRef.current,"All strategic cities captured"));
       }
 
       setHour(prev=>{const total=prev+simHours;if(total>=24){setDay(d=>d+Math.floor(total/24));return total%24}return total});
