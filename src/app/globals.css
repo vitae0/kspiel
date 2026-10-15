@@ -1050,3 +1050,82 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .menu-room-team-choice button{display:flex;align-items:center;gap:7px;font-size:9px;padding:8px;border:1px solid #8a866b;background:#1c2923b4;cursor:pointer}
 .menu-room-team-choice button.active{border-color:#dfc382;background:#656043a3}
 .menu-room-empty{padding:15px 12px;border:1px dashed #b29d70;color:#d3c7aa;line-height:1.55;font-size:10px}
+
+
+/* Continuous horizontal browsing replaces paginated theater cards.
+ * Only this strip scrolls. The menu itself remains fixed to the viewport. */
+.setup-shell .theater-list{min-width:0;min-height:0;overflow:hidden}
+.setup-shell .theater-picker.theater-carousel{
+  display:flex;
+  flex-flow:row nowrap;
+  justify-content:flex-start;
+  align-items:stretch;
+  gap:clamp(8px,1vw,15px);
+  grid-template-columns:none;
+  grid-auto-rows:auto;
+  flex:1 1 auto;
+  min-width:0;
+  min-height:0;
+  height:0;
+  width:100%;
+  padding:3px 4px 9px 2px;
+  margin:0;
+  overflow-x:auto;
+  overflow-y:hidden;
+  scroll-snap-type:x proximity;
+  scroll-padding-inline:2px;
+  overscroll-behavior-x:contain;
+  scrollbar-width:thin;
+  scrollbar-color:#a69b6b85 #15221b5e;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-x pinch-zoom;
+  cursor:grab;
+}
+.setup-shell .theater-picker.theater-carousel::-webkit-scrollbar{height:6px}
+.setup-shell .theater-picker.theater-carousel::-webkit-scrollbar-track{background:#15221b64}
+.setup-shell .theater-picker.theater-carousel::-webkit-scrollbar-thumb{background:#a69b6b8c;border-radius:8px}
+.setup-shell .theater-picker.theater-carousel.is-dragging{cursor:grabbing;scroll-snap-type:none;user-select:none}
+.setup-shell .theater-picker.theater-carousel:focus-visible{outline:1px solid #ccbc85;outline-offset:-1px}
+.setup-shell .theater-picker.theater-carousel .theater-option{
+  display:flex;
+  flex:0 0 clamp(260px,39%,440px);
+  width:auto;
+  max-width:calc(100% - 12px);
+  min-width:0;
+  height:100%;
+  min-height:0;
+  scroll-snap-align:start;
+  overflow:hidden;
+}
+.setup-shell .theater-picker.theater-carousel.is-dragging .theater-option{
+  pointer-events:none;
+}
+.setup-shell .theater-scroll-hint{
+  display:flex;
+  flex:none;
+  justify-content:space-between;
+  gap:8px;
+  padding:6px 4px 2px;
+  color:#e3d2a4;
+  letter-spacing:.12em;
+  font-size:8px;
+  font-weight:800;
+  text-shadow:0 1px 4px #000;
+}
+@media(max-width:900px){
+  .setup-shell .theater-picker.theater-carousel{
+    display:flex;grid-template-columns:none;
+    scroll-snap-type:x proximity;
+    gap:9px;
+  }
+  .setup-shell .theater-picker.theater-carousel .theater-option{
+    flex:0 0 min(82vw,390px);
+    max-width:calc(100% - 12px);
+  }
+}
+@media(max-width:480px){
+  .setup-shell .theater-picker.theater-carousel .theater-option{flex-basis:86%}
+}
+@media(prefers-reduced-motion:reduce){
+  .setup-shell .theater-picker.theater-carousel{scroll-behavior:auto}
+}
