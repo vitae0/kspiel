@@ -538,7 +538,7 @@ export default function Home(){
 
     if(type==="retreat"){
       commitUnits(prev=>prev.map(u=>{
-        if(!selected.includes(u.id)||u.supply<RETREAT_SUPPLY_MIN||!isInCombat(u,prev))return u;
+        if(!selected.includes(u.id)||u.supply<RETREAT_SUPPLY_MIN)return u;
         const d=retreatDestination(u,prev,citiesRef.current);
         return{...u,supply:clamp(u.supply-10,0,100),order:{type:"retreat",targetX:d.x,targetY:d.y}};
       }));
@@ -1212,7 +1212,7 @@ export default function Home(){
     ?savedLinks.value:computeLogisticsLinks(activeScenario,units,cities,currentSupplyNetwork,emplacements);
   linksViewRef.current={network:currentSupplyNetwork,units,cities,emplacements,value:currentLogisticsGraph};
   const primaryAccess=primary?supplyAccess(activeScenario,primary,units,cities,currentSupplyNetwork,emplacements,currentLogisticsGraph,openWorld):null;
-  const canRetreat=selectedUnits.some(u=>isInCombat(u,units));
+  const canRetreat=selectedUnits.some(u=>u.order?.type!=="retreat"&&cities.some(c=>c.owner===u.side));
   const activeFront=primary?.groupId?frontDirectives.find(f=>f.groupId===primary.groupId):undefined;
   const savedScout=scoutViewRef.current;
   const scoutFresh=savedScout&&savedScout.scenario===activeScenario&&savedScout.units===units&&savedScout.cities===cities
