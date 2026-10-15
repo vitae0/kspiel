@@ -1,6 +1,6 @@
 "use client";
 
-import {useEffect,useMemo,useRef,useState} from "react";
+import {useEffect,useMemo,useRef,useState,type PointerEvent as ReactPointerEvent,type MouseEvent as ReactMouseEvent,type KeyboardEvent as ReactKeyboardEvent} from "react";
 import {generateScenario,polylinePath,presetRoster,UNIT_LABEL} from "@/sim/game";
 import {createOpenWorldState} from "@/sim/openworld";
 import {scenarioTerritoryCells} from "@/sim/territory";
@@ -130,63 +130,115 @@ function TheaterThumbnail({presetId,mode,priority=false}:{presetId:string;mode:M
 export function MapSelection({presets,selectedPresetId,onSelect,mode,locked=false}:{
   presets:ScenarioPreset[];selectedPresetId:string;onSelect:(id:string)=>void;mode:MapMode;locked?:boolean;
 }){
-  const [page,setPage]=useState(0);
-  const [pageSize,setPageSize]=useState(2);
+  const strip=useRef<HTMLDivElement|null>(null);
+  const drag=useRef<{pointerId:number;startX:number;scrollLeft:number;moved:boolean}|null>(null);
+  const suppressClick=useRef(false);
+
+  // Mouse wheels browse horizontally over the strip, but native touchpad
+  // horizontal gestures and mobile swipes remain handled by the browser.
   useEffect(()=>{
-    const resize=()=>{
-      const width=window.innerWidth,height=window.innerHeight;
-      setPageSize(width<=900?1:height>=1030&&width>=1260?4:2);
+    const element=strip.current;
+    if(!element)return;
+    const onWheel=(event:WheelEvent)=>{
+      if(event.ctrlKey||event.metaKey||event.altKey)return;
+      if(Math.abs(event.deltaX)>=Math.abs(event.deltaY))return;
+      if(element.scrollWidth<=element.clientWidth)return;
+      event.preventDefault();
+      element.scrollLeft+=event.deltaY;
     };
-    resize();
-    window.addEventListener("resize",resize);
-    return()=>window.removeEventListener("resize",resize);
-  },[]);
-  const count=Math.max(1,Math.ceil(presets.length/pageSize));
-  const selectedIndex=presets.findIndex(p=>p.id===selectedPresetId);
-  const pageIndex=Math.min(page,count-1);
+    element.addEventListener("wheel",onWheel,{passive:false});
+    return()=>element.removeEventListener("wheel",onWheel);
+  },[presets.length]);
+
+  // Reset horizontal position when the map category/mode changes, without
+  // snapping back when a card is selected during free browsing.
+  const filterKey=mode+":"+presets.map(preset=>preset.id).join(",");
   useEffect(()=>{
-    if(selectedIndex>=0)setPage(Math.floor(selectedIndex/pageSize));
-    else setPage(0);
-  },[selectedPresetId,pageSize,presets.length,presets[0]?.id]);
+    strip.current?.scrollTo({left:0,behavior:"auto"});
+  },[filterKey]);
+
+  const onPointerDown=(event:ReactPointerEvent<HTMLDivElement>)=>{
+    if(event.pointerType!=="mouse"||event.button!==0)return;
+    drag.current={pointerId:event.pointerId,startX:event.clientX,scrollLeft:event.currentTarget.scrollLeft,moved:false};
+    suppressClick.current=false;
+  };
+  const onPointerMove=(event:ReactPointerEvent<HTMLDivElement>)=>{
+    const current=drag.current;
+    if(!current||current.pointerId!==event.pointerId)return;
+    if(!current.moved&&Math.abs(event.clientX-current.startX)>7){
+      current.moved=true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      event.currentTarget.classList.add("is-dragging");
+    }
+    if(current.moved){
+      event.currentTarget.scrollLeft=current.scrollLeft+current.startX-event.clientX;
+      event.preventDefault();
+    }
+  };
+  const stopDrag=(event:ReactPointerEvent<HTMLDivElement>)=>{
+    const current=drag.current;
+    if(!current||current.pointerId!==event.pointerId)return;
+    suppressClick.current=current.moved;
+    drag.current=null;
+    event.currentTarget.classList.remove("is-dragging");
+    if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+  const onClickCapture=(event:ReactMouseEvent<HTMLDivElement>)=>{
+    if(!suppressClick.current)return;
+    suppressClick.current=false;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const onStripKeyDown=(event:ReactKeyboardEvent<HTMLDivElement>)=>{
+    if(event.target!==event.currentTarget)return;
+    if(event.key==="ArrowLeft"||event.key==="ArrowRight"){
+      event.preventDefault();
+      event.currentTarget.scrollBy({left:(event.key==="ArrowRight"?1:-1)*Math.max(220,event.currentTarget.clientWidth*.55),behavior:"smooth"});
+    }
+  };
+
   if(!presets.length)return <p className="theater-empty">No maps match this filter.</p>;
   return <div className="theater-list" aria-label="Available battle maps">
-    <div className="theater-picker" aria-live="polite">
-      {presets.slice(pageIndex*pageSize,(pageIndex+1)*pageSize).map(preset=>{
-      const chosen=preset.id===selectedPresetId;
-      const blue=sideCount(preset.id,"blue",mode),red=sideCount(preset.id,"red",mode);
-      const roster=[...new Set([...rosterRows(preset.id,"blue",mode),...rosterRows(preset.id,"red",mode)]
-        .map(row=>row.kind))];
-      return <button type="button" key={preset.id} disabled={locked}
-        aria-pressed={chosen}
-        className={"theater-option theme-"+preset.theme+(chosen?" selected":"")}
-        onClick={()=>onSelect(preset.id)}>
-        <TheaterThumbnail presetId={preset.id} mode={mode} priority={chosen}/>
-        <div className="theater-option-content">
-          <div className="theater-option-meta">
-            <span>{preset.warfare==="guerrilla"?"GUERRILLA":(preset.mapScale??1)>=2?"MEGA THEATER":preset.historical?"HISTORICAL":"FICTIONAL"}</span>
-            <span>{preset.year??preset.era.replace("_"," ").toUpperCase()}</span>
+    <div ref={strip} className="theater-picker theater-carousel" role="region"
+      aria-roledescription="carousel" aria-label="Browse battle maps horizontally"
+      tabIndex={0} onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+      onPointerUp={stopDrag} onPointerCancel={stopDrag}
+      onClickCapture={onClickCapture} onKeyDown={onStripKeyDown}>
+      {presets.map(preset=>{
+        const chosen=preset.id===selectedPresetId;
+        const blue=sideCount(preset.id,"blue",mode),red=sideCount(preset.id,"red",mode);
+        const roster=[...new Set([...rosterRows(preset.id,"blue",mode),...rosterRows(preset.id,"red",mode)]
+          .map(row=>row.kind))];
+        return <button type="button" key={preset.id} disabled={locked}
+          aria-pressed={chosen}
+          className={"theater-option theme-"+preset.theme+(chosen?" selected":"")}
+          onClick={()=>onSelect(preset.id)}>
+          <TheaterThumbnail presetId={preset.id} mode={mode} priority={chosen}/>
+          <div className="theater-option-content">
+            <div className="theater-option-meta">
+              <span>{preset.warfare==="guerrilla"?"GUERRILLA":(preset.mapScale??1)>=2?"MEGA THEATER":preset.historical?"HISTORICAL":"FICTIONAL"}</span>
+              <span>{preset.year??preset.era.replace("_"," ").toUpperCase()}</span>
+            </div>
+            <strong>{preset.title}</strong>
+            <p>{preset.subtitle}</p>
+            <div className="theater-option-force">
+              <span className="blue"><Flag styleName={preset.sideFlags.blue}/><b>{blue}</b> BLUE</span><i>VS</i>
+              <span className="red"><Flag styleName={preset.sideFlags.red}/><b>{red}</b> RED</span>
+              {mode==="openworld"&&<><i>VS</i><span className="green"><Flag styleName="generic-blue"/><b>{OPENWORLD.green}</b> GREEN</span></>}
+            </div>
+            <div className="theater-option-unit-types">
+              {roster.map(kind=><span key={kind} title={KIND_NAMES[kind]}>{UNIT_LABEL[kind]}</span>)}
+            </div>
+            <div className="theater-option-footer">
+              <span>{preset.location}</span><b>{chosen?"✓ SELECTED":"SELECT MAP →"}</b>
+            </div>
           </div>
-          <strong>{preset.title}</strong>
-          <p>{preset.subtitle}</p>
-          <div className="theater-option-force">
-            <span className="blue"><Flag styleName={preset.sideFlags.blue}/><b>{blue}</b> BLUE</span><i>VS</i>
-            <span className="red"><Flag styleName={preset.sideFlags.red}/><b>{red}</b> RED</span>
-            {mode==="openworld"&&<><i>VS</i><span className="green"><Flag styleName="generic-blue"/><b>{OPENWORLD.green}</b> GREEN</span></>}
-          </div>
-          <div className="theater-option-unit-types">
-            {roster.map(kind=><span key={kind} title={KIND_NAMES[kind]}>{UNIT_LABEL[kind]}</span>)}
-          </div>
-          <div className="theater-option-footer">
-            <span>{preset.location}</span><b>{chosen?"✓ SELECTED":"SELECT MAP →"}</b>
-          </div>
-        </div>
-      </button>;
-    })}
+        </button>;
+      })}
     </div>
-    <div className="theater-pagination" aria-label="Map pages">
-      <button type="button" disabled={pageIndex===0} aria-label="Previous map page" onClick={()=>setPage(n=>Math.max(0,n-1))}>← PREVIOUS</button>
-      <span>MAPS {pageIndex*pageSize+1}–{Math.min(presets.length,(pageIndex+1)*pageSize)} / {presets.length}</span>
-      <button type="button" disabled={pageIndex>=count-1} aria-label="Next map page" onClick={()=>setPage(n=>Math.min(count-1,n+1))}>NEXT →</button>
+    <div className="theater-scroll-hint" aria-hidden="true">
+      <span>← DRAG · SWIPE · SCROLL →</span>
+      <span>{presets.length} THEATERS</span>
     </div>
   </div>;
 }
