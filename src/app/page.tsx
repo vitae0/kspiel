@@ -1243,7 +1243,7 @@ export default function Home(){
     {multiplayer&&networkPhase==="opponent-left"&&<div className="network-status-banner">PLAYER DISCONNECTED · MATCH PAUSED</div>}
     {isMobile&&mobilePanel!=="none"&&<button className="mobile-backdrop" aria-label="Close panel" onClick={()=>setMobilePanel("none")}/>}
     <LeftSidebar {...{
-      mobilePanel,setMobilePanel,armyGroups,blue,selected,selectGroup,unitSymbols,pendingMassAttack,
+      mobilePanel,setMobilePanel,armyGroups,blue,selected,selectGroup,unitSymbols,setUnitSymbols,pendingMassAttack,
       setPendingMassAttack,setMassTargets,setPendingOrder,setPendingPlan,massTargets,
       launchGroupAttack,frontDirectives,playerSide,units,changeFrontMode,attackPlans,
       setSelected,executePlan,cancelPlan,openWorld,pendingStrategicBuild,
