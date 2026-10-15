@@ -475,3 +475,25 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .unit-counter.kind-partisan{--role:#89be86}
 .unit-counter.kind-raider{--role:#88afaa}
 .unit-counter.kind-partisan .unit-top,.unit-counter.kind-raider .unit-top{letter-spacing:-.025em}
+
+/* Event-driven mortar and gunfire: map-space particles, deliberately pointer transparent. */
+.combat-effects{position:absolute;inset:0;z-index:9;pointer-events:none;overflow:visible;isolation:isolate}
+.combat-effect{--flash:#ffe0a0;--dust:#a19b87;--blast:#edb87b}
+.combat-effect.effect-mortar{--flash:#ffebac;--dust:#c0ba9a;--blast:#f7c68a}
+.combat-effect.effect-heavy_artillery{--flash:#ffd5a2;--dust:#9d8b7d;--blast:#f1a775}
+.combat-effect .shell-trace{stroke:var(--flash);stroke-width:3;stroke-linecap:round;stroke-dasharray:4 21;opacity:0;filter:drop-shadow(0 0 5px #ffc977);animation:combatTracer 880ms ease-out both}
+.combat-effect .muzzle-flash{fill:var(--flash);stroke:#ffe0a1;stroke-width:3;filter:drop-shadow(0 0 15px #e7a850);opacity:0;animation:combatMuzzle 650ms ease-out both}
+.combat-effect .blast-core{fill:var(--blast);stroke:#f7dfae;stroke-width:7;filter:drop-shadow(0 0 22px #ff9e5f);transform-box:fill-box;transform-origin:center;opacity:0;animation:combatImpact 1050ms ease-out both}
+.combat-effect .blast-ring{fill:none;stroke:#eccd9b;stroke-width:6;transform-box:fill-box;transform-origin:center;opacity:0;animation:combatShock 1200ms ease-out both}
+.combat-effect .smoke-plume{fill:var(--dust);stroke:#52514970;stroke-width:2;transform-box:fill-box;transform-origin:center;opacity:0;filter:blur(6px);animation:combatSmoke 1350ms ease-out both}
+.combat-effect.effect-mortar .shell-trace{stroke-dasharray:2 15;stroke-width:2}
+.combat-effect.effect-heavy_artillery .blast-ring{stroke-width:9}
+@keyframes combatTracer{0%{opacity:0;stroke-dashoffset:150}8%{opacity:1}40%{opacity:.85;stroke-dashoffset:10}58%,100%{opacity:0;stroke-dashoffset:-90}}
+@keyframes combatMuzzle{0%{opacity:0;transform:scale(.25)}7%{opacity:1;transform:scale(1.35)}20%{opacity:.5;transform:scale(.85)}40%,100%{opacity:0;transform:scale(1.65)}}
+@keyframes combatImpact{0%,24%{opacity:0;transform:scale(.05)}34%{opacity:1;transform:scale(.8)}46%{opacity:.95;transform:scale(1.4)}64%{opacity:.5;transform:scale(1.05)}100%{opacity:0;transform:scale(1.8)}}
+@keyframes combatShock{0%,28%{opacity:0;transform:scale(.1)}38%{opacity:.9;transform:scale(.7)}65%{opacity:.5;transform:scale(1.3)}100%{opacity:0;transform:scale(2)}}
+@keyframes combatSmoke{0%,30%{opacity:0;transform:translateY(20px) scale(.15)}44%{opacity:.55}74%{opacity:.4;transform:translateY(-18px) scale(1.5)}100%{opacity:0;transform:translateY(-55px) scale(2)}}
+.formation-controls button.active{border-color:#b6bfa0;background:#334635;color:#f2f3d7}
+.unit-counter.low-ammo{box-shadow:inset 0 4px 0 var(--role,#9d946a),0 0 10px #df986575}
+.unit-counter.low-ammo .unit-top::after{content:"!";color:#ffbe6b;font-weight:900}
+@media(prefers-reduced-motion:reduce){.combat-effects{display:none}}
