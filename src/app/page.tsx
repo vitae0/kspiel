@@ -3,6 +3,9 @@
 import {useEffect,useMemo,useRef,useState,type MouseEvent as ReactMouseEvent,type PointerEvent as ReactPointerEvent,type WheelEvent as ReactWheelEvent} from "react";
 import {generateScenario,polylinePath,SCENARIO_PRESETS,terrainAt,TERRAIN_RULES,UNIT_LABEL,WORLD_H,WORLD_W} from "@/sim/game";
 import {armyGroupColor,roadVisualPieces} from "@/sim/operations";
+import {advanceDirective,applyEncirclement,decoyVisibleTo,frontAssignments,isDetected,updateContacts,type FrontDirective,type FrontMode,type LastSeenContact,type DecoyContact} from "@/sim/warfare";
+import {startHistory,updateHistory,finishHistory,addBattleEvent,type BattleHistory} from "@/sim/telemetry";
+import AfterActionReport from "./after-action";
 import {scenarioTerritoryCells,territoryBoundaryPath} from "@/sim/territory";
 import {botControlledSides,createMatchConfig,defaultArmyGroups,localControlledSides} from "@/sim/session";
 import {addStrategicStructure,advanceOpenWorld,buildStrategicCity,createOpenWorldState,queueRecruitment,UNIT_COST,type OpenWorldBuildKind,type OpenWorldState} from "@/sim/openworld";
@@ -766,7 +769,7 @@ function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],side:Sid
 
       // Hysteresis prevents advance/retreat thrashing around a single threshold.
       const retreating=u.order?.type==="retreat";
-      const shouldRetreat=u.organization<(retreating?58:34)||u.strength<(retreating?64:46)||u.supply<(retreating?30:10)||(nearestHostile.d<170&&ratio<(retreating?.98:.72));
+      const shouldRetreat=(u.morale??82)<(retreating?27:15)||u.organization<(retreating?58:34)||u.strength<(retreating?64:46)||u.supply<(retreating?30:10)||(nearestHostile.d<170&&ratio<(retreating?.98:.72));
       if(shouldRetreat){
         if(retreating&&u.order?.targetX!==undefined&&u.order?.targetY!==undefined)return u;
         const d=retreatDestination(u,units,cities);
@@ -865,6 +868,8 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     const terrain=TERRAIN_RULES[sample.terrain];
     const access=supplyAccess(scenario,u,units,cities,supplyNetwork,emplacements,logisticsGraph,openWorld);
     const n:Formation={...u,order:u.order?{...u.order}:undefined};
+    n.suppression=clamp((u.suppression??0)-hours*(u.order?.type==="retreat"?7:3.5),0,100);
+    n.morale=clamp((u.morale??82)+hours*((u.supply>25?0.15:-.28)-(u.suppression??0)*.009),0,100);
 
     if(n.order?.targetUnitId){
       const tracked=units.find(v=>v.id===n.order?.targetUnitId&&v.strength>1);
@@ -885,7 +890,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     n.supply=clamp(n.supply+hours*forageSupply(u,sample.terrain,inCombat),0,100);
     if(MOTORIZED_KINDS.has(u.kind))n.fuel=clamp(n.fuel-hours*(inCombat?.42:.18),0,100);
 
-    if(access.level>0){
+    if(access.level>0&&(u.isolationHours??0)<6){
       n.supply=clamp(n.supply+hours*access.supplyPerHour*(scenario.presetId==="open-world"?1.65:1),0,100);
       if(MOTORIZED_KINDS.has(u.kind))n.fuel=clamp(n.fuel+hours*access.fuelPerHour,0,100);
     }
@@ -975,6 +980,8 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     const special=u.kind==="special_forces";
     const foot=u.kind==="infantry"||u.kind==="mountaineer"||u.kind==="engineer";
     if(n.supply<25)n.organization=clamp(n.organization-hours*(special?.08:foot?.34:.78),0,100);
+    n.organization=clamp(n.organization-hours*(n.suppression??0)*.006,0,100);
+    if((n.morale??80)<12&&n.order?.type!=="retreat")n.organization=clamp(n.organization-hours*.7,0,100);
     if(n.supply<12){n.organization=clamp(n.organization-hours*(special?.16:foot?.62:1.25),0,100);n.strength=clamp(n.strength-hours*(special?.012:foot?.05:.14),0,100)}
     if(n.supply<4)n.strength=clamp(n.strength-hours*(special?.035:foot?.12:.3),0,100);
     n.readiness=clamp(n.organization*.46+n.supply*.3+n.strength*.24,0,100);
@@ -1012,13 +1019,18 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       const aDef=TERRAIN_RULES[terrainAt(scenario,a.x,a.y).terrain].defense*aWall*fieldDefense(a,b);
       const bDef=TERRAIN_RULES[terrainAt(scenario,b.x,b.y).terrain].defense*bWall*fieldDefense(b,a);
       const aRetreat=a.order?.type==="retreat",bRetreat=b.order?.type==="retreat";
-      const aPower=aCan&&!aRetreat?(a.softAttack*(1-b.hardness)+a.hardAttack*b.hardness)*(a.organization/100)*(a.supply/100):0;
-      const bPower=bCan&&!bRetreat?(b.softAttack*(1-a.hardness)+b.hardAttack*a.hardness)*(b.organization/100)*(b.supply/100):0;
+      const aPower=aCan&&!aRetreat?(a.softAttack*(1-b.hardness)+a.hardAttack*b.hardness)*(a.organization/100)*(a.supply/100)*(1-(a.suppression??0)*.006)*(0.6+(a.morale??82)/205):0;
+      const bPower=bCan&&!bRetreat?(b.softAttack*(1-a.hardness)+b.hardAttack*a.hardness)*(b.organization/100)*(b.supply/100)*(1-(b.suppression??0)*.006)*(0.6+(b.morale??82)/205):0;
       const aPosture=a.order?.type==="assault"?1.22:a.order?.type==="probe"?.76:1;
       const bPosture=b.order?.type==="assault"?1.22:b.order?.type==="probe"?.76:1;
       const aLoss=(bPower*bPosture/Math.max(20,a.defense*aDef+a.entrenchment*(a.kind==="tank"?.45:1.35)))*hours*2.15*(aRetreat?1.2:1);
       const bLoss=(aPower*aPosture/Math.max(20,b.defense*bDef+b.entrenchment*(b.kind==="tank"?.45:1.35)))*hours*2.15*(bRetreat?1.2:1);
+      const actualALoss=Math.min(a.strength,aLoss),actualBLoss=Math.min(b.strength,bLoss);
+      a.damageDealt=(a.damageDealt??0)+actualBLoss;
+      b.damageDealt=(b.damageDealt??0)+actualALoss;
       a.strength=clamp(a.strength-aLoss,0,100);b.strength=clamp(b.strength-bLoss,0,100);
+      a.morale=clamp((a.morale??82)-actualALoss*.38,0,100);
+      b.morale=clamp((b.morale??82)-actualBLoss*.38,0,100);
       a.organization=clamp(a.organization-aLoss*1.9,0,100);b.organization=clamp(b.organization-bLoss*1.9,0,100);
     }
   }
@@ -1046,6 +1058,10 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
         const cover=mortarTerrainProfile(terrainAt(scenario,target.x,target.y).terrain).effect;
         const power=(gun.softAttack*(1-target.hardness)+gun.hardAttack*target.hardness)*(gun.organization/100)*(gun.supply/100)*rangeFactor*profile.effect*falloff*friendlyFire;
         const loss=(power/Math.max(22,target.defense*.62+target.entrenchment*1.3))*hours*1.22*cover*(target.kind==="tank"?.86:target.kind==="armor"?.94:1);
+        const actual=Math.min(target.strength,loss),shock=clamp(loss*4,0,25);
+        if(target.side!==gun.side){gun.damageDealt=(gun.damageDealt??0)+actual;gun.suppressionInflicted=(gun.suppressionInflicted??0)+shock}
+        target.suppression=clamp((target.suppression??0)+shock,0,100);
+        target.morale=clamp((target.morale??82)-loss*1.7-shock*.12,0,100);
         target.strength=clamp(target.strength-loss,0,100);
         target.organization=clamp(target.organization-loss*3.25,0,100);
       }
@@ -1063,6 +1079,11 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     const rangeFactor=clamp(1-(range-80)/(gun.kind==="heavy_artillery"?880:530),.34,1);
     const power=(gun.softAttack*(1-target.hardness)+gun.hardAttack*target.hardness)*(gun.organization/100)*(gun.supply/100)*rangeFactor;
     const loss=(power/Math.max(24,target.defense*terrain.defense+target.entrenchment*1.15))*hours*(gun.kind==="heavy_artillery"?1.65:1.45)*(target.kind==="tank"?.86:target.kind==="armor"?.94:1);
+    gun.damageDealt=(gun.damageDealt??0)+Math.min(target.strength,loss);
+    const shock=clamp(loss*3.2,0,28);
+    gun.suppressionInflicted=(gun.suppressionInflicted??0)+shock;
+    target.suppression=clamp((target.suppression??0)+shock,0,100);
+    target.morale=clamp((target.morale??82)-loss*1.5-shock*.15,0,100);
     target.strength=clamp(target.strength-loss,0,100);target.organization=clamp(target.organization-loss*2.2,0,100);
     gun.supply=clamp(gun.supply-hours*(gun.kind==="heavy_artillery"?1.45:.95),0,100);gun.organization=clamp(gun.organization-hours*.04,0,100);
   }
