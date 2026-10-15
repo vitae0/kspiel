@@ -1150,3 +1150,8 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 }
 .nato-toggle.active{border-color:#e1c780;color:#ffe2a0;background:#45452c}
 .nato-toggle:hover{border-color:#e0c881;background:#3e4935}
+
+.nato-display-settings{padding:9px 10px!important;border-bottom:1px solid #7a8b725d}
+.nato-display-switch{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border:1px solid #8892768c;background:#263528;color:#d1dbcd;cursor:pointer;font-size:10px;font-weight:800;letter-spacing:.07em}
+.nato-display-switch.active{border-color:#e4c880;color:#ffe6b1;background:#454b32}
+.nato-display-switch>small{font-size:8px;color:#d4ccae}
