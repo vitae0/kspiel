@@ -18,6 +18,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Scenario runtime smoke test
         run: node scripts/smoke-theaters.cjs
+      - name: FFA 3/4/5 balanced map and supply tests
+        run: node scripts/smoke-ffa.cjs
       - name: Attrition and synchronized march tests
         run: node scripts/smoke-attrition.cjs
       - name: Typecheck and static build
