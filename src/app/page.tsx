@@ -721,7 +721,10 @@ function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],side:Sid
   return units.map((u):Formation=>{
     if(u.side!==side||!canCommand(u))return u;
     const nearestHostile=hostile.map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
-    if(!nearestHostile)return u;
+    if(!nearestHostile){
+      const target=hostileCities.map(c=>({c,d:Math.hypot(c.x-u.x,c.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
+      return target?{...u,order:{type:"move",targetX:target.c.x,targetY:target.c.y}}:u;
+    }
     // Irregulars prioritize isolated convoys and vulnerable artillery instead of open-field clashes.
     if(u.kind==="partisan"||u.kind==="raider"){
       const rearTarget=hostile.filter(v=>v.kind==="logistics"||ARTILLERY_KINDS.has(v.kind))
@@ -1907,7 +1910,7 @@ export default function Home(){
     const presets=SCENARIO_PRESETS.filter(p=>!p.id.startsWith("ffa-")&&(setupCategory==="all"||
       (setupCategory==="historical"&&p.historical)||(setupCategory==="fictional"&&!p.historical)||
       (setupCategory==="mega"&&(p.mapScale??1)>=2)||(setupCategory==="guerrilla"&&p.warfare==="guerrilla")));
-    const selectedPreset=SCENARIO_PRESETS.find(p=>p.id===selectedPresetId)??SCENARIO_PRESETS[0];
+    const selectedPreset=SCENARIO_PRESETS.find(p=>p.id===selectedPresetId)??SCENARIO_PRESETS.find(p=>p.id==="frontier")!;
     const ffaPresets=SCENARIO_PRESETS.filter(p=>p.id.startsWith("ffa-"));
     const ffaSides=ALL_SIDES.slice(0,ffaSize);
     return <main className="setup-shell">
@@ -1917,7 +1920,7 @@ export default function Home(){
         <div className="setup-grid">
           <section className="setup-main">
             <div className="setup-heading"><small>FIELD OPERATIONS / NEW CAMPAIGN</small><h1>{selectedGameMode==="openworld"?"Build a dominion":selectedGameMode==="ffa"?"Every commander for themselves":"Choose a theater"}</h1><p>{selectedGameMode==="openworld"?"Expand territory, exploit resources automatically, build infrastructure and raise new armies against multiple rivals." :selectedGameMode==="ffa"?"Independent factions, balanced starting cities and dedicated battle maps. Every unoccupied FFA faction is controlled by the AI.":"Terrain now changes the roster, mobility, visibility and logistics. Historical presets are stylized scenarios, not exact order-of-battle reconstructions."}</p></div>
-            <div className="setup-tabs"><button disabled={Boolean(multiplayer)} className={selectedGameMode==="scenario"?"active":""} onClick={()=>setSelectedGameMode("scenario")}>SCENARIO WAR</button><button disabled={Boolean(multiplayer)} className={selectedGameMode==="openworld"?"active":""} onClick={()=>{setSelectedGameMode("openworld");setSelectedPresetId("frontier")}}>OPEN WORLD</button><button className={selectedGameMode==="ffa"?"active":""} onClick={()=>{setSelectedGameMode("ffa");setFfaSize(3);setSelectedPresetId("ffa-triad");setPlayerSide("blue")}} disabled={Boolean(multiplayer)}>FREE FOR ALL</button></div>
+            <div className="setup-tabs"><button disabled={Boolean(multiplayer)} className={selectedGameMode==="scenario"?"active":""} onClick={()=>{setSelectedGameMode("scenario");if(selectedPresetId.startsWith("ffa-"))setSelectedPresetId("frontier");setPlayerSide("blue")}}>SCENARIO WAR</button><button disabled={Boolean(multiplayer)} className={selectedGameMode==="openworld"?"active":""} onClick={()=>{setSelectedGameMode("openworld");setSelectedPresetId("frontier")}}>OPEN WORLD</button><button className={selectedGameMode==="ffa"?"active":""} onClick={()=>{setSelectedGameMode("ffa");setFfaSize(3);setSelectedPresetId("ffa-triad");setPlayerSide("blue")}} disabled={Boolean(multiplayer)}>FREE FOR ALL</button></div>
             {selectedGameMode==="scenario"&&<div className="setup-tabs"><button className={setupCategory==="all"?"active":""} onClick={()=>setSetupCategory("all")}>ALL</button><button className={setupCategory==="fictional"?"active":""} onClick={()=>setSetupCategory("fictional")}>FICTIONAL</button><button className={setupCategory==="historical"?"active":""} onClick={()=>setSetupCategory("historical")}>HISTORICAL</button><button className={setupCategory==="mega"?"active":""} onClick={()=>setSetupCategory("mega")}>MEGA MAPS</button><button className={setupCategory==="guerrilla"?"active":""} onClick={()=>setSetupCategory("guerrilla")}>GUERRILLA</button></div>}
             {selectedGameMode==="scenario"&&<div className="scenario-grid">{presets.map(preset=><button key={preset.id} disabled={Boolean(multiplayer)} className={"scenario-card theme-"+preset.theme+" "+(selectedPresetId===preset.id?"selected":"")} onClick={()=>{setSelectedPresetId(preset.id);setPlayerSide("blue")}}>
               <span className="scenario-theme">{preset.warfare==="guerrilla"?"⚑ GUERRILLA · ": (preset.mapScale??1)>=2?"◈ MEGA MAP · ":""}{preset.theme.toUpperCase()} · {preset.era.replace("_"," ").toUpperCase()}</span><b>{preset.title}</b><small>{preset.location}{preset.year?" · "+preset.year:""}</small><p>{preset.subtitle}</p>
