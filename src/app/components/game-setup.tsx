@@ -148,10 +148,21 @@ return <main className="setup-shell">
             </div></>}
             </div>}
             {sideTab==="room"&&<div className="menu-room-content">
+            {pendingInviteCode&&!multiplayer&&<div className="menu-room-join-fields">
+              <label>COMMANDER
+                <input maxLength={20} placeholder="Nickname" value={nickname}
+                  onChange={e=>{setNickname(e.target.value);window.localStorage.setItem("kspiel.nickname",e.target.value)}}/>
+              </label>
+              <div className="menu-room-team-choice">{(["blue","red"] as Side[]).map(side=>
+                <button key={side} type="button" className={playerSide===side?"active":""} onClick={()=>setPlayerSide(side)}>
+                  <Flag styleName={selectedPreset.sideFlags[side]??"generic-blue"}/>{side.toUpperCase()} TEAM
+                </button>)}</div>
+            </div>}
             {pendingInviteCode&&!multiplayer&&<div className="invite-join-card"><b>INVITE ROOM · {pendingInviteCode}</b><small>Pick a nickname and either team. Everyone on a team can command the full army.</small><div className="invite-actions"><button disabled={networkPhase==="matching"||!nickname.trim()} onClick={()=>void joinPendingInvite()}>JOIN ROOM</button><button onClick={()=>{setPendingInviteCode("");setNetworkError("")}}>DISMISS</button></div></div>}
             {multiplayer&&<div className={"network-lobby "+networkPhase}><div><span><b>{networkPhase==="connected"?"ALL COMMANDERS CONNECTED":networkPhase==="opponent-left"?"PLAYER DISCONNECTED":multiplayer.kind==="quickplay"?"QUICK PLAY QUEUE":"PRIVATE ROOM"}</b><small>ROOM {multiplayer.code} · {multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.nickname} · {multiplayer.side.toUpperCase()} TEAM</small></span><strong>{onlinePlayers.length}/{multiplayer.maxPlayers}</strong></div><div className="lobby-roster">{(["blue","red"] as Side[]).map(side=><div key={side}><b>{side.toUpperCase()} TEAM</b>{onlinePlayers.filter(player=>player.side===side).sort((a,b)=>a.slot-b.slot).map(player=><small key={player.token}>{player.slot}. {player.nickname}{player.token===multiplayer.playerToken?" · YOU":""}</small>)}{onlinePlayers.filter(player=>player.side===side).length<multiplayer.teamSize&&<small>Waiting for {multiplayer.teamSize-onlinePlayers.filter(player=>player.side===side).length}…</small>}</div>)}</div>{inviteLink&&<div className="invite-link"><input aria-label="Invite link" readOnly value={inviteLink}/><button onClick={()=>void navigator.clipboard.writeText(inviteLink)}>COPY LINK</button></div>}<button className="cancel-network" onClick={cancelMultiplayer}>CANCEL</button></div>}
             {networkPhase==="matching"&&<div className="network-lobby matching"><b>CONNECTING TO MATCHMAKING…</b><small>Preparing Supabase Realtime session.</small></div>}
             {networkError&&<div className="network-error">{networkError==="team_full"?"That team is full. Pick the other team.":networkError==="room_unavailable"?"That room is full, closed, or expired.":networkError}</div>}
+            {!pendingInviteCode&&!multiplayer&&networkPhase==="idle"&&<div className="menu-room-empty">No active room. Select Quick Play or Private Match under SETTINGS.</div>}
             </div>}
             {sideTab==="forces"&&<div className="menu-forces-content">
               <MapDeploymentBrief preset={selectedPreset} mode={selectedGameMode}/>
