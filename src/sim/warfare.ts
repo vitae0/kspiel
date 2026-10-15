@@ -4,7 +4,7 @@ import type {CityState,Emplacement,Formation,Scenario,Side} from "./types";
 export type FrontMode="hold"|"advance"|"push"|"retreat";
 export type FrontDirective={
   id:string;side:Side;groupId:string;start:{x:number;y:number};end:{x:number;y:number};
-  mode:FrontMode;lastIssued:number;createdAt:number;reserveFraction:number;
+  mode:FrontMode;lastIssued:number;createdAt:number;reserveFraction:number;facing?:1|-1;
 };
 export type FrontAssignment={unitId:string;x:number;y:number;role:"line"|"reserve"|"gun"|"relay"};
 export type LastSeenContact={id:string;side:Side;kind:Formation["kind"];x:number;y:number;strength:number;seenAt:number;confidence:number};
@@ -92,7 +92,7 @@ export function frontAssignments(front:FrontDirective,units:Formation[],cities:C
   const tangent={x:dx/length,y:dy/length},middle={x:(front.start.x+front.end.x)/2,y:(front.start.y+front.end.y)/2};
   const hostile=units.filter(u=>u.side!==front.side&&u.strength>12);
   const nearest=[...hostile].sort((a,b)=>dist(a,middle)-dist(b,middle))[0];
-  const sign=nearest&&((nearest.x-middle.x)*(-tangent.y)+(nearest.y-middle.y)*tangent.x)<0?-1:1;
+  const sign=front.facing??(nearest&&((nearest.x-middle.x)*(-tangent.y)+(nearest.y-middle.y)*tangent.x)<0?-1:1);
   const normal={x:-tangent.y*sign,y:tangent.x*sign};
   const isCombat=(u:Formation)=>!["artillery","heavy_artillery","mortar","logistics"].includes(u.kind);
   const combat=group.filter(isCombat).sort((a,b)=>b.strength*a.organization-a.strength*b.organization);
@@ -142,7 +142,7 @@ export function advanceDirective(plan:FrontDirective,hours:number,units:Formatio
   const mid={x:(plan.start.x+plan.end.x)/2,y:(plan.start.y+plan.end.y)/2};
   const nearest=units.filter(u=>u.side!==plan.side).sort((a,b)=>dist(a,mid)-dist(b,mid))[0];
   const tangent={x:dx/Math.max(1,Math.hypot(dx,dy)),y:dy/Math.max(1,Math.hypot(dx,dy))};
-  const sign=nearest&&((nearest.x-mid.x)*(-tangent.y)+(nearest.y-mid.y)*tangent.x)<0?-1:1;
+  const sign=plan.facing??(nearest&&((nearest.x-mid.x)*(-tangent.y)+(nearest.y-mid.y)*tangent.x)<0?-1:1);
   const normal={x:-tangent.y*sign,y:tangent.x*sign};
   const friendly=units.filter(u=>u.side===plan.side&&u.groupId===plan.groupId);
   const nearbyEnemy=units.filter(u=>u.side!==plan.side&&dist(u,mid)<520);
@@ -153,5 +153,5 @@ export function advanceDirective(plan:FrontDirective,hours:number,units:Formatio
   const move=(p:{x:number;y:number})=>({x:clamp(p.x+normal.x*step,3,scenario.worldWidth-3),y:clamp(p.y+normal.y*step,3,scenario.worldHeight-3)});
   const a=move(plan.start),b=move(plan.end);
   if(terrainAt(scenario,a.x,a.y).terrain==="water"||terrainAt(scenario,b.x,b.y).terrain==="water")return plan;
-  return {...plan,start:a,end:b};
+  return {...plan,start:a,end:b,facing:sign as 1|-1};
 }
