@@ -454,7 +454,7 @@ function supplySourceAtPoint(side:Side,point:{x:number;y:number},cities:CityStat
   return roadSource.capacity>citySource.capacity?roadSource:citySource;
 }
 
-function builtRoadSupplyAccess(u:Formation,units:Formation[],cities:CityState[],network:SupplyNetwork,emplacements:Emplacement[],openWorld:OpenWorldState|null){
+function builtRoadSupplyAccess(u:Pick<Formation,"side"|"x"|"y">,units:Formation[],cities:CityState[],network:SupplyNetwork,emplacements:Emplacement[],openWorld:OpenWorldState|null){
   const roads=[
     ...emplacements
       .filter(e=>e.kind==="road"&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined)
@@ -588,9 +588,9 @@ function computeLogisticsLinks(scenario:Scenario,units:Formation[],cities:CitySt
   return{supplied,links,hubLinks,activeHubs,cityRange,relayRange,hubCityRange};
 }
 
-function supplyAccess(scenario:Scenario,u:Formation,units:Formation[],cities:CityState[],network=computeSupplyNetwork(scenario,units,cities),emplacements:Emplacement[]=[],logisticsGraph=computeLogisticsLinks(scenario,units,cities,network,emplacements),openWorld:OpenWorldState|null=null){
-  const sample=terrainAt(scenario,u.x,u.y);
-  const city=sample.objective?cities.find(c=>c.name===sample.objective):undefined;
+function supplyAccess(scenario:Scenario,u:Pick<Formation,"id"|"side"|"kind"|"x"|"y">,units:Formation[],cities:CityState[],network=computeSupplyNetwork(scenario,units,cities),emplacements:Emplacement[]=[],logisticsGraph=computeLogisticsLinks(scenario,units,cities,network,emplacements),openWorld:OpenWorldState|null=null){
+  // Newly founded Dominion cities are also real supply hubs.
+  const city=cityAtPoint(cities,u.x,u.y,70);
   const generatedRoadLink=roadSupplyAccess(u,network);
   const builtRoadLink=builtRoadSupplyAccess(u,units,cities,network,emplacements,openWorld);
   const roadLink=!generatedRoadLink?builtRoadLink:!builtRoadLink?generatedRoadLink
@@ -1350,7 +1350,17 @@ export default function Home(){
       if(aiElapsed>=AI_COMMAND_INTERVAL_SECONDS){for(const side of botSides)working=enemyAI(scenario,working,citiesRef.current,side);aiElapsed=0}
       let nextUnits=simulate(scenario,working,simHours,citiesRef.current,emplacementsRef.current,openWorldRef.current);
       if(openWorldRef.current){
-        const ow=advanceOpenWorld(scenario,openWorldRef.current,nextUnits,citiesRef.current,simHours);
+        // Validate each completed recruit against the same supply state used by
+        // the map, including interdicted roads, depots and logistics relays.
+        // Cache network calculations lazily: no extra work on empty queues.
+        let spawnNetwork:SupplyNetwork|null=null;
+        let spawnLinks:ReturnType<typeof computeLogisticsLinks>|null=null;
+        const hasSpawnSupply=(side:Side,kind:Formation["kind"],x:number,y:number)=>{
+          const network=spawnNetwork??(spawnNetwork=computeSupplyNetwork(scenario,nextUnits,citiesRef.current));
+          const links=spawnLinks??(spawnLinks=computeLogisticsLinks(scenario,nextUnits,citiesRef.current,network,emplacementsRef.current));
+          return supplyAccess(scenario,{id:"recruitment-spawn-probe",side,kind,x,y},nextUnits,citiesRef.current,network,emplacementsRef.current,links,openWorldRef.current).level>0;
+        };
+        const ow=advanceOpenWorld(scenario,openWorldRef.current,nextUnits,citiesRef.current,simHours,hasSpawnSupply);
         openWorldRef.current=ow.state;setOpenWorld(ow.state);
         if(ow.spawned.length)nextUnits=[...nextUnits,...ow.spawned];
         if(ow.newCities.length){citiesRef.current=[...citiesRef.current,...ow.newCities];setCities(citiesRef.current)}
