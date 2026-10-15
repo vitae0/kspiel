@@ -1636,12 +1636,46 @@ export default function Home(){
   }
 
   function deployFront(start:{x:number;y:number},end:{x:number;y:number}){
-    if(selected.length<2)return;
-    const dx=end.x-start.x,dy=end.y-start.y,len2=dx*dx+dy*dy;if(len2<100)return;
-    const ordered=units.filter(u=>selected.includes(u.id)).sort((a,b)=>(((a.x-start.x)*dx+(a.y-start.y)*dy)-((b.x-start.x)*dx+(b.y-start.y)*dy))/len2);
-    const targets=new Map<string,{x:number;y:number}>();
-    ordered.forEach((u,i)=>{const t=ordered.length===1?.5:i/(ordered.length-1);targets.set(u.id,nearestLandPoint(start.x+dx*t,start.y+dy*t))});
-    commitUnits(prev=>prev.map(u=>{const target=targets.get(u.id);return target?{...u,formationShape:"line",order:{type:"move",targetX:target.x,targetY:target.y}}:u}));setPendingOrder(null);
+    const lead=units.find(u=>u.id===selected[0]);
+    const chosen=lead?.groupId?units.filter(u=>u.side===lead.side&&u.groupId===lead.groupId):units.filter(u=>selected.includes(u.id));
+    if(chosen.length<2)return;
+    const dx=end.x-start.x,dy=end.y-start.y,length=Math.hypot(dx,dy);if(length<80)return;
+    const tx=dx/length,ty=dy/length,mid={x:(start.x+end.x)/2,y:(start.y+end.y)/2};
+    const threat=units.filter(u=>u.side!==chosen[0].side).sort((a,b)=>Math.hypot(a.x-mid.x,a.y-mid.y)-Math.hypot(b.x-mid.x,b.y-mid.y))[0];
+    const sign=threat&&((threat.x-mid.x)*(-ty)+(threat.y-mid.y)*tx)<0?-1:1;
+    const normal={x:-ty*sign,y:tx*sign};
+    const depth=(u:Formation)=>u.kind==="logistics"?-360:u.kind==="heavy_artillery"?-310
+      :u.kind==="artillery"?-255:u.kind==="mortar"?-165:u.kind==="engineer"?-85
+      :u.kind==="recon"?35:u.kind==="tank"||u.kind==="armor"?-12:u.kind==="mechanized"?8:42;
+    const targets=new Map<string,{x:number;y:number}>(),rows=new Map<number,Formation[]>();
+    for(const u of chosen){const d=depth(u),row=rows.get(d)??[];row.push(u);rows.set(d,row)}
+    for(const [d,row] of rows){
+      row.sort((a,b)=>(a.x-b.x)*tx+(a.y-b.y)*ty);
+      row.forEach((u,i)=>{const t=(i+1)/(row.length+1);targets.set(u.id,nearestLandPoint(start.x+dx*t+normal.x*d,start.y+dy*t+normal.y*d))});
+    }
+    commitUnits(prev=>prev.map(u=>{
+      const target=targets.get(u.id);if(!target)return u;
+      const route=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},target,emplacementsRef.current,openWorldRef.current);
+      const [first,...rest]=route;
+      return{...u,formationShape:"line",order:first?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest}:{type:"move",targetX:target.x,targetY:target.y}};
+    }));
+    const engineers=chosen.filter(u=>u.kind==="engineer").sort((a,b)=>(a.x-b.x)*tx+(a.y-b.y)*ty);
+    const actor=multiplayerRef.current?.playerToken.slice(0,8)??"local",projects:ConstructionProject[]=[];
+    engineers.forEach((u,i)=>{
+      const t=(i+.5)/engineers.length,center=nearestLandPoint(start.x+dx*t-normal.x*70,start.y+dy*t-normal.y*70);
+      const half=Math.min(185,length/Math.max(2,engineers.length*2));
+      const a=nearestLandPoint(center.x-tx*half,center.y-ty*half),b=nearestLandPoint(center.x+tx*half,center.y+ty*half);
+      if([a,b].some(p=>["water","highmountain"].includes(terrainAt(activeScenario,p.x,p.y).terrain)))return;
+      const kind:EmplacementKind=engineers.length>1&&i%2===1?"barricade":"trench";
+      projects.push({id:"front-"+chosen[0].side+"-"+actor+"-"+buildCounter.current++,kind,side:u.side,
+        x:a.x,y:a.y,x2:b.x,y2:b.y,builderIds:[u.id],progress:0,
+        requiredHours:(kind==="trench"?10:12)+half*2*(kind==="trench"?.02:.024)});
+    });
+    if(projects.length){
+      const next=[...projectsRef.current,...projects];projectsRef.current=next;setConstructionProjects(next);
+      if(multiplayerRef.current&&!multiplayerRef.current.isHost)for(const project of projects)sendNetwork("construction-create",{project});
+    }
+    setPendingOrder(null);setFrontToolActive(false);
   }
 
   function assignGroup(groupId:string){
@@ -1651,7 +1685,37 @@ export default function Home(){
 
   function selectGroup(groupId:string){
     setSelected(units.filter(u=>localSides.has(u.side)&&u.groupId===groupId).map(u=>u.id));
-    setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);
+    setPendingOrder(null);setPendingPlan(false);setPendingMassAttack(false);setMassTargets([]);setPendingBuild(null);
+  }
+
+  function launchGroupAttack(){
+    const group=primary?.groupId;
+    const force=units.filter(u=>u.side===playerSide&&(group?u.groupId===group:selected.includes(u.id)));
+    const targets=units.filter(u=>massTargets.includes(u.id)&&u.side!==playerSide&&u.strength>1);
+    if(!force.length||!targets.length)return;
+    const load=new Map<string,number>(targets.map(t=>[t.id,0]));
+    const assignments=new Map<string,Formation>();
+    for(const u of force){
+      const target=[...targets].sort((a,b)=>{
+        const cost=(t:Formation)=>Math.hypot(t.x-u.x,t.y-u.y)/Math.max(1,u.speed)+(load.get(t.id)??0)*100;
+        return cost(a)-cost(b);
+      })[0];
+      assignments.set(u.id,target);load.set(target.id,(load.get(target.id)??0)+1);
+    }
+    commitUnits(prev=>prev.map(u=>{
+      const target=assignments.get(u.id);if(!target)return u;
+      const artillery=ARTILLERY_KINDS.has(u.kind),support=u.kind==="logistics";
+      const standOff=support?440:u.kind==="heavy_artillery"?680:u.kind==="artillery"?450:u.kind==="mortar"?750:34;
+      const dx=u.x-target.x,dy=u.y-target.y,distance=Math.max(1,Math.hypot(dx,dy));
+      const staging=nearestLandPoint(target.x+dx/distance*standOff,target.y+dy/distance*standOff);
+      if(artillery&&distance<=standOff*1.08)return{...u,order:{type:"fire",targetUnitId:target.id}};
+      const path=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},staging,emplacementsRef.current,openWorldRef.current);
+      const [first,...rest]=path;
+      const finalType:OrderType=artillery?"fire":support?"resupply":"assault";
+      if(!first)return{...u,order:artillery?{type:"fire",targetUnitId:target.id}:support?{type:"resupply"}:{type:"assault",targetUnitId:target.id}};
+      return{...u,order:{type:"move",targetX:first.x,targetY:first.y,waypoints:rest,finalType,finalTargetUnitId:support?undefined:target.id}};
+    }));
+    setMassTargets([]);setPendingMassAttack(false);
   }
 
   function arrangeFormation(shape:FormationShape){
@@ -1871,7 +1935,7 @@ export default function Home(){
       if(touchPoints.current.size>=2){beginPinch();return}
       const screen=viewportPoint(e.clientX,e.clientY);if(!screen)return;
       const targeting=Boolean(pendingOrder||pendingPlan||pendingBuild||pendingStrategicBuild);
-      const mode:"pan"|"front"|"target"=targeting?"target":mobileTool==="front"&&selected.length>1?"front":"pan";
+      const mode:"pan"|"front"|"target"=targeting?"target":mobileTool==="front"&&selected.length>0?"front":"pan";
       drag.current={mode,startClientX:e.clientX,startClientY:e.clientY,px:pan.x,py:pan.y,moved:false};
       if(mode==="front")setFrontPreview({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
       if(mode==="pan"){
@@ -1890,7 +1954,7 @@ export default function Home(){
     if(e.button>2)return;const screen=viewportPoint(e.clientX,e.clientY);if(!screen)return;
     let mode:"pan"|"box"|"front"|"select"="select";
     if(e.button===1)mode="pan";
-    else if(e.button===0&&e.ctrlKey&&selected.length>1)mode="front";
+    else if(e.button===0&&(e.ctrlKey||frontToolActive)&&selected.length>0)mode="front";
     else if(e.button===0)mode="box";
     else return;
     if(mode==="pan")e.preventDefault();
