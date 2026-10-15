@@ -92,7 +92,7 @@ export function frontAssignments(front:FrontDirective,units:Formation[],cities:C
   const tangent={x:dx/length,y:dy/length},middle={x:(front.start.x+front.end.x)/2,y:(front.start.y+front.end.y)/2};
   const hostile=units.filter(u=>u.side!==front.side&&u.strength>12);
   const nearest=[...hostile].sort((a,b)=>dist(a,middle)-dist(b,middle))[0];
-  const sign=nearest&&(nearest.x-middle.x)*(-tangent.y)+(nearest.y-middle.y)*tangent.x<0?-1:1;
+  const sign=nearest&&((nearest.x-middle.x)*(-tangent.y)+(nearest.y-middle.y)*tangent.x)<0?-1:1;
   const normal={x:-tangent.y*sign,y:tangent.x*sign};
   const isCombat=(u:Formation)=>!["artillery","heavy_artillery","mortar","logistics"].includes(u.kind);
   const combat=group.filter(isCombat).sort((a,b)=>b.strength*a.organization-a.strength*b.organization);
@@ -142,7 +142,7 @@ export function advanceDirective(plan:FrontDirective,hours:number,units:Formatio
   const mid={x:(plan.start.x+plan.end.x)/2,y:(plan.start.y+plan.end.y)/2};
   const nearest=units.filter(u=>u.side!==plan.side).sort((a,b)=>dist(a,mid)-dist(b,mid))[0];
   const tangent={x:dx/Math.max(1,Math.hypot(dx,dy)),y:dy/Math.max(1,Math.hypot(dx,dy))};
-  const sign=nearest&&(nearest.x-mid.x)*(-tangent.y)+(nearest.y-mid.y)*tangent.x<0?-1:1;
+  const sign=nearest&&((nearest.x-mid.x)*(-tangent.y)+(nearest.y-mid.y)*tangent.x)<0?-1:1;
   const normal={x:-tangent.y*sign,y:tangent.x*sign};
   const friendly=units.filter(u=>u.side===plan.side&&u.groupId===plan.groupId);
   const nearbyEnemy=units.filter(u=>u.side!==plan.side&&dist(u,mid)<520);
