@@ -413,48 +413,35 @@ function rosterForScenario(scenario:Scenario):UnitKind[]{
     ...repeated("mortar",5),...repeated("artillery",6),...repeated("heavy_artillery",3),...repeated("recon",4),...repeated("engineer",4),...repeated("logistics",4)
   ];
 }
-function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>number,kind:UnitKind){
-  const worldWidth=scenario.worldWidth??WORLD_W,worldHeight=scenario.worldHeight??WORLD_H;
+function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>number){
   const owned=cities.filter(c=>c.owner===side);
+  if(!owned.length)throw new Error("Cannot deploy formations without a friendly supply city");
   const hostile=cities.filter(c=>c.owner!==side);
-  for(let tries=0;tries<100;tries++){
-    const anchor=owned[Math.floor(rnd()*owned.length)]??{x:side==="blue"?worldWidth*.2:worldWidth*.8,y:worldHeight*.5};
-    const connected=scenario.roadRoutes.filter(route=>Math.hypot(route[0].x-anchor.x,route[0].y-anchor.y)<5||Math.hypot(route[route.length-1].x-anchor.x,route[route.length-1].y-anchor.y)<5);
-    const route=connected[Math.floor(rnd()*connected.length)];
-    let base:{x:number;y:number}=anchor;
-    if(route){
-      const startDist=Math.hypot(route[0].x-anchor.x,route[0].y-anchor.y);
-      const endDist=Math.hypot(route[route.length-1].x-anchor.x,route[route.length-1].y-anchor.y);
-      if(startDist<=endDist){
-        base=route[Math.floor(rnd()*Math.min(2,route.length))];
-      }else{
-        const offset=Math.floor(rnd()*Math.min(2,route.length));
-        base=route[Math.max(0,route.length-1-offset)];
-      }
-    }
-    const angle=rnd()*Math.PI*2,radius=rnd()*34;
-    const x=Math.max(330,Math.min(worldWidth-90,base.x+Math.cos(angle)*radius));
-    const y=Math.max(90,Math.min(worldHeight-90,base.y+Math.sin(angle)*radius));
-    const terrain=terrainAt(scenario,x,y).terrain;
-    const nearHostileCity=hostile.some(c=>Math.hypot(c.x-x,c.y-y)<180);
-    if(!nearHostileCity&&terrain!=="water"&&terrain!=="mountain"&&terrain!=="highmountain")return{x,y};
+  const width=scenario.worldWidth??WORLD_W,height=scenario.worldHeight??WORLD_H;
+  // Only a friendly city's urban footprint guarantees immediate supply.
+  for(let tries=0;tries<120;tries++){
+    const anchor=owned[Math.floor(rnd()*owned.length)];
+    const angle=rnd()*Math.PI*2,radius=8+Math.sqrt(rnd())*51;
+    const x=anchor.x+Math.cos(angle)*radius,y=anchor.y+Math.sin(angle)*radius;
+    if(x<1||y<1||x>=width||y>=height)continue;
+    if(terrainAt(scenario,x,y).objective!==anchor.name)continue;
+    if(hostile.some(c=>Math.hypot(c.x-x,c.y-y)<165))continue;
+    return{x,y};
   }
-  const anchor=owned.sort((a,b)=>{
-    const da=Math.min(...hostile.map(c=>Math.hypot(c.x-a.x,c.y-a.y)),Infinity);
-    const db=Math.min(...hostile.map(c=>Math.hypot(c.x-b.x,c.y-b.y)),Infinity);
-    return db-da;
-  })[0]??{x:side==="blue"?worldWidth*.2:worldWidth*.8,y:worldHeight*.5};
+  const anchor=owned.find(c=>terrainAt(scenario,c.x,c.y).objective===c.name);
+  if(!anchor)throw new Error("No valid friendly supply city for initial deployment");
   return{x:anchor.x,y:anchor.y};
 }
 
 function makeFormations(side:Side,scenario:Scenario,rnd:()=>number){
   const kinds=rosterForScenario(scenario);
+  if(!scenario.cities.some(c=>c.owner===side))return [];
   const labels:Record<UnitKind,string>={
     infantry:"Infantry",mechanized:"Mechanized",armor:"Armored",tank:"Tank",cavalry:"Cavalry",mountaineer:"Mountain",special_forces:"Special Forces",
     mortar:"Mortar",artillery:"Field Artillery",heavy_artillery:"Heavy Artillery",recon:"Recon",engineer:"Engineers",logistics:"Logistics"
   };
   return kinds.map((kind,i)=>{
-    const p=spawnPoint(side,scenario.cities,scenario,rnd,kind);
+    const p=spawnPoint(side,scenario.cities,scenario,rnd);
     const prefix=side[0];
     const groupId=side+"-army-"+(1+Math.floor(i/10));
     return unit(prefix+(i+1),(i+1)+"th "+labels[kind],side,kind,p.x,p.y,rnd,{groupId,...(kind==="logistics"?{supply:100}: {})});
