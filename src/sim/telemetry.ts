@@ -13,13 +13,13 @@ export type BattleHistory={title:string;seed:number;startedAt:number;finishedAt?
   records:UnitRecord[];lastSampleHour:number;startingCities:Record<Side,number>;
 };
 const zero=()=>({damage:0,suppression:0,losses:0,casualties:0,reinforcements:0,captures:0,construction:0,shortageHours:0,isolatedHours:0});
-const totalSides=()=>({blue:zero(),red:zero(),green:zero()});
+const totalSides=():BattleHistory["totals"]=>({blue:zero(),red:zero(),green:zero(),yellow:zero(),purple:zero()});
 export function startHistory(title:string,seed:number,units:Formation[],cities:CityState[],openWorld?:OpenWorldState|null):BattleHistory{
   const history:BattleHistory={
     title,seed,startedAt:0,samples:[],events:[],totals:totalSides(),
     records:units.map(u=>({id:u.id,name:u.name,side:u.side,kind:u.kind,damage:u.damageDealt??0,suppression:u.suppressionInflicted??0,initialStrength:u.strength,lastStrength:u.strength,active:true})),
     lastSampleHour:-Infinity,
-    startingCities:{blue:cities.filter(c=>c.owner==="blue").length,red:cities.filter(c=>c.owner==="red").length,green:cities.filter(c=>c.owner==="green").length}
+    startingCities:Object.fromEntries(SIDES.map(side=>[side,cities.filter(c=>c.owner===side).length])) as Record<Side,number>
   };
   return appendSample(history,0,units,cities,openWorld,true);
 }
@@ -34,9 +34,9 @@ export function appendSample(history:BattleHistory,hour:number,units:Formation[]
       isolated:own.filter(u=>(u.isolationHours??0)>6).length,
       territory:openWorld?.resourceNodes.filter(c=>c.owner===side).reduce((s,c)=>s+c.control,0)??cities.filter(c=>c.owner===side).length,
       dealt:totals.damage,losses:totals.losses,casualties:totals.casualties,reinforcements:totals.reinforcements,captures:totals.captures,
-      construction:totals.construction,resources:openWorld?Object.values(openWorld.resources[side]).reduce((s,n)=>s+n,0):0,
-      manpowerStock:openWorld?.resources[side].manpower??0,materialsStock:openWorld?.resources[side].materials??0,
-      fuelStock:openWorld?.resources[side].fuel??0,shortage:own.filter(u=>u.supply<20).length};
+      construction:totals.construction,resources:openWorld?Object.values(openWorld.resources[side]??{}).reduce((s,n)=>s+n,0):0,
+      manpowerStock:openWorld?.resources[side]?.manpower??0,materialsStock:openWorld?.resources[side]?.materials??0,
+      fuelStock:openWorld?.resources[side]?.fuel??0,shortage:own.filter(u=>u.supply<20).length};
   }
   history.samples.push({hour,values});history.lastSampleHour=hour;
   // Keep an actual time series without unbounded memory growth in long Dominion sessions.
