@@ -1487,9 +1487,10 @@ export default function Home(){
               .sort((a,b)=>Math.hypot(unit.x-a.x,unit.y-a.y)-Math.hypot(unit.x-b.x,unit.y-b.y))[0]:undefined;
             if(shooting){ordered.set(unit.id,{...unit,order:unit.kind==="mortar"?{type:"fire",targetX:shooting.x,targetY:shooting.y}:{type:"fire",targetUnitId:shooting.id}});continue}
             const gap=Math.hypot(unit.x-objective.x,unit.y-objective.y);
-            const oldGoal=unit.order?.waypoints?.length?unit.order.waypoints[unit.order.waypoints.length-1]:unit.order;
+            const tail=unit.order?.waypoints?.at(-1);
+            const oldGoal=tail??(unit.order?.targetX!==undefined&&unit.order.targetY!==undefined?{x:unit.order.targetX,y:unit.order.targetY}:null);
             if(gap<60){if(assignment.role==="line"&&moved.mode==="hold")ordered.set(unit.id,{...unit,order:{type:"dig"}});continue}
-            if(oldGoal?.targetX!==undefined&&oldGoal?.targetY!==undefined&&Math.hypot(oldGoal.targetX-objective.x,oldGoal.targetY-objective.y)<95)continue;
+            if(oldGoal&&Math.hypot(oldGoal.x-objective.x,oldGoal.y-objective.y)<95)continue;
             const route=movementRoutePlan(scenario,citiesRef.current,unit,{x:unit.x,y:unit.y},objective,emplacementsRef.current,openWorldRef.current,
               moved.mode==="retreat"?[]:nextUnits.filter(u=>u.side!==unit.side));
             const [first,...rest]=route;
