@@ -1364,7 +1364,7 @@ export default function Home(){
   const snapshotSeqRef=useRef(0);
   const latestSnapshotRef=useRef<MultiplayerSnapshot|null>(null);
   latestSnapshotRef.current={seq:0,units,cities,attackPlans,emplacements,constructionProjects,hour,day,running,speed,warResult,
-    frontDirectives,decoys,battleHistory:battleReport?{
+    frontDirectives,decoys,combatEffects:gunEffects.slice(-36),battleHistory:battleReport?{
       ...battleReport,
       samples:battleReport.samples.filter((_,i)=>i===battleReport.samples.length-1||i%Math.max(1,Math.ceil(battleReport.samples.length/120))===0),
       events:battleReport.events.slice(-100),
@@ -1402,6 +1402,8 @@ export default function Home(){
       setAttackPlans(snapshot.attackPlans);
       frontsRef.current=snapshot.frontDirectives??[];setFrontDirectives(frontsRef.current);
       decoysRef.current=snapshot.decoys??[];setDecoys(decoysRef.current);
+      const syncedEffects=snapshot.combatEffects??[];
+      gunEffectsRef.current=syncedEffects;setGunEffects(syncedEffects);
       if(snapshot.battleHistory){historyRef.current=snapshot.battleHistory;setBattleReport(snapshot.battleHistory)}
       warResultRef.current=snapshot.warResult;setWarResult(snapshot.warResult);
       setHour(snapshot.hour);setDay(snapshot.day);setRunning(snapshot.running);setSpeed(snapshot.speed);

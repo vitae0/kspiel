@@ -2,6 +2,7 @@ import {createClient} from "@supabase/supabase-js";
 import type {AttackPlan,CityState,ConstructionProject,Emplacement,Formation,Side} from "@/sim/types";
 import type {FrontDirective,DecoyContact} from "@/sim/warfare";
 import type {BattleHistory} from "@/sim/telemetry";
+import type {GunEvent} from "@/sim/attrition";
 
 export const SUPABASE_URL="https://qyylrkqktctcsrqgviwp.supabase.co";
 export const SUPABASE_PUBLISHABLE_KEY="sb_publishable_VaV0h0GhPx171fJHTG-avw_7oWSlJt8";
@@ -54,6 +55,7 @@ export type MultiplayerSnapshot={
   frontDirectives?:FrontDirective[];
   decoys?:DecoyContact[];
   battleHistory?:BattleHistory;
+  combatEffects?:GunEvent[];
 };
 
 type MatchmakingPayload=
