@@ -303,14 +303,29 @@ function movementRoutePlan(
   from:{x:number;y:number},
   to:{x:number;y:number},
   emplacements:Emplacement[]=[],
-  openWorld?:OpenWorldState|null
+  openWorld?:OpenWorldState|null,
+  dangerUnits:Formation[]=[]
 ){
+  const dangerCost=(points:Array<{x:number;y:number}>)=>{
+    if(!dangerUnits.length)return 0;
+    let extra=0;
+    const path=[from,...points];
+    for(let i=0;i<path.length-1;i++){
+      for(const foe of dangerUnits){
+        if(foe.side===u.side||foe.strength<12)continue;
+        const hit=segmentContact(path[i].x,path[i].y,path[i+1].x,path[i+1].y,foe.x,foe.y);
+        if(hit.distance<180)extra+=((180-hit.distance)/180)*65*(foe.strength/100);
+      }
+    }
+    return extra;
+  };
   let best:{cost:number;points:Array<{x:number;y:number}>}={
-    cost:fastSegmentTravelCost(scenario,u,from,to,false),
+    cost:fastSegmentTravelCost(scenario,u,from,to,false)+dangerCost([to]),
     points:[to]
   };
   const consider=(cost:number,points:Array<{x:number;y:number}>)=>{
-    if(Number.isFinite(cost)&&cost<best.cost)best={cost,points:dedupeRoutePoints(points)};
+    const adjusted=cost+dangerCost(points);
+    if(Number.isFinite(adjusted)&&adjusted<best.cost)best={cost:adjusted,points:dedupeRoutePoints(points)};
   };
 
   const fieldRoads=emplacements
@@ -855,6 +870,11 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       const tracked=units.find(v=>v.id===n.order?.targetUnitId&&v.strength>1);
       if(tracked)n.order={...n.order,targetX:tracked.x,targetY:tracked.y};
       else n.order={type:"defend"};
+    }
+    if(n.order?.finalType==="assault"&&n.order.finalTargetUnitId){
+      const target=units.find(v=>v.id===n.order?.finalTargetUnitId&&v.strength>1);
+      if(target&&Math.hypot(target.x-u.x,target.y-u.y)<95)
+        n.order={type:"assault",targetUnitId:target.id,targetX:target.x,targetY:target.y};
     }
 
     const inCombat=isInCombat(u,units);
@@ -1462,7 +1482,7 @@ export default function Home(){
 
   function startOrder(type:OrderType){
     if(!selected.length)return;
-    setPendingBuild(null);
+    setPendingBuild(null);setPendingMassAttack(false);setMassTargets([]);
     const selectedNow=units.filter(u=>selected.includes(u.id));
     if(type==="move"){setPendingOrder("move");setPendingPlan(false);return}
     if((type==="assault"||type==="probe")&&!selectedNow.some(u=>DIRECT_COMBAT_KINDS.has(u.kind)))return;
@@ -1494,7 +1514,7 @@ export default function Home(){
         return;
       }
       if(key==="b"){setPendingPlan(true);setPendingOrder(null);setPendingMassAttack(false);setPendingBuild(null);setConstructionAnchor(null);return}
-      if(key==="h"){setPendingMassAttack(true);setMassTargets([]);setPendingPlan(false);setPendingOrder(null);return}
+      if(key==="h"&&selected.length){setPendingMassAttack(true);setMassTargets([]);setPendingPlan(false);setPendingOrder(null);return}
       if(key==="enter"&&pendingMassAttack){launchGroupAttack();return}
       if(key==="m")startOrder("move");else if(key==="a")startOrder("assault");else if(key==="p")startOrder("probe");
       else if(key==="f")startOrder("fire");else if(key==="d")startOrder("defend");else if(key==="g")startOrder("dig");
@@ -1575,7 +1595,8 @@ export default function Home(){
     setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setOpenWorld(null);openWorldRef.current=null;setPendingStrategicBuild(null);setStrategicBuildAnchor(null);
   }
 
-  const theaterTerritory=useMemo(()=>scenario&&!openWorld?scenarioTerritoryCells(scenario,cities,units):[],[scenario,cities,units,openWorld]);
+  const territoryStep=scenario&&scenario.worldWidth>WORLD_W?560:360;
+  const theaterTerritory=useMemo(()=>scenario&&!openWorld?scenarioTerritoryCells(scenario,cities,units,scenario.worldWidth>WORLD_W?560:360):[],[scenario,cities,units,openWorld]);
 
   if(!scenario){
     const presets=SCENARIO_PRESETS.filter(p=>setupCategory==="all"||setupCategory==="historical"===p.historical);
@@ -1664,6 +1685,20 @@ export default function Home(){
       row.sort((a,b)=>(a.x-b.x)*tx+(a.y-b.y)*ty);
       row.forEach((u,i)=>{const t=(i+1)/(row.length+1);targets.set(u.id,nearestLandPoint(start.x+dx*t+normal.x*d,start.y+dy*t+normal.y*d))});
     }
+    // Form a rear-city-to-front relay chain with hops shorter than logistics range.
+    const logistics=chosen.filter(u=>u.kind==="logistics");
+    const city=cities.filter(c=>c.owner===chosen[0].side).sort((a,b)=>Math.hypot(a.x-mid.x,a.y-mid.y)-Math.hypot(b.x-mid.x,b.y-mid.y))[0];
+    if(city&&logistics.length){
+      const head=nearestLandPoint(mid.x-normal.x*320,mid.y-normal.y*320);
+      const toHead=Math.hypot(head.x-city.x,head.y-city.y);
+      if(toHead>1){
+        const hop=Math.min(760,toHead/(logistics.length+1));
+        logistics.forEach((u,i)=>{
+          const part=Math.min(1,(i+1)*hop/toHead);
+          targets.set(u.id,nearestLandPoint(city.x+(head.x-city.x)*part,city.y+(head.y-city.y)*part));
+        });
+      }
+    }
     commitUnits(prev=>prev.map(u=>{
       const target=targets.get(u.id);if(!target)return u;
       const route=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},target,emplacementsRef.current,openWorldRef.current);
@@ -1720,7 +1755,7 @@ export default function Home(){
       const dx=u.x-target.x,dy=u.y-target.y,distance=Math.max(1,Math.hypot(dx,dy));
       const staging=nearestLandPoint(target.x+dx/distance*standOff,target.y+dy/distance*standOff);
       if(artillery&&distance<=standOff*1.08)return{...u,order:{type:"fire",targetUnitId:target.id}};
-      const path=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},staging,emplacementsRef.current,openWorldRef.current);
+      const path=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},staging,emplacementsRef.current,openWorldRef.current,units);
       const [first,...rest]=path;
       const finalType:OrderType=artillery?"fire":support?"resupply":"assault";
       if(!first)return{...u,order:artillery?{type:"fire",targetUnitId:target.id}:support?{type:"resupply"}:{type:"assault",targetUnitId:target.id}};
@@ -2083,7 +2118,7 @@ export default function Home(){
           {activeScenario.terrainFeatures.map(f=><path key={f.id} d={f.path} className={"terrain-region "+f.terrain}/>)}
           <g className="territory-layer" clipPath="url(#landClip)">
             {(["blue","red","green"] as Side[]).map(side=><g key={"zone-"+side} className={"territory-mass "+side}>
-              <path d={territoryBoundaryPath(openWorld?openWorld.resourceNodes:theaterTerritory,side,openWorld?560:360)} fillRule="evenodd"/>
+              <path d={territoryBoundaryPath(openWorld?openWorld.resourceNodes:theaterTerritory,side,openWorld?560:territoryStep)} fillRule="evenodd"/>
             </g>)}
             {(openWorld?openWorld.resourceNodes:theaterTerritory).filter(cell=>cell.contested>.7&&cell.control<.67).map(cell=><circle key={"uncertain-"+cell.x+"-"+cell.y} className="territory-disputed" cx={cell.x} cy={cell.y} r={openWorld?165:105} opacity={Math.min(.26,cell.contested*.24)}/>)}
           </g>
