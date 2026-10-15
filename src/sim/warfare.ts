@@ -1,9 +1,10 @@
 import {terrainAt} from "./game";
 import type {CityState,Emplacement,Formation,Scenario,Side} from "./types";
+import {frontPathFrame,frontPathPoints,frontVertexFrame,nearestFrontFraction,type FrontPoint} from "./front-path";
 
 export type FrontMode="hold"|"advance"|"push"|"retreat";
 export type FrontDirective={
-  id:string;side:Side;groupId:string;start:{x:number;y:number};end:{x:number;y:number};
+  id:string;side:Side;groupId:string;start:FrontPoint;end:FrontPoint;points?:FrontPoint[];
   mode:FrontMode;lastIssued:number;createdAt:number;reserveFraction:number;facing?:1|-1;
 };
 export type FrontAssignment={unitId:string;x:number;y:number;role:"line"|"reserve"|"gun"|"relay"};
@@ -89,70 +90,75 @@ export function decoyVisibleTo(decoy:DecoyContact,observer:Side,units:Formation[
 export function frontAssignments(front:FrontDirective,units:Formation[],cities:CityState[],scenario:Scenario):FrontAssignment[]{
   const group=units.filter(u=>u.groupId===front.groupId&&u.side===front.side&&u.strength>4);
   if(!group.length)return [];
-  const dx=front.end.x-front.start.x,dy=front.end.y-front.start.y,length=Math.max(1,Math.hypot(dx,dy));
-  const tangent={x:dx/length,y:dy/length},middle={x:(front.start.x+front.end.x)/2,y:(front.start.y+front.end.y)/2};
+  const path=frontPathPoints(front),middle=frontPathFrame(path,.5);
   const hostile=units.filter(u=>u.side!==front.side&&u.strength>12);
   const nearest=[...hostile].sort((a,b)=>dist(a,middle)-dist(b,middle))[0];
-  const sign=front.facing??(nearest&&((nearest.x-middle.x)*(-tangent.y)+(nearest.y-middle.y)*tangent.x)<0?-1:1);
-  const normal={x:-tangent.y*sign,y:tangent.x*sign};
+  const sign=front.facing??(nearest&&((nearest.x-middle.x)*middle.nx+(nearest.y-middle.y)*middle.ny)<0?-1:1);
+  const at=(t:number)=>{const f=frontPathFrame(path,t);return{...f,nx:f.nx*sign,ny:f.ny*sign}};
   const isCombat=(u:Formation)=>!["artillery","heavy_artillery","mortar","logistics"].includes(u.kind);
   const combat=group.filter(isCombat).sort((a,b)=>b.strength*a.organization-a.strength*b.organization);
   const reserveCount=clamp(Math.round(combat.length*front.reserveFraction),combat.length>4?1:0,Math.max(1,combat.length-1));
   const reserveUnits=new Set(combat.slice(0,reserveCount).map(u=>u.id));
-  const line=group.filter(u=>isCombat(u)&&!reserveUnits.has(u.id)).sort((a,b)=>((a.x-front.start.x)*tangent.x+(a.y-front.start.y)*tangent.y)-((b.x-front.start.x)*tangent.x+(b.y-front.start.y)*tangent.y));
+  const line=group.filter(u=>isCombat(u)&&!reserveUnits.has(u.id))
+    .sort((a,b)=>nearestFrontFraction(path,a)-nearestFrontFraction(path,b));
   const exposure=[0,1,2,3].map(i=>{
-    const point={x:front.start.x+dx*(i+.5)/4,y:front.start.y+dy*(i+.5)/4};
-    const strength=hostile.filter(u=>dist(u,point)<510).reduce((s,u)=>s+u.strength*(u.kind==="tank"?1.4:1),0);
-    const defenders=line.filter(u=>dist(u,point)<460).reduce((s,u)=>s+u.strength,0);
-    return{point,threat:strength/Math.max(30,defenders)};
+    const frame=at((i+.5)/4),point={x:frame.x,y:frame.y};
+    const strength=hostile.filter(u=>dist(u,point)<510).reduce((sum,u)=>sum+u.strength*(u.kind==="tank"?1.4:1),0);
+    const defenders=line.filter(u=>dist(u,point)<460).reduce((sum,u)=>sum+u.strength,0);
+    return{frame,threat:strength/Math.max(30,defenders)};
   }).sort((a,b)=>b.threat-a.threat);
-  const weakest=exposure[0].point;
+  const weakest=exposure[0].frame;
   const safe=(x:number,y:number)=>{
     const px=clamp(x,4,scenario.worldWidth-4),py=clamp(y,4,scenario.worldHeight-4);
     const t=terrainAt(scenario,px,py).terrain;
-    if(t!=="water"&&t!=="highmountain")return{x:px,y:py};
-    return middle;
+    return t!=="water"&&t!=="highmountain"?{x:px,y:py}:{x:middle.x,y:middle.y};
   };
   const lines:FrontAssignment[]=line.map((u,i)=>{
-    const t=(i+.5)/line.length;
-    return{unitId:u.id,...safe(front.start.x+dx*t+normal.x*20,front.start.y+dy*t+normal.y*20),role:"line"};
+    const f=at((i+.5)/line.length);
+    return{unitId:u.id,...safe(f.x+f.nx*20,f.y+f.ny*20),role:"line"};
   });
   const reserves=group.filter(u=>reserveUnits.has(u.id)).map((u,i)=>{
     const offset=(i-(reserveCount-1)/2)*68;
-    return{unitId:u.id,...safe(weakest.x-normal.x*240+tangent.x*offset,weakest.y-normal.y*240+tangent.y*offset),role:"reserve" as const};
+    return{unitId:u.id,...safe(weakest.x-weakest.nx*240+weakest.tx*offset,weakest.y-weakest.ny*240+weakest.ty*offset),role:"reserve" as const};
   });
-  const support=group.filter(u=>!isCombat(u)&&u.kind!=="logistics").map((u,i)=>{
-    const depth=u.kind==="heavy_artillery"?340:u.kind==="artillery"?260:185;
-    const t=(i+.5)/Math.max(1,group.filter(v=>!isCombat(v)&&v.kind!=="logistics").length);
-    return{unitId:u.id,...safe(front.start.x+dx*t-normal.x*depth,front.start.y+dy*t-normal.y*depth),role:"gun" as const};
+  const guns=group.filter(u=>!isCombat(u)&&u.kind!=="logistics");
+  const support=guns.map((u,i)=>{
+    const depth=u.kind==="heavy_artillery"?340:u.kind==="artillery"?260:185,f=at((i+.5)/guns.length);
+    return{unitId:u.id,...safe(f.x-f.nx*depth,f.y-f.ny*depth),role:"gun" as const};
   });
   const logistics=group.filter(u=>u.kind==="logistics");
   const rear=cities.filter(c=>c.owner===front.side).sort((a,b)=>dist(a,middle)-dist(b,middle))[0];
   const relay=logistics.map((u,i)=>{
-    const base=rear??middle,target={x:middle.x-normal.x*290,y:middle.y-normal.y*290};
+    const base=rear??middle,target={x:middle.x-middle.nx*sign*290,y:middle.y-middle.ny*sign*290};
     const t=(i+1)/(logistics.length+1);
     return{unitId:u.id,...safe(base.x+(target.x-base.x)*t,base.y+(target.y-base.y)*t),role:"relay" as const};
   });
   return [...lines,...reserves,...support,...relay];
 }
-/** Advance exactly one tactical increment after the minimum order interval. */
+/** Advance the entire sketched front along local normals, retaining all bends. */
 export function advanceDirective(plan:FrontDirective,hours:number,units:Formation[],cities:CityState[],scenario:Scenario){
   if(plan.mode==="hold")return plan;
   const step=plan.mode==="push"?170:plan.mode==="advance"?85:-130;
-  const dx=plan.end.x-plan.start.x,dy=plan.end.y-plan.start.y;
-  const mid={x:(plan.start.x+plan.end.x)/2,y:(plan.start.y+plan.end.y)/2};
+  const path=frontPathPoints(plan),mid=frontPathFrame(path,.5);
   const nearest=units.filter(u=>u.side!==plan.side).sort((a,b)=>dist(a,mid)-dist(b,mid))[0];
-  const tangent={x:dx/Math.max(1,Math.hypot(dx,dy)),y:dy/Math.max(1,Math.hypot(dx,dy))};
-  const sign=plan.facing??(nearest&&((nearest.x-mid.x)*(-tangent.y)+(nearest.y-mid.y)*tangent.x)<0?-1:1);
-  const normal={x:-tangent.y*sign,y:tangent.x*sign};
+  const sign=plan.facing??(nearest&&((nearest.x-mid.x)*mid.nx+(nearest.y-mid.y)*mid.ny)<0?-1:1);
   const friendly=units.filter(u=>u.side===plan.side&&u.groupId===plan.groupId);
   const nearbyEnemy=units.filter(u=>u.side!==plan.side&&dist(u,mid)<520);
-  const power=(xs:Formation[])=>xs.reduce((s,u)=>s+u.strength*(.3+.7*u.organization/100)*(.3+.7*u.supply/100),0);
-  const ratio=power(friendly)/Math.max(1,power(nearbyEnemy));
-  // Controlled advance pauses when overwhelmingly outnumbered; push is explicitly riskier.
-  if(plan.mode==="advance"&&ratio<.75)return plan;
-  const move=(p:{x:number;y:number})=>({x:clamp(p.x+normal.x*step,3,scenario.worldWidth-3),y:clamp(p.y+normal.y*step,3,scenario.worldHeight-3)});
-  const a=move(plan.start),b=move(plan.end);
-  if(terrainAt(scenario,a.x,a.y).terrain==="water"||terrainAt(scenario,b.x,b.y).terrain==="water")return plan;
-  return {...plan,start:a,end:b,facing:sign as 1|-1};
+  const power=(xs:Formation[])=>xs.reduce((sum,u)=>sum+u.strength*(.3+.7*u.organization/100)*(.3+.7*u.supply/100),0);
+  if(plan.mode==="advance"&&power(friendly)/Math.max(1,power(nearbyEnemy))<.75)return plan;
+  const shifted=path.map((p,i)=>{
+    const f=frontVertexFrame(path,i);
+    return{x:clamp(p.x+f.nx*sign*step,3,scenario.worldWidth-3),
+      y:clamp(p.y+f.ny*sign*step,3,scenario.worldHeight-3)};
+  });
+  // Check the full new route, not only its endpoints.
+  if(shifted.some((p,i)=>{
+    if(terrainAt(scenario,p.x,p.y).terrain==="water")return true;
+    if(!i)return false;
+    const prev=shifted[i-1],steps=Math.max(1,Math.ceil(dist(prev,p)/90));
+    for(let k=1;k<steps;k++)if(terrainAt(scenario,prev.x+(p.x-prev.x)*k/steps,prev.y+(p.y-prev.y)*k/steps).terrain==="water")return true;
+    return false;
+  }))return plan;
+  return{...plan,start:shifted[0],end:shifted[shifted.length-1],
+    ...(plan.points?{points:shifted}:{}),facing:sign as 1|-1};
 }
