@@ -1620,7 +1620,7 @@ export default function Home(){
           const assignments=frontAssignments(moved,nextUnits,citiesRef.current,scenario);
           for(const assignment of assignments){
             const unit=nextUnits.find(u=>u.id===assignment.unitId);
-            if(!unit||unit.order?.type==="retreat"||unit.organization<16||unit.strength<10)continue;
+            if(!unit||unit.order?.type==="retreat"||unit.order?.marchId||unit.organization<16||unit.strength<10)continue;
             const objective={x:assignment.x,y:assignment.y};
             const targetEnemies=nextUnits.filter(u=>u.side!==unit.side&&u.strength>5);
             const range=unit.kind==="heavy_artillery"?820:unit.kind==="artillery"?540:unit.kind==="mortar"?mortarMaxRange(scenario,unit):0;
@@ -2234,7 +2234,8 @@ export default function Home(){
         }
         if(requested==="probe"&&DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:"probe",targetX:tx,targetY:ty}};
         const slot=slots.get(u.id);
-        const destination=slot?nearestLandPoint(slot.x,slot.y):{x:tx,y:ty};
+        const candidate=slot?nearestLandPoint(slot.x,slot.y):{x:tx,y:ty};
+        const destination=terrainAt(activeScenario,candidate.x,candidate.y).terrain==="water"?{x:tx,y:ty}:candidate;
         const route=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},destination,emplacementsRef.current,openWorldRef.current);
         const [first,...rest]=route;
         const inColumn=Boolean(marchId)&&!AMMO_TYPES.has(u.kind)&&u.kind!=="logistics";
