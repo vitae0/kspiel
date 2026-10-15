@@ -228,6 +228,7 @@ function pointSegmentDistance(x:number,y:number,a:{x:number;y:number},b:{x:numbe
 export function isLand(scenario:Scenario,x:number,y:number){
   const worldWidth=scenario.worldWidth??WORLD_W,worldHeight=scenario.worldHeight??WORLD_H;
   if(x<0||x>worldWidth||y<0||y>worldHeight)return false;
+  if(scenario.landPolygons?.length)return scenario.landPolygons.some(poly=>pointInPolygon(x,y,poly));
   if(scenario.landPolygon?.length)return pointInPolygon(x,y,scenario.landPolygon);
   return x>=coastX(scenario.coast,y);
 }
@@ -669,7 +670,8 @@ function geographicPoint(theater:GeographicTheater,longitude:number,latitude:num
 function generateGeographicTheater(seed:number,preset:ScenarioPreset,rnd:()=>number,theater:GeographicTheater):Scenario{
   const worldWidth=WORLD_W*(preset.mapScale??2),worldHeight=WORLD_H*(preset.mapScale??2);
   const landPolygon=theater.outline.map(([lon,lat])=>geographicPoint(theater,lon,lat,worldWidth,worldHeight));
-  const canPlace=(x:number,y:number)=>pointInPolygon(x,y,landPolygon);
+  const landPolygons=[landPolygon,...(theater.islands??[]).map(island=>island.map(([lon,lat])=>geographicPoint(theater,lon,lat,worldWidth,worldHeight)))];
+  const canPlace=(x:number,y:number)=>landPolygons.some(poly=>pointInPolygon(x,y,poly));
   const rawCities=theater.cities.map(([name,longitude,latitude,owner])=>({
     name,...geographicPoint(theater,longitude,latitude,worldWidth,worldHeight),owner,capture:0
   }));
@@ -719,23 +721,26 @@ function generateGeographicTheater(seed:number,preset:ScenarioPreset,rnd:()=>num
     const a=byName.get(nameA),b=byName.get(nameB);
     if(a&&b){roadNetwork.routes.push(routeBetween(a,b,rnd));extra.add(key)}
   }
-  // Ensure all road endpoints use the relocated city locations; keeps logistics consistent.
-  const sourceByName=new Map(rawCities.map(c=>[c.name,c]));
-  for(const route of roadNetwork.routes){
-    for(const endpoint of [0,route.length-1]){
-      const pt=route[endpoint];
-      const source=rawCities.find(city=>Math.hypot(city.x-pt.x,city.y-pt.y)<2);
-      const moved=source?byName.get(source.name):null;
-      if(moved)route[endpoint]={x:moved.x,y:moved.y};
+  // Exclude sea-spanning roads, especially across the Messina Strait and along the peninsular coastline.
+  const safeRoads=roadNetwork.routes.filter(route=>{
+    let samples=0,land=0;
+    for(let segment=1;segment<route.length;segment++){
+      const a=route[segment-1],b=route[segment];
+      for(let k=0;k<=8;k++){
+        const x=a.x+(b.x-a.x)*k/8,y=a.y+(b.y-a.y)*k/8;
+        samples++;if(canPlace(x,y))land++;
+      }
     }
-  }
+    return land/samples>.82;
+  });
   const rivers=theater.rivers.map(line=>line.map(([lon,lat])=>geographicPoint(theater,lon,lat,worldWidth,worldHeight)));
   const shell:Scenario={
     seed,presetId:preset.id,title:preset.title,theme:preset.theme,era:preset.era,historical:preset.historical,year:preset.year,
     location:preset.location,sideNames:preset.sideNames,sideFlags:preset.sideFlags,worldWidth,worldHeight,
-    landPolygon,coast:{base:-999,amp1:0,amp2:0,amp3:0,f1:0,f2:0,f3:0,p1:0,p2:0},cities,
+    landPolygon,landPolygons,coast:{base:-999,amp1:0,amp2:0,amp3:0,f1:0,f2:0,f3:0,p1:0,p2:0},cities,
     terrainFeatures:relief,roadNodes:cities.map((city,i)=>({id:"road-"+i,x:city.x,y:city.y,cityName:city.name})),
-    roadRoutes:roadNetwork.routes,riverRoutes:rivers,formations:[],landPath:"M "+landPolygon.map(pt=>pt.x.toFixed(1)+" "+pt.y.toFixed(1)).join(" L ")+" Z"
+    roadRoutes:safeRoads,riverRoutes:rivers,formations:[],
+    landPath:landPolygons.map(poly=>"M "+poly.map(pt=>pt.x.toFixed(1)+" "+pt.y.toFixed(1)).join(" L ")+" Z").join(" ")
   };
   shell.formations=[...makeFormations("blue",shell,rnd),...makeFormations("red",shell,rnd)];
   return shell;

@@ -57,6 +57,7 @@ export type Scenario={
   worldWidth:number;
   worldHeight:number;
   landPolygon?:Array<{x:number;y:number}>;
+  landPolygons?:Array<Array<{x:number;y:number}>>;
   landPath:string;
   terrainFeatures:TerrainFeature[];
   roadNodes:RoadNode[];
