@@ -6,6 +6,7 @@ import {type CityState,type Emplacement,type Formation,type Scenario,type Terrai
 import {clamp,segmentContact,segmentsIntersect,structureSegmentDistance} from "@/sim/geometry";
 import {MOVEMENT_SCALE,DIRECT_COMBAT_KINDS,ARTILLERY_KINDS,GUN_ARTILLERY_KINDS,MOTORIZED_KINDS,isInCombat,retreatDestination,mortarTerrainProfile,mortarMaxRange,mortarDispersion,movementSupplyFactor,roadMovementBonus,movementTerrainFactor,forageSupply} from "@/sim/rules";
 import {computeSupplyNetwork,computeLogisticsLinks,supplyAccess} from "@/sim/logistics";
+import {SpatialGrid} from "@/sim/spatial-grid";
 
 export function resolveReliefs(units:Formation[],cities:CityState[]):Formation[]{
   const out=units.map(u=>({...u,order:u.order?{...u.order}:undefined}));
@@ -184,9 +185,13 @@ export function simulate(scenario:Scenario,units:Formation[],hours:number,cities
 
   let result=resolveReliefs(next,cities);
 
+  // Preserve pair ordering (and therefore combat outcomes) while checking only local units.
+  const combatGrid=new SpatialGrid(result.map((u,index)=>({x:u.x,y:u.y,index})));
   for(let i=0;i<result.length;i++){
-    for(let j=i+1;j<result.length;j++){
-      const a=result[i],b=result[j];
+    const a=result[i];
+    const candidates=combatGrid.within(a.x,a.y,48).filter(entry=>entry.index>i).sort((a,b)=>a.index-b.index);
+    for(const entry of candidates){
+      const j=entry.index,b=result[j];
       if(a.side===b.side)continue;
       const dist=Math.hypot(a.x-b.x,a.y-b.y);
       if(dist>48)continue;

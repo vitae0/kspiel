@@ -20,5 +20,7 @@ jobs:
         run: node scripts/smoke-theaters.cjs
       - name: Attrition and synchronized march tests
         run: node scripts/smoke-attrition.cjs
+      - name: Spatial index parity checks
+        run: node scripts/smoke-spatial.cjs
       - name: Typecheck and static build
         run: npm run build

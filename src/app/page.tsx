@@ -10,12 +10,20 @@ import AfterActionReport from "./after-action";
 import BrandMark from "./brand-mark";
 import MenuAtmosphere from "./menu-atmosphere";
 import MenuScore from "./menu-score";
-import {scenarioTerritoryCells} from "@/sim/territory";
-import {organicTerritoryBoundaryPath} from "@/sim/organic-territory";
+import {useTerritoryView} from "@/app/hooks/use-territory-view";
 import {botControlledSides,createMatchConfig,defaultArmyGroups,localControlledSides} from "@/sim/session";
 import {addStrategicStructure,advanceOpenWorld,buildStrategicCity,createOpenWorldState,queueRecruitment,UNIT_COST,type OpenWorldBuildKind,type OpenWorldState} from "@/sim/openworld";
 import {closeMultiplayerRoom,createPrivateMatch,findQuickPlay,inviteUrl,joinPrivateMatch,supabase,type MultiplayerSession,type MultiplayerSnapshot,type MultiplayerTeamSize,type UnitCommandPatch} from "@/lib/multiplayer";
 import type {AttackPlan,CityState,ConstructionProject,Emplacement,EmplacementKind,FlagStyle,Formation,FormationShape,OrderType,Scenario,Side,TerrainSample} from "@/sim/types";
+
+import {clamp,segmentsIntersect} from "@/sim/geometry";
+import {SOLO_SPEED,MULTIPLAYER_SPEED,SIM_HOURS_PER_REAL_SECOND,MAX_FRAME_SECONDS,SIM_TICK_MS,AI_COMMAND_INTERVAL_SECONDS,RETREAT_SUPPLY_MIN,DIRECT_COMBAT_KINDS,ARTILLERY_KINDS,GUN_ARTILLERY_KINDS,isInCombat,retreatDestination,visionRange,mortarMaxRange,mortarDispersion} from "@/sim/rules";
+import {movementRoutePlan} from "@/sim/navigation";
+import {routeInterdictionPoints,type SupplyNetwork,computeSupplyNetwork,supplySourceAtPoint,logisticsDistributionRange,computeLogisticsLinks,supplyAccess} from "@/sim/logistics";
+import {updateCities,enemyAI} from "@/sim/strategy";
+import {simulate} from "@/sim/simulation";
+import {applyEmplacementFire,advanceConstruction} from "@/sim/construction";
+import {pct,timeLabel,constructionLabel,constructionShort,isLinearConstruction} from "@/app/ui-utils";
 
 const COMMAND_GUIDE=[
   {title:"SELECT YOUR ARMY",body:"Click a unit or drag a selection box. Keys 1–6 select army groups; Ctrl+1–6 assigns selected units. Nearby units start in the same group."},
@@ -28,14 +36,6 @@ const COMMAND_GUIDE=[
   {title:"MULTIPLAYER SPEED",body:"The host controls the shared clock with 0.5×, 1× and 2× multiplayer speeds. Other commanders receive authoritative snapshots and do not run a separate simulation."},
   {title:"REINFORCEMENTS",body:"In scenario battles, after four in-game days, armies below two-thirds of their initial number receive up to three formations per reserve wave from a safe rear city."}
 ] as const;
-import {clamp,segmentsIntersect} from "@/sim/geometry";
-import {SOLO_SPEED,MULTIPLAYER_SPEED,SIM_HOURS_PER_REAL_SECOND,MAX_FRAME_SECONDS,SIM_TICK_MS,AI_COMMAND_INTERVAL_SECONDS,RETREAT_SUPPLY_MIN,DIRECT_COMBAT_KINDS,ARTILLERY_KINDS,GUN_ARTILLERY_KINDS,isInCombat,retreatDestination,visionRange,mortarMaxRange,mortarDispersion} from "@/sim/rules";
-import {movementRoutePlan} from "@/sim/navigation";
-import {routeInterdictionPoints,type SupplyNetwork,computeSupplyNetwork,supplySourceAtPoint,logisticsDistributionRange,computeLogisticsLinks,supplyAccess} from "@/sim/logistics";
-import {updateCities,enemyAI} from "@/sim/strategy";
-import {simulate} from "@/sim/simulation";
-import {applyEmplacementFire,advanceConstruction} from "@/sim/construction";
-import {pct,timeLabel,constructionLabel,constructionShort,isLinearConstruction} from "@/app/ui-utils";
 const IRREGULAR_TRAITS:Partial<Record<Formation["kind"],string>>={
   militia:"LOCAL DEFENSE · Low equipment cost · Strong city garrisons · Weak breakthrough · Modest supply use",
   partisan:"FOREST AMBUSH · Concealment · Rural foraging · Disrupts hostile road supply and favors irregular engagements",
@@ -655,15 +655,7 @@ export default function Home(){
   const territoryZoomEase=territoryZoomT*territoryZoomT*(3-2*territoryZoomT);
   const territoryLayerOpacity=1-.88*territoryZoomEase;
 
-  const territoryStep=scenario&&scenario.worldWidth>WORLD_W?560:360;
-  const theaterTerritory=useMemo(()=>scenario&&!openWorld?scenarioTerritoryCells(scenario,cities,units,scenario.worldWidth>WORLD_W?560:360):[],[scenario,cities,units,openWorld]);
-  const territoryCells=openWorld?.resourceNodes??theaterTerritory;
-  const contourStep=openWorld?560:territoryStep;
-  const territoryPaths=useMemo(()=>({
-    blue:organicTerritoryBoundaryPath(territoryCells,"blue",contourStep),
-    red:organicTerritoryBoundaryPath(territoryCells,"red",contourStep),
-    green:organicTerritoryBoundaryPath(territoryCells,"green",contourStep)
-  }),[territoryCells,contourStep]);
+  const {theaterTerritory,territoryPaths}=useTerritoryView(scenario,cities,units,openWorld);
 
   if(!scenario){
     const presets=SCENARIO_PRESETS.filter(p=>setupCategory==="all"||
@@ -711,7 +703,7 @@ export default function Home(){
   }
   const activeScenario:Scenario=scenario;
   const mapW=activeScenario.worldWidth,mapH=activeScenario.worldHeight;
-  const currentSupplyNetwork=computeSupplyNetwork(activeScenario,units,cities);
+  const currentSupplyNetwork=useMemo(()=>computeSupplyNetwork(activeScenario,units,cities),[activeScenario,units,cities]);
 
   function mapPoint(clientX:number,clientY:number){
     const rect=viewport.current?.getBoundingClientRect();if(!rect)return null;
@@ -1202,7 +1194,7 @@ export default function Home(){
     return u.order.type.toUpperCase();
   }
 
-  const currentLogisticsGraph=computeLogisticsLinks(activeScenario,units,cities,currentSupplyNetwork,emplacements);
+  const currentLogisticsGraph=useMemo(()=>computeLogisticsLinks(activeScenario,units,cities,currentSupplyNetwork,emplacements),[activeScenario,units,cities,currentSupplyNetwork,emplacements]);
   const primaryAccess=primary?supplyAccess(activeScenario,primary,units,cities,currentSupplyNetwork,emplacements,currentLogisticsGraph,openWorld):null;
   const canRetreat=selectedUnits.some(u=>isInCombat(u,units));
   const activeFront=primary?.groupId?frontDirectives.find(f=>f.groupId===primary.groupId):undefined;

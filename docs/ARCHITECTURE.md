@@ -21,3 +21,9 @@ The simulation has been extracted from the original monolithic `src/app/page.tsx
 - Optimize hot paths with benchmarks before changing tactical outcomes.
 - Run `node scripts/smoke-theaters.cjs`, `node scripts/smoke-attrition.cjs`, and `npm run build` on every behavior-affecting change.
 - Treat all performance targets as hypotheses until measured in a production browser profile.
+
+## Performance
+- Static road queries use a WeakMap-scoped indexed geometry lookup, validated against full scans.
+- Combat pairs use local spatial queries, preserving original pair order.
+- Territory path calculations are presentation-only snapshots updated at most every 600ms, immediately on owner changes.
+- React hover changes no longer rebuild derived supply/link graphs.

@@ -56,7 +56,12 @@ export function enemyAI(scenario:Scenario,units:Formation[],cities:CityState[],s
 
   return units.map((u):Formation=>{
     if(u.side!==side)return u;
-    const nearestHostile=hostile.map(v=>({v,d:Math.hypot(v.x-u.x,v.y-u.y)})).sort((a,b)=>a.d-b.d)[0];
+    let nearestHostile:{v:Formation;d:number}|undefined;
+    let nearestSquared=Infinity;
+    for(const v of hostile){
+      const dx=v.x-u.x,dy=v.y-u.y,d2=dx*dx+dy*dy;
+      if(d2<nearestSquared){nearestSquared=d2;nearestHostile={v,d:Math.sqrt(d2)}}
+    }
     if(!nearestHostile)return u;
     // Irregulars prioritize isolated convoys and vulnerable artillery instead of open-field clashes.
     if(u.kind==="partisan"||u.kind==="raider"){

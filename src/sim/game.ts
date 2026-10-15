@@ -1,6 +1,7 @@
 import type {CityState,Formation,Scenario,ScenarioPreset,ScenarioTheme,Side,TerrainFeature,TerrainKind,TerrainSample,UnitKind} from "./types";
 import {groupNearbyFormations} from "./operations";
 import {GEOGRAPHIC_THEATERS,type GeographicTheater} from "./theaters";
+import {roadNearPoint} from "./terrain-index";
 
 export const WORLD_W=8400;
 export const WORLD_H=5600;
@@ -250,9 +251,7 @@ export function terrainAt(scenario:Scenario,x:number,y:number):TerrainSample{
   return{x,y,terrain:baseTerrain,elevation:.36+.07*Math.sin(x*.003+scenario.seed)+.04*Math.cos(y*.005),road:nearRoad(scenario,x,y)};
 }
 
-export function nearRoad(scenario:Scenario,x:number,y:number){
-  return scenario.roadRoutes.some(route=>route.slice(0,-1).some((p,i)=>pointSegmentDistance(x,y,p,route[i+1])<30));
-}
+export function nearRoad(scenario:Scenario,x:number,y:number){return roadNearPoint(scenario,x,y)}
 
 function featureSpec(theme:ScenarioTheme,rnd:()=>number):Array<[TerrainFeature["terrain"],number,[number,number],[number,number]]>{
   if(theme==="mountain")return[
