@@ -470,3 +470,8 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .scenario-card .scenario-theme{letter-spacing:.065em}
 .scenario-card:has(.scenario-theme) .scenario-side-line{flex-wrap:wrap}
 @media(max-width:780px){.irregular-doctrine{font-size:9px}}
+
+.unit-counter.kind-militia{--role:#c6ba82}
+.unit-counter.kind-partisan{--role:#89be86}
+.unit-counter.kind-raider{--role:#88afaa}
+.unit-counter.kind-partisan .unit-top,.unit-counter.kind-raider .unit-top{letter-spacing:-.025em}
