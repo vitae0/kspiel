@@ -3,6 +3,7 @@
 import {useEffect,useMemo,useRef,useState,type MouseEvent as ReactMouseEvent,type PointerEvent as ReactPointerEvent,type WheelEvent as ReactWheelEvent} from "react";
 import {generateScenario,polylinePath,SCENARIO_PRESETS,terrainAt,TERRAIN_RULES,UNIT_LABEL,WORLD_H,WORLD_W} from "@/sim/game";
 import {armyGroupColor,roadVisualPieces} from "@/sim/operations";
+import {AMMO_TYPES,SHELL_INTERVAL,fireBudget,marchPaces,marchSlots,replenish,type GunEvent} from "@/sim/attrition";
 import {advanceDirective,applyEncirclement,decoyVisibleTo,frontAssignments,isDetected,updateContacts,type FrontDirective,type FrontMode,type LastSeenContact,type DecoyContact} from "@/sim/warfare";
 import {startHistory,updateHistory,finishHistory,addBattleEvent,type BattleHistory} from "@/sim/telemetry";
 import AfterActionReport from "./after-action";
@@ -20,7 +21,8 @@ const COMMAND_GUIDE=[
   {title:"SUPPLY AND ROADS",body:"Supplied cities anchor supply. Only interrupted road sections turn red. Terrain and unit type change supply consumption; tanks are less hindered by trenches."},
   {title:"REINFORCEMENTS",body:"In scenario battles, after four in-game days, armies below two-thirds of their initial number receive up to three formations per reserve wave from a safe rear city."}
 ] as const;
-const SPEED_MULTIPLIER=[0,1,2.5,6];
+const SOLO_SPEED=[0,1,2.5,6];
+const MULTIPLAYER_SPEED=[0,.5,1,2];
 const SIM_HOURS_PER_REAL_SECOND=.75;
 const MAX_FRAME_SECONDS=.12;
 const SIM_TICK_MS=100;
@@ -893,7 +895,11 @@ function forageSupply(u:Formation,terrain:TerrainSample["terrain"],inCombat:bool
   return 0;
 }
 
-function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CityState[],emplacements:Emplacement[]=[],openWorld:OpenWorldState|null=null){
+function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CityState[],emplacements:Emplacement[]=[],openWorld:OpenWorldState|null=null,effects?:GunEvent[],now=0){
+  const marching=marchPaces(units,u=>{
+    const ground=terrainAt(scenario,u.x,u.y);
+    return u.speed*movementTerrainFactor(u,ground.terrain)*movementSupplyFactor(u)*(ground.road?roadMovementBonus(u):1);
+  });
   const supplyNetwork=computeSupplyNetwork(scenario,units,cities);
   const logisticsGraph=computeLogisticsLinks(scenario,units,cities,supplyNetwork,emplacements);
   const next=units.map(u=>{
@@ -923,10 +929,15 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     n.supply=clamp(n.supply+hours*forageSupply(u,sample.terrain,inCombat),0,100);
     if(MOTORIZED_KINDS.has(u.kind))n.fuel=clamp(n.fuel-hours*(inCombat?.42:.18),0,100);
 
-    if(access.level>0&&(u.isolationHours??0)<6){
+    const logisticsConnected=access.level>0&&(u.isolationHours??0)<6;
+    if(logisticsConnected){
       n.supply=clamp(n.supply+hours*access.supplyPerHour*(scenario.presetId==="open-world"?1.65:1),0,100);
       if(MOTORIZED_KINDS.has(u.kind))n.fuel=clamp(n.fuel+hours*access.fuelPerHour,0,100);
     }
+    // Gun ammunition and building materials are independent finite stockpiles.
+    // An isolated pocket only recovers at a nearly negligible field-scavenging rate.
+    if(AMMO_TYPES.has(n.kind))n.ammo=replenish(n.ammo,logisticsConnected?access.level:0,n.supply,access.supplyPerHour,hours,"ammo");
+    n.materials=replenish(n.materials,logisticsConnected?access.level:0,n.supply,access.supplyPerHour,hours,"materials");
 
     const friendlyCity=sample.objective?cities.find(c=>c.name===sample.objective&&c.owner===u.side):undefined;
     if(friendlyCity&&!inCombat&&n.supply>22){
@@ -972,7 +983,11 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
           :((u.kind==="partisan"||u.kind==="raider")&&["forest","hills","mountain"].includes(sample.terrain))?Math.min(1.04,terrain.move*1.52)
           :terrain.move;
         const supplyMove=n.order.type==="retreat"?Math.max(.72,movementSupplyFactor(n)):movementSupplyFactor(n);
-        const travel=Math.min(dist,u.speed*terrainMove*roadBonus*posture*supplyMove*hours*MOVEMENT_SCALE);
+        const ordinaryPace=u.speed*terrainMove*roadBonus*posture*supplyMove;
+        // Each independent march column advances no faster than its current slowest
+        // combat member. Guns/logistics travel separately and are not pace-limited.
+        const marchLimit=n.order.marchId?marching.get(n.order.marchId):undefined;
+        const travel=Math.min(dist,Math.min(ordinaryPace,marchLimit??Infinity)*hours*MOVEMENT_SCALE);
         let nx=clamp(u.x+dx/dist*travel,1,scenario.worldWidth-1),ny=clamp(u.y+dy/dist*travel,1,scenario.worldHeight-1);
 
         if(DIRECT_COMBAT_KINDS.has(u.kind)&&n.order.type!=="retreat"){
@@ -1087,6 +1102,9 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
       const tx=gun.order.targetX,ty=gun.order.targetY;
       const range=Math.hypot(tx-gun.x,ty-gun.y),maxRange=mortarMaxRange(scenario,gun);
       if(range>maxRange||gun.supply<8||gun.organization<10)continue;
+      const volley=fireBudget(gun.ammo,gun.kind,hours);
+      if(volley.spent<=0)continue;
+      gun.ammo=volley.remaining;
       const targetTerrain=terrainAt(scenario,tx,ty).terrain;
       const profile=mortarTerrainProfile(targetTerrain);
       const dispersion=mortarDispersion(scenario,tx,ty,range/maxRange);
@@ -1101,7 +1119,7 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
         const friendlyFire=target.side===gun.side?.55:1;
         const cover=mortarTerrainProfile(terrainAt(scenario,target.x,target.y).terrain).effect;
         const power=(gun.softAttack*(1-target.hardness)+gun.hardAttack*target.hardness)*(gun.organization/100)*(gun.supply/100)*rangeFactor*profile.effect*falloff*friendlyFire;
-        const loss=(power/Math.max(22,target.defense*.62+target.entrenchment*1.3))*hours*1.22*cover*(target.kind==="tank"?.86:target.kind==="armor"?.94:1);
+        const loss=(power/Math.max(22,target.defense*.62+target.entrenchment*1.3))*hours*volley.ratio*1.22*cover*(target.kind==="tank"?.86:target.kind==="armor"?.94:1);
         const actual=Math.min(target.strength,loss),shock=clamp(loss*4,0,25);
         if(target.side!==gun.side){gun.damageDealt=(gun.damageDealt??0)+actual;gun.suppressionInflicted=(gun.suppressionInflicted??0)+shock}
         target.suppression=clamp((target.suppression??0)+shock,0,100);
@@ -1109,7 +1127,14 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
         target.strength=clamp(target.strength-loss,0,100);
         target.organization=clamp(target.organization-loss*3.25,0,100);
       }
-      gun.supply=clamp(gun.supply-hours*.82,0,100);gun.organization=clamp(gun.organization-hours*.035,0,100);
+      gun.supply=clamp(gun.supply-hours*.82*volley.ratio,0,100);gun.organization=clamp(gun.organization-hours*.035*volley.ratio,0,100);
+      gun.shotClock=(gun.shotClock??0)+hours*volley.ratio;
+      const interval=SHELL_INTERVAL[gun.kind]??.4;
+      let emitted=0;
+      while(gun.shotClock>=interval&&emitted++<2){
+        gun.shotClock-=interval;
+        effects?.push({id:gun.id+"-"+now+"-"+emitted,kind:"mortar",side:gun.side,fromX:gun.x,fromY:gun.y,x:impactX,y:impactY,birth:now});
+      }
       continue;
     }
 
@@ -1119,17 +1144,28 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     const range=Math.hypot(target.x-gun.x,target.y-gun.y);
     const maxRange=gun.kind==="heavy_artillery"?820:540;
     if(range>maxRange||gun.supply<10||gun.organization<10)continue;
+    const volley=fireBudget(gun.ammo,gun.kind,hours);
+    if(volley.spent<=0)continue;
+    gun.ammo=volley.remaining;
     const terrain=TERRAIN_RULES[terrainAt(scenario,target.x,target.y).terrain];
     const rangeFactor=clamp(1-(range-80)/(gun.kind==="heavy_artillery"?880:530),.34,1);
     const power=(gun.softAttack*(1-target.hardness)+gun.hardAttack*target.hardness)*(gun.organization/100)*(gun.supply/100)*rangeFactor;
-    const loss=(power/Math.max(24,target.defense*terrain.defense+target.entrenchment*1.15))*hours*(gun.kind==="heavy_artillery"?1.65:1.45)*(target.kind==="tank"?.86:target.kind==="armor"?.94:1);
+    const loss=(power/Math.max(24,target.defense*terrain.defense+target.entrenchment*1.15))*hours*volley.ratio*(gun.kind==="heavy_artillery"?1.65:1.45)*(target.kind==="tank"?.86:target.kind==="armor"?.94:1);
     gun.damageDealt=(gun.damageDealt??0)+Math.min(target.strength,loss);
     const shock=clamp(loss*3.2,0,28);
     gun.suppressionInflicted=(gun.suppressionInflicted??0)+shock;
     target.suppression=clamp((target.suppression??0)+shock,0,100);
     target.morale=clamp((target.morale??82)-loss*1.5-shock*.15,0,100);
     target.strength=clamp(target.strength-loss,0,100);target.organization=clamp(target.organization-loss*2.2,0,100);
-    gun.supply=clamp(gun.supply-hours*(gun.kind==="heavy_artillery"?1.45:.95),0,100);gun.organization=clamp(gun.organization-hours*.04,0,100);
+    gun.supply=clamp(gun.supply-hours*(gun.kind==="heavy_artillery"?1.45:.95)*volley.ratio,0,100);gun.organization=clamp(gun.organization-hours*.04*volley.ratio,0,100);
+    gun.shotClock=(gun.shotClock??0)+hours*volley.ratio;
+    const interval=SHELL_INTERVAL[gun.kind]??.6;
+    let emitted=0;
+    while(gun.shotClock>=interval&&emitted++<2){
+      gun.shotClock-=interval;
+      effects?.push({id:gun.id+"-"+now+"-"+emitted,kind:gun.kind as "artillery"|"heavy_artillery",side:gun.side,
+        fromX:gun.x,fromY:gun.y,x:target.x,y:target.y,birth:now});
+    }
   }
 
   return result.filter(u=>u.strength>1);
@@ -1175,9 +1211,18 @@ function advanceConstruction(projects:ConstructionProject[],emplacements:Emplace
     const workY=project.y2===undefined?project.y:(project.y+project.y2)*.5;
     const builders=units.filter(u=>project.builderIds.includes(u.id)&&u.side===project.side&&u.strength>8&&(project.kind!=="road"||u.kind==="logistics"));
     const active=builders.filter(u=>Math.hypot(u.x-workX,u.y-workY)<92&&u.supply>12&&!isInCombat(u,units));
-    const workerPower=Math.min(12,active.reduce((sum,builder)=>sum+(builder.kind==="engineer"?4:builder.kind==="logistics"&&project.kind==="road"?1.35:1),0));
-    for(const builder of active)builder.supply=clamp(builder.supply-hours*(project.kind==="fixed_artillery"?.34:project.kind==="supply_depot"?.26:project.kind==="road"?.24:.2),0,100);
-    const progress=project.progress+hours*workerPower;
+    let workBudget=hours*12;
+    let progress=project.progress;
+    for(const builder of active){
+      if(workBudget<=0||progress>=project.requiredHours)break;
+      const skill=builder.kind==="engineer"?4:builder.kind==="logistics"&&project.kind==="road"?1.35:1;
+      const stock=clamp(builder.materials??100,0,100);
+      const work=Math.min(hours*skill,workBudget,project.requiredHours-progress,stock/1.65);
+      if(work<=0)continue;
+      builder.materials=clamp(stock-work*1.65,0,100);
+      builder.supply=clamp(builder.supply-work*(project.kind==="fixed_artillery"?.095:project.kind==="supply_depot"?.08:.06),0,100);
+      progress+=work;workBudget-=work;
+    }
     if(progress>=project.requiredHours){
       nextEmplacements.push({
         id:"em-"+project.id,kind:project.kind,side:project.side,x:project.x,y:project.y,x2:project.x2,y2:project.y2,
@@ -1197,6 +1242,8 @@ export default function Home(){
   const [pendingOrder,setPendingOrder]=useState<OrderType|null>(null);
   const [running,setRunning]=useState(true);
   const [speed,setSpeed]=useState(1);
+  const [marchShape,setMarchShape]=useState<FormationShape>("line");
+  const [gunEffects,setGunEffects]=useState<GunEvent[]>([]);
   const [hour,setHour]=useState(6);
   const [day,setDay]=useState(1);
   const [pan,setPan]=useState({x:-260,y:-190});
@@ -1261,6 +1308,8 @@ export default function Home(){
   const planCounter=useRef(1);
   const buildCounter=useRef(1);
   const initialRosterRef=useRef<Formation[]>([]);
+  const marchSerial=useRef(1);
+  const gunEffectsRef=useRef<GunEvent[]>([]);
   const initialCountRef=useRef<Record<Side,number>>({blue:0,red:0,green:0});
   const elapsedHoursRef=useRef(0);
   const lastReserveRef=useRef<Record<Side,number>>({blue:0,red:0,green:0});
@@ -1508,12 +1557,18 @@ export default function Home(){
     const tick=()=>{
       const now=performance.now();
       const realSeconds=Math.min(MAX_FRAME_SECONDS,Math.max(0,(now-last)/1000));last=now;aiElapsed+=realSeconds;
-      const simHours=realSeconds*SIM_HOURS_PER_REAL_SECOND*SPEED_MULTIPLIER[speed];
+      const simHours=realSeconds*SIM_HOURS_PER_REAL_SECOND*(multiplayerRef.current?MULTIPLAYER_SPEED:SOLO_SPEED)[speed];
 
       const beforeUnits=unitsRef.current,beforeCities=citiesRef.current,beforeEmplacements=emplacementsRef.current;
       let working=unitsRef.current;
       if(aiElapsed>=AI_COMMAND_INTERVAL_SECONDS){for(const side of botSides)working=enemyAI(scenario,working,citiesRef.current,side,decoysRef.current,elapsedHoursRef.current);aiElapsed=0}
-      let nextUnits=simulate(scenario,working,simHours,citiesRef.current,emplacementsRef.current,openWorldRef.current);
+      const freshEffects:GunEvent[]=[];
+      let nextUnits=simulate(scenario,working,simHours,citiesRef.current,emplacementsRef.current,openWorldRef.current,freshEffects,now);
+      // Keep the map responsive during mass barrages, including 100+ artillery pieces.
+      const activeEffects=[...gunEffectsRef.current.filter(e=>now-e.birth<1350),...freshEffects].slice(-100);
+      if(freshEffects.length||activeEffects.length!==gunEffectsRef.current.length){
+        gunEffectsRef.current=activeEffects;setGunEffects(activeEffects);
+      }
       elapsedHoursRef.current+=simHours;
       if(elapsedHoursRef.current-lastEncirclementRef.current>=1.0){
         nextUnits=applyEncirclement(nextUnits,citiesRef.current,elapsedHoursRef.current-lastEncirclementRef.current);
@@ -1717,7 +1772,8 @@ export default function Home(){
       historyRef.current=startHistory(generated.title,seed,generated.formations,generated.cities,null);
     }
     const first=generated.formations.find(u=>u.side===activeSide);setSelected(first?[first.id]:[]);
-    const mapScale=generated.worldWidth/WORLD_W;setRunning(true);setSpeed(1);setHour(6);setDay(1);setPan({x:-260,y:-190});setZoom((isMobile ? .34 : .24)/mapScale);setMobilePanel("none");setMobileTool("pan");
+    const mapScale=generated.worldWidth/WORLD_W;setRunning(true);setSpeed(network?2:1);
+    gunEffectsRef.current=[];setGunEffects([]);marchSerial.current=1;setHour(6);setDay(1);setPan({x:-260,y:-190});setZoom((isMobile ? .34 : .24)/mapScale);setMobilePanel("none");setMobileTool("pan");
   }
 
   function activateMultiplayer(session:MultiplayerSession){
@@ -1773,7 +1829,7 @@ export default function Home(){
     if(multiplayerRef.current)cancelMultiplayer();
     setRunning(false);setScenario(null);setUnits([]);unitsRef.current=[];setCities([]);citiesRef.current=[];
     setSelected([]);setAttackPlans([]);setWarResult(null);warResultRef.current=null;setPendingBuild(null);
-    setBattleReport(null);historyRef.current=null;frontsRef.current=[];setFrontDirectives([]);decoysRef.current=[];setDecoys([]);
+    setBattleReport(null);historyRef.current=null;gunEffectsRef.current=[];setGunEffects([]);frontsRef.current=[];setFrontDirectives([]);decoysRef.current=[];setDecoys([]);
     setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setOpenWorld(null);openWorldRef.current=null;setPendingStrategicBuild(null);setStrategicBuildAnchor(null);
   }
 
@@ -2114,6 +2170,12 @@ export default function Home(){
     if(pendingBuild){createConstruction(tx,ty);return}
     if(pendingPlan){createAttackPlan(tx,ty);return}
     const requested=pendingOrder;
+    // Selected armies march as a temporary cohesive column, not an army-group reassignment.
+    const chosen=units.filter(u=>selected.includes(u.id)&&u.side===playerSide);
+    const coordinated=!append&&(requested===null||requested==="move")&&
+      chosen.filter(u=>!AMMO_TYPES.has(u.kind)&&u.kind!=="logistics").length>=2;
+    const slots=coordinated?marchSlots(chosen,{x:tx,y:ty},marchShape):new Map<string,{x:number;y:number}>();
+    const marchId=coordinated?"march-"+playerSide+"-"+marchSerial.current++:undefined;
     commitUnits(prev=>{
       return prev.map(u=>{
         if(!selected.includes(u.id))return u;
@@ -2129,9 +2191,15 @@ export default function Home(){
           return{...u,order:{type:"fire",targetX:tx,targetY:ty}};
         }
         if(requested==="probe"&&DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:"probe",targetX:tx,targetY:ty}};
-        const route=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},{x:tx,y:ty},emplacementsRef.current,openWorldRef.current);
+        const slot=slots.get(u.id);
+        const destination=slot?nearestLandPoint(slot.x,slot.y):{x:tx,y:ty};
+        const route=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},destination,emplacementsRef.current,openWorldRef.current);
         const [first,...rest]=route;
-        return first?{...u,order:{type:"move",targetX:first.x,targetY:first.y,waypoints:rest}}:{...u,order:{type:"move",targetX:tx,targetY:ty}};
+        const inColumn=Boolean(marchId)&&!AMMO_TYPES.has(u.kind)&&u.kind!=="logistics";
+        const order:NonNullable<Formation["order"]>=first
+          ?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest,...(inColumn?{marchId}:{})}
+          :{type:"move",targetX:destination.x,targetY:destination.y,...(inColumn?{marchId}:{})};
+        return{...u,order};
       });
     });
     if(!append)setPendingOrder(null);
@@ -2311,7 +2379,7 @@ export default function Home(){
       <div className="brand"><span className="brand-mark">K</span><div><b>KSPIEL</b><small>{activeScenario.title.toUpperCase()} · #{activeScenario.seed.toString(16).toUpperCase()}</small></div></div>
       <div className="theater-state"><span className="command-side"><Flag styleName={activeScenario.sideFlags[playerSide]??"generic-blue"}/>{activeScenario.sideNames[playerSide]}</span><span>DAY {day}</span><strong>{timeLabel(hour)}</strong><span className={running?"live":"paused"}>{running?"RUNNING":"PAUSED"}</span>{multiplayer&&<span className={"network-badge "+networkPhase}>{multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.code}</span>}</div>
       <div className="global-metrics"><div><small>SUPPLY</small><b>{pct(averageSupply)}%</b></div><div><small>ORG</small><b>{pct(averageOrg)}%</b></div><div><small>CITIES</small><b>{blueCities}/{cities.length}</b></div><div><small>CONTACTS</small><b>{enemy.filter(u=>isDetected(u,observerForces,cities,emplacements,activeScenario,playerSide)).length}</b></div></div>
-      <div className="time-controls"><button className="guide-toggle" onClick={()=>{setShowTutorial(true);setTutorialStep(0)}}>GUIDE ?</button>{!multiplayer&&<button className="aar-end" onClick={concludeSession}>END MATCH · REPORT</button>}<button className="setup-return" onClick={returnToSetup}>SETUP</button><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)} className="icon-btn">{running?"Ⅱ":"▶"}</button>{[1,2,3].map(s=><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} key={s} onClick={()=>{if(!warResult){setSpeed(s);setRunning(true)}}} className={speed===s?"active":""}>×{s}</button>)}</div>
+      <div className="time-controls"><button className="guide-toggle" onClick={()=>{setShowTutorial(true);setTutorialStep(0)}}>GUIDE ?</button>{!multiplayer&&<button className="aar-end" onClick={concludeSession}>END MATCH · REPORT</button>}<button className="setup-return" onClick={returnToSetup}>SETUP</button><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)} className="icon-btn">{running?"Ⅱ":"▶"}</button>{[1,2,3].map(s=><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} key={s} onClick={()=>{if(!warResult){setSpeed(s);setRunning(true)}}} className={speed===s?"active":""}>×{(multiplayer?MULTIPLAYER_SPEED:SOLO_SPEED)[s]}</button>)}</div>
     </header>
 
     {showTutorial&&!battleReport&&<div className="guide-backdrop" role="dialog" aria-modal="true" aria-label="Game tutorial"><div className="guide-card">
@@ -2383,6 +2451,15 @@ export default function Home(){
           <rect width={mapW} height={mapH} className="fog-dark" mask="url(#fogMask)"/><rect x="1" y="1" width={mapW-2} height={mapH-2} className="world-boundary"/>
         </svg>
 
+        {gunEffects.length>0&&<svg className="combat-effects" width={mapW} height={mapH} aria-hidden="true">
+          {gunEffects.filter(e=>localSides.has(e.side)||units.some(u=>u.side===playerSide&&Math.hypot(u.x-e.x,u.y-e.y)<640)).map(e=><g key={e.id} className={"combat-effect effect-"+e.kind}>
+            <line className="shell-trace" x1={e.fromX} y1={e.fromY} x2={e.x} y2={e.y}/>
+            <circle className="muzzle-flash" cx={e.fromX} cy={e.fromY} r={e.kind==="mortar"?13:23}/>
+            <circle className="blast-core" cx={e.x} cy={e.y} r={e.kind==="mortar"?24:e.kind==="heavy_artillery"?51:37}/>
+            <circle className="blast-ring" cx={e.x} cy={e.y} r={e.kind==="mortar"?45:e.kind==="heavy_artillery"?105:70}/>
+            <circle className="smoke-plume" cx={e.x+9} cy={e.y-10} r={e.kind==="mortar"?31:60}/>
+          </g>)}
+        </svg>}
         {selectedUnits.some(u=>ARTILLERY_KINDS.has(u.kind))&&<svg className="artillery-ranges" width={mapW} height={mapH}>{selectedUnits.filter(u=>ARTILLERY_KINDS.has(u.kind)).map(u=>{const r=u.kind==="mortar"?mortarMaxRange(activeScenario,u):u.kind==="heavy_artillery"?820:540;return <g key={"range-"+u.id}><circle cx={u.x} cy={u.y} r={r}/><text x={u.x+10} y={u.y-r+22}>{Math.round(r)} RANGE</text></g>})}</svg>}
         {pendingOrder==="fire"&&aimPoint&&selectedUnits.some(u=>u.kind==="mortar")&&<svg className="mortar-aim" width={mapW} height={mapH}><circle cx={aimPoint.x} cy={aimPoint.y} r={mortarDispersion(activeScenario,aimPoint.x,aimPoint.y,Math.min(1,Math.min(...selectedUnits.filter(u=>u.kind==="mortar").map(u=>Math.hypot(aimPoint.x-u.x,aimPoint.y-u.y)/mortarMaxRange(activeScenario,u)))))} /><circle className="mortar-aim-core" cx={aimPoint.x} cy={aimPoint.y} r="7"/></svg>}
         {units.map(u=>{
@@ -2442,7 +2519,7 @@ export default function Home(){
       {openWorld&&!primary?<div className="openworld-inspector"><div className="section-title">OPEN WORLD</div><b>{cities.filter(c=>c.owner===playerSide).length} CONTROLLED CITIES</b><span>{openWorld.recruitment.filter(q=>q.side===playerSide).length} formations recruiting</span><span>Keep forces concentrated on empty land to urbanize it into a permanent city.</span></div>:primary?<div className="inspector">
         <div className="unit-heading"><div className="big-counter">{UNIT_LABEL[primary.kind]}</div><div><small>{primary.kind.toUpperCase()} FORMATION</small><h2>{primary.name}</h2><span>{orderLabel(primary)}</span></div></div>
         {IRREGULAR_TRAITS[primary.kind]&&<div className="irregular-doctrine">{IRREGULAR_TRAITS[primary.kind]}</div>}
-        <div className="stat-grid"><Stat label="Strength" value={primary.strength}/><Stat label="Organization" value={primary.organization}/><Stat label="Supply" value={primary.supply}/><Stat label="Fuel" value={primary.fuel}/><Stat label="Entrenchment" value={primary.entrenchment}/><Stat label="Readiness" value={primary.readiness}/><Stat label="Morale" value={primary.morale??82}/><Stat label="Suppression" value={primary.suppression??0}/><Stat label="Isolation" value={Math.min(100,(primary.isolationHours??0)*1.15)}/></div>
+        <div className="stat-grid"><Stat label="Strength" value={primary.strength}/><Stat label="Organization" value={primary.organization}/><Stat label="Supply" value={primary.supply}/><Stat label="Fuel" value={primary.fuel}/>{AMMO_TYPES.has(primary.kind)&&<Stat label="Ammunition" value={primary.ammo??100}/>}<Stat label="Materials" value={primary.materials??100}/><Stat label="Entrenchment" value={primary.entrenchment}/><Stat label="Readiness" value={primary.readiness}/><Stat label="Morale" value={primary.morale??82}/><Stat label="Suppression" value={primary.suppression??0}/><Stat label="Isolation" value={Math.min(100,(primary.isolationHours??0)*1.15)}/></div>
         <div className="section-title">COMBAT MODEL</div><div className="numbers"><Row k="Manpower" v={primary.manpower.toLocaleString()}/><Row k="Soft attack" v={String(primary.softAttack)}/><Row k="Hard attack" v={String(primary.hardAttack)}/><Row k="Defense" v={String(primary.defense)}/><Row k="Breakthrough" v={String(primary.breakthrough)}/><Row k="Recon" v={String(primary.recon)}/><Row k="Speed" v={primary.speed+" km/h"}/></div>
         {(primary.isolationHours??0)>6&&<div className="isolated-warning">ENCIRCLEMENT · {Math.round(primary.isolationHours??0)} HOURS WITHOUT A SAFE CORRIDOR</div>}
         <div className="section-title">SUPPLY ACCESS</div>{primaryAccess&&<div className={"supply-access level-"+primaryAccess.level}><b>{primaryAccess.label}</b><span>{primaryAccess.range>0?"Relay range "+Math.round(primaryAccess.range):primaryAccess.level===0?"Resupply severely limited":"Automatic resupply active"}</span></div>}
@@ -2456,6 +2533,9 @@ export default function Home(){
           <button disabled={!selectedUnits.length} className={pendingBuild==="supply_depot"?"active":""} onClick={()=>armConstruction("supply_depot")}><b>SUPPLY DEPOT</b><small>34 worker-hours · engineers ×4</small></button>
         </div>
         <div className="section-title">FORMATION</div><div className="formation-controls">{(["line","column","wedge","echelon"] as FormationShape[]).map(shape=><button key={shape} onClick={()=>arrangeFormation(shape)} disabled={selectedUnits.length<2}>{shape.toUpperCase()}</button>)}</div>
+        <div className="section-title">MARCH FORMATION · INDEPENDENT OF GROUPS</div>
+        <div className="formation-controls">{(["line","column","wedge","echelon"] as FormationShape[]).map(shape=><button key={"march-"+shape} className={marchShape===shape?"active":""} onClick={()=>setMarchShape(shape)}>{shape.toUpperCase()}</button>)}</div>
+        <small className="muted-line">Select units from any armies. Right-click to march in separate slots at the slowest combat unit's pace. Guns and logistics follow in the rear.</small>
         <div className="section-title">ARMY GROUP</div><div className="group-assign">{armyGroups.map(g=><button key={g.id} className={selectedUnits.length>0&&selectedUnits.every(u=>u.groupId===g.id)?"active":""} onClick={()=>assignGroup(g.id)}>{g.hotkey}</button>)}</div>
         <div className="section-title">FRONT COMMAND</div><div className="front-command"><button className={frontToolActive?"active":""} onClick={()=>{setFrontToolActive(v=>!v);setPendingMassAttack(false);setPendingOrder(null)}}>DRAW FRONT · CTRL+DRAG</button><small>Deploy group and create a persistent frontline with autonomous reserves.</small>
           {activeFront&&<div className="front-modes">{(["hold","advance","push","retreat","stop"] as const).map(mode=><button key={mode} className={activeFront.mode===mode?"active":""} onClick={()=>changeFrontMode(activeFront.groupId,mode)}>{mode.toUpperCase()}</button>)}</div>}
