@@ -28,5 +28,7 @@ jobs:
         run: KSPIEL_BENCH_UNITS=100 npm run bench:sim
       - name: Modular UI render smoke tests
         run: node scripts/smoke-ui.cjs
+      - name: Curved front and legacy compatibility tests
+        run: node scripts/smoke-front-path.cjs
       - name: Typecheck and static build
         run: npm run build
