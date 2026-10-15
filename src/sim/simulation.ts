@@ -7,6 +7,7 @@ import {clamp,segmentContact,segmentsIntersect,structureSegmentDistance} from "@
 import {MOVEMENT_SCALE,DIRECT_COMBAT_KINDS,ARTILLERY_KINDS,GUN_ARTILLERY_KINDS,MOTORIZED_KINDS,isInCombat,retreatDestination,mortarTerrainProfile,mortarMaxRange,mortarDispersion,movementSupplyFactor,roadMovementBonus,movementTerrainFactor,forageSupply} from "@/sim/rules";
 import {computeSupplyNetwork,computeLogisticsLinks,supplyAccess} from "@/sim/logistics";
 import {SpatialGrid} from "@/sim/spatial-grid";
+import {territoryOwnerAt} from "@/sim/territory";
 
 export function resolveReliefs(units:Formation[],cities:CityState[]):Formation[]{
   const out=units.map(u=>({...u,order:u.order?{...u.order}:undefined}));
@@ -71,10 +72,18 @@ export function simulate(scenario:Scenario,units:Formation[],hours:number,cities
     n.supply=clamp(n.supply+hours*forageSupply(u,sample.terrain,inCombat),0,100);
     if(MOTORIZED_KINDS.has(u.kind))n.fuel=clamp(n.fuel-hours*(inCombat?.42:.18),0,100);
 
-    const logisticsConnected=access.level>0&&(u.isolationHours??0)<6;
+    const isolated=(u.isolationHours??0)>0;
+    const controlled=territoryOwnerAt(scenario,cities,units,u.x,u.y)===u.side;
+    const logisticsConnected=access.level>0&&!isolated;
     if(logisticsConnected){
       n.supply=clamp(n.supply+hours*access.supplyPerHour*(scenario.presetId==="open-world"?1.65:1),0,100);
       if(MOTORIZED_KINDS.has(u.kind))n.fuel=clamp(n.fuel+hours*access.fuelPerHour,0,100);
+    }
+    // Friendly territorial control is an actual resupply network; isolated pockets
+    // cannot use the colored region as an infinite source of ammunition or food.
+    if(controlled&&!isolated){
+      n.supply=clamp(Math.max(76,n.supply+hours*2.7),0,100);
+      if(MOTORIZED_KINDS.has(n.kind))n.fuel=clamp(Math.max(52,n.fuel+hours*.8),0,100);
     }
     // Gun ammunition and building materials are independent finite stockpiles.
     // An isolated pocket only recovers at a nearly negligible field-scavenging rate.
@@ -89,7 +98,7 @@ export function simulate(scenario:Scenario,units:Formation[],hours:number,cities
     }
 
     if(n.order?.type==="dig"){
-      n.entrenchment=clamp(n.entrenchment+hours*.42,0,100);
+      n.entrenchment=clamp(n.entrenchment+hours*1.65,0,100);
       n.organization=clamp(n.organization+hours*.18,0,100);
       n.supply=clamp(n.supply-hours*.05,0,100);
     }else if(n.order?.type==="resupply"){
@@ -172,6 +181,9 @@ export function simulate(scenario:Scenario,units:Formation[],hours:number,cities
       n.entrenchment=clamp(n.entrenchment+hours*.012,0,100);
     }
 
+    // Encirclement drains remaining stockpiles continuously, even on RESUPPLY
+    // orders or terrain that would normally permit foraging.
+    if(isolated)n.supply=Math.min(n.supply,clamp(u.supply-hours*2.2,0,100));
     const special=u.kind==="special_forces";
     const foot=u.kind==="infantry"||u.kind==="mountaineer"||u.kind==="engineer"||u.kind==="militia"||u.kind==="partisan"||u.kind==="raider";
     if(n.supply<25)n.organization=clamp(n.organization-hours*(special?.08:foot?.34:.78),0,100);
@@ -189,12 +201,12 @@ export function simulate(scenario:Scenario,units:Formation[],hours:number,cities
   const combatGrid=new SpatialGrid(result.map((u,index)=>({x:u.x,y:u.y,index})));
   for(let i=0;i<result.length;i++){
     const a=result[i];
-    const candidates=combatGrid.within(a.x,a.y,48).filter(entry=>entry.index>i).sort((a,b)=>a.index-b.index);
+    const candidates=combatGrid.within(a.x,a.y,116).filter(entry=>entry.index>i).sort((a,b)=>a.index-b.index);
     for(const entry of candidates){
       const j=entry.index,b=result[j];
       if(a.side===b.side)continue;
       const dist=Math.hypot(a.x-b.x,a.y-b.y);
-      if(dist>48)continue;
+      if(dist>116)continue;
 
       const aCan=DIRECT_COMBAT_KINDS.has(a.kind),bCan=DIRECT_COMBAT_KINDS.has(b.kind);
       if(!aCan&&!bCan)continue;
