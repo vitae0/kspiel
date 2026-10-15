@@ -19,6 +19,9 @@ const COMMAND_GUIDE=[
   {title:"GROUP ATTACK · H",body:"Select an army group, press H, click multiple visible enemy units, then press ENTER or LAUNCH. The command distributes targets and chooses routes and supporting gun positions."},
   {title:"DRAW A FRONT",body:"Select any formation in an army group and Ctrl+left-drag a slanted line, or use FRONT mode. Infantry goes forward, artillery and logistics move behind, engineers build field works."},
   {title:"SUPPLY AND ROADS",body:"Supplied cities anchor supply. Only interrupted road sections turn red. Terrain and unit type change supply consumption; tanks are less hindered by trenches."},
+  {title:"ATTRITION AND BARRAGES",body:"Mortars and artillery burn finite AMMO while firing. Engineers and other builders consume MATERIALS on every construction job. Strong connected supply routes refill both faster; isolated guns can run dry. Tracers, shell trails, dust and shock waves show active fire."},
+  {title:"COHESIVE MARCH",body:"Select units from multiple army groups, choose MARCH FORMATION (line, column, wedge or echelon) and right-click the map. Combat units keep separate slots and wait for lagging forces; artillery and logistics take rear positions. Army-group memberships stay intact."},
+  {title:"MULTIPLAYER SPEED",body:"The host controls the shared clock with 0.5×, 1× and 2× multiplayer speeds. Other commanders receive authoritative snapshots and do not run a separate simulation."},
   {title:"REINFORCEMENTS",body:"In scenario battles, after four in-game days, armies below two-thirds of their initial number receive up to three formations per reserve wave from a safe rear city."}
 ] as const;
 const SOLO_SPEED=[0,1,2.5,6];
@@ -2217,7 +2220,7 @@ export default function Home(){
     const coordinated=!append&&(requested===null||requested==="move")&&
       chosen.filter(u=>!AMMO_TYPES.has(u.kind)&&u.kind!=="logistics").length>=2;
     const slots=coordinated?marchSlots(chosen,{x:tx,y:ty},marchShape):new Map<string,{x:number;y:number}>();
-    const marchId=coordinated?"march-"+playerSide+"-"+marchSerial.current++:undefined;
+    const marchId=coordinated?"march-"+playerSide+"-"+(multiplayerRef.current?.playerToken.slice(0,8)??"local")+"-"+marchSerial.current++:undefined;
     commitUnits(prev=>{
       return prev.map(u=>{
         if(!selected.includes(u.id))return u;
