@@ -1,13 +1,13 @@
 import {terrainAt} from "./game";
-import type {CityState,Formation,Scenario,Side} from "./types";
+import {ALL_SIDES,type CityState,type Formation,type Scenario,type Side} from "./types";
 
 export type TerritoryCell={x:number;y:number;owner:Side|null;control:number;contested:number};
-const SIDES:Side[]=["blue","red","green"];
+const SIDES:Side[]=[...ALL_SIDES];
 
 /** Territorial influence is a field, not an arbitrary 520px disc around each unit. */
 export function scenarioTerritoryCells(scenario:Scenario,cities:CityState[],units:Formation[],step=360):TerritoryCell[]{
   const cells:TerritoryCell[]=[];
-  const friendly:Record<Side,Formation[]>={blue:[],red:[],green:[]};
+  const friendly:Record<Side,Formation[]>={blue:[],red:[],green:[],yellow:[],purple:[]};
   const cityGroups:Record<Side,CityState[]>={blue:[],red:[],green:[]};
   for(const u of units)if(u.strength>8)friendly[u.side].push(u);
   for(const c of cities)cityGroups[c.owner].push(c);
