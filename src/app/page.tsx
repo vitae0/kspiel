@@ -1162,6 +1162,11 @@ export default function Home(){
   const [warResult,setWarResult]=useState<Side|null>(null);
   const [selectionBox,setSelectionBox]=useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
   const [frontPreview,setFrontPreview]=useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
+  const [frontDirectives,setFrontDirectives]=useState<FrontDirective[]>([]);
+  const [contacts,setContacts]=useState<LastSeenContact[]>([]);
+  const [decoys,setDecoys]=useState<DecoyContact[]>([]);
+  const [pendingDecoy,setPendingDecoy]=useState(false);
+  const [battleReport,setBattleReport]=useState<BattleHistory|null>(null);
   const [attackPlans,setAttackPlans]=useState<AttackPlan[]>([]);
   const [pendingPlan,setPendingPlan]=useState(false);
   const [pendingMassAttack,setPendingMassAttack]=useState(false);
@@ -1199,6 +1204,14 @@ export default function Home(){
   const suppressContextMenu=useRef(false);
   const viewport=useRef<HTMLDivElement>(null);
   const unitsRef=useRef<Formation[]>([]);
+  const frontsRef=useRef<FrontDirective[]>([]);
+  const contactsRef=useRef<LastSeenContact[]>([]);
+  const decoysRef=useRef<DecoyContact[]>([]);
+  const historyRef=useRef<BattleHistory|null>(null);
+  const lastOperationalRef=useRef(0);
+  const lastEncirclementRef=useRef(0);
+  const lastIntelRef=useRef(0);
+  const decoySerialRef=useRef(1);
   const citiesRef=useRef<CityState[]>([]);
   const warResultRef=useRef<Side|null>(null);
   const planCounter=useRef(1);
@@ -1217,7 +1230,8 @@ export default function Home(){
   const lastSnapshotSeqRef=useRef(0);
   const snapshotSeqRef=useRef(0);
   const latestSnapshotRef=useRef<MultiplayerSnapshot|null>(null);
-  latestSnapshotRef.current={seq:0,units,cities,attackPlans,emplacements,constructionProjects,hour,day,running,speed,warResult};
+  latestSnapshotRef.current={seq:0,units,cities,attackPlans,emplacements,constructionProjects,hour,day,running,speed,warResult,
+    frontDirectives,decoys,battleHistory:battleReport??undefined};
 
   useEffect(()=>{
     const saved=window.localStorage.getItem("kspiel.nickname");
@@ -1248,6 +1262,9 @@ export default function Home(){
       projectsRef.current=snapshot.constructionProjects;setConstructionProjects(snapshot.constructionProjects);
       emplacementsRef.current=snapshot.emplacements;setEmplacements(snapshot.emplacements);
       setAttackPlans(snapshot.attackPlans);
+      frontsRef.current=snapshot.frontDirectives??[];setFrontDirectives(frontsRef.current);
+      decoysRef.current=snapshot.decoys??[];setDecoys(decoysRef.current);
+      if(snapshot.battleHistory){historyRef.current=snapshot.battleHistory;setBattleReport(snapshot.battleHistory)}
       warResultRef.current=snapshot.warResult;setWarResult(snapshot.warResult);
       setHour(snapshot.hour);setDay(snapshot.day);setRunning(snapshot.running);setSpeed(snapshot.speed);
     };
@@ -1276,6 +1293,30 @@ export default function Home(){
           });
           unitsRef.current=next;return next;
         });
+      })
+      .on("broadcast",{event:"front-upsert"},({payload})=>{
+        if(!multiplayer.isHost)return;
+        const side=senderSide(payload as Record<string,unknown>);
+        const front=payload?.front as FrontDirective|undefined;
+        if(!side||!front||front.side!==side||!front.groupId.startsWith(side+"-army-"))return;
+        const next=[...frontsRef.current.filter(f=>f.id!==front.id&&f.groupId!==front.groupId),front];
+        frontsRef.current=next;setFrontDirectives(next);
+      })
+      .on("broadcast",{event:"front-remove"},({payload})=>{
+        if(!multiplayer.isHost)return;
+        const side=senderSide(payload as Record<string,unknown>);
+        const groupId=typeof payload?.groupId==="string"?payload.groupId:"";
+        if(!side||!groupId.startsWith(side+"-army-"))return;
+        const next=frontsRef.current.filter(f=>f.groupId!==groupId);
+        frontsRef.current=next;setFrontDirectives(next);
+      })
+      .on("broadcast",{event:"decoy-create"},({payload})=>{
+        if(!multiplayer.isHost)return;
+        const side=senderSide(payload as Record<string,unknown>);
+        const decoy=payload?.decoy as DecoyContact|undefined;
+        if(!side||!decoy||decoy.owner!==side)return;
+        const next=[...decoysRef.current.filter(d=>d.id!==decoy.id),decoy].slice(-32);
+        decoysRef.current=next;setDecoys(next);
       })
       .on("broadcast",{event:"plan-upsert"},({payload})=>{
         if(!multiplayer.isHost)return;
@@ -1336,8 +1377,13 @@ export default function Home(){
   },[]);
 
   useEffect(()=>{
-    if(isMobile&&(pendingOrder||pendingPlan||pendingBuild))setMobilePanel("none");
-  },[isMobile,pendingOrder,pendingPlan,pendingBuild]);
+    if(isMobile&&(pendingOrder||pendingPlan||pendingBuild||pendingDecoy))setMobilePanel("none");
+  },[isMobile,pendingOrder,pendingPlan,pendingBuild,pendingDecoy]);
+  useEffect(()=>{
+    if(!scenario||multiplayer?.isHost)return;
+    const observed=updateContacts(contactsRef.current,units,cities,emplacements,scenario,playerSide,(day-1)*24+hour-6);
+    contactsRef.current=observed;setContacts(observed);
+  },[scenario,multiplayer?.isHost,units,cities,emplacements,playerSide,day,hour]);
 
   useEffect(()=>{
     const el=viewport.current;
@@ -1556,13 +1602,19 @@ export default function Home(){
     initialRosterRef.current=generated.formations;
     initialCountRef.current={blue:generated.formations.filter(u=>u.side==="blue").length,red:generated.formations.filter(u=>u.side==="red").length,green:0};
     elapsedHoursRef.current=0;lastReserveRef.current={blue:0,red:0,green:0};reserveSerialRef.current=1;
+    frontsRef.current=[];setFrontDirectives([]);contactsRef.current=[];setContacts([]);
+    decoysRef.current=[];setDecoys([]);setPendingDecoy(false);decoySerialRef.current=1;
+    lastOperationalRef.current=0;lastEncirclementRef.current=0;lastIntelRef.current=0;
+    setBattleReport(null);historyRef.current=null;
     setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setMobilePanel("none");
     if(gameMode==="openworld"){
       const ow=createOpenWorldState(generated,generated.formations,generated.cities);openWorldRef.current=ow.state;setOpenWorld(ow.state);
       setScenario(generated);setUnits(ow.units);unitsRef.current=ow.units;setCities(ow.cities);citiesRef.current=ow.cities;
+      historyRef.current=startHistory(generated.title,seed,ow.units,ow.cities,ow.state);
     }else{
       openWorldRef.current=null;setOpenWorld(null);setScenario(generated);setUnits(generated.formations);unitsRef.current=generated.formations;
       setCities(generated.cities);citiesRef.current=generated.cities;
+      historyRef.current=startHistory(generated.title,seed,generated.formations,generated.cities,null);
     }
     const first=generated.formations.find(u=>u.side===activeSide);setSelected(first?[first.id]:[]);
     const mapScale=generated.worldWidth/WORLD_W;setRunning(true);setSpeed(1);setHour(6);setDay(1);setPan({x:-260,y:-190});setZoom((isMobile ? .34 : .24)/mapScale);setMobilePanel("none");setMobileTool("pan");
@@ -1613,6 +1665,7 @@ export default function Home(){
     if(multiplayerRef.current)cancelMultiplayer();
     setRunning(false);setScenario(null);setUnits([]);unitsRef.current=[];setCities([]);citiesRef.current=[];
     setSelected([]);setAttackPlans([]);setWarResult(null);warResultRef.current=null;setPendingBuild(null);
+    setBattleReport(null);historyRef.current=null;frontsRef.current=[];setFrontDirectives([]);decoysRef.current=[];setDecoys([]);
     setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setOpenWorld(null);openWorldRef.current=null;setPendingStrategicBuild(null);setStrategicBuildAnchor(null);
   }
 

@@ -1,5 +1,7 @@
 import {createClient} from "@supabase/supabase-js";
 import type {AttackPlan,CityState,ConstructionProject,Emplacement,Formation,Side} from "@/sim/types";
+import type {FrontDirective,DecoyContact} from "@/sim/warfare";
+import type {BattleHistory} from "@/sim/telemetry";
 
 export const SUPABASE_URL="https://qyylrkqktctcsrqgviwp.supabase.co";
 export const SUPABASE_PUBLISHABLE_KEY="sb_publishable_VaV0h0GhPx171fJHTG-avw_7oWSlJt8";
@@ -49,6 +51,9 @@ export type MultiplayerSnapshot={
   running:boolean;
   speed:number;
   warResult:Side|null;
+  frontDirectives?:FrontDirective[];
+  decoys?:DecoyContact[];
+  battleHistory?:BattleHistory;
 };
 
 type MatchmakingPayload=
