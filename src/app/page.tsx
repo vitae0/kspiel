@@ -1622,7 +1622,7 @@ export default function Home(){
     const onKey=(e:KeyboardEvent)=>{
       const el=e.target as HTMLElement|null;if(el?.tagName==="INPUT"||el?.tagName==="TEXTAREA"||el?.isContentEditable)return;
       const key=e.key.toLowerCase();
-      if(key==="escape"){setPendingOrder(null);setPendingPlan(false);setPendingMassAttack(false);setMassTargets([]);setPendingBuild(null);setConstructionAnchor(null);setFrontToolActive(false);return}
+      if(key==="escape"){setPendingDecoy(false);setPendingOrder(null);setPendingPlan(false);setPendingMassAttack(false);setMassTargets([]);setPendingBuild(null);setConstructionAnchor(null);setFrontToolActive(false);return}
       const digit=/^Digit([1-6])$/.exec(e.code);
       if(digit){
         const group=armyGroups[Number(digit[1])-1];
@@ -1630,6 +1630,7 @@ export default function Home(){
         return;
       }
       if(key==="b"){setPendingPlan(true);setPendingOrder(null);setPendingMassAttack(false);setPendingBuild(null);setConstructionAnchor(null);return}
+      if(key==="y"&&selected.some(id=>units.some(u=>u.id===id&&u.kind==="recon"&&u.side===playerSide))){setPendingDecoy(true);setPendingOrder(null);setPendingPlan(false);return}
       if(key==="h"&&selected.length){setPendingMassAttack(true);setMassTargets([]);setPendingPlan(false);setPendingOrder(null);return}
       if(key==="enter"&&pendingMassAttack){launchGroupAttack();return}
       if(key==="m")startOrder("move");else if(key==="a")startOrder("assault");else if(key==="p")startOrder("probe");
@@ -1844,7 +1845,30 @@ export default function Home(){
       const next=[...projectsRef.current,...projects];projectsRef.current=next;setConstructionProjects(next);
       if(multiplayerRef.current&&!multiplayerRef.current.isHost)for(const project of projects)sendNetwork("construction-create",{project});
     }
+    const front:FrontDirective={id:"front-"+chosen[0].side+"-"+(chosen[0].groupId??"field"),side:chosen[0].side,
+      groupId:chosen[0].groupId??chosen[0].side+"-army-1",start,end,mode:"hold",
+      lastIssued:elapsedHoursRef.current,createdAt:elapsedHoursRef.current,reserveFraction:.22};
+    const nextFronts=[...frontsRef.current.filter(f=>f.groupId!==front.groupId),front];
+    frontsRef.current=nextFronts;setFrontDirectives(nextFronts);
+    if(multiplayerRef.current&&!multiplayerRef.current.isHost)sendNetwork("front-upsert",{front});
+    if(historyRef.current)addBattleEvent(historyRef.current,{hour:elapsedHoursRef.current,side:front.side,kind:"front",title:"Army front established"});
     setPendingOrder(null);setFrontToolActive(false);
+  }
+
+  function changeFrontMode(groupId:string,mode:FrontMode|"stop"){
+    const current=frontsRef.current.find(front=>front.groupId===groupId&&front.side===playerSide);
+    if(!current)return;
+    if(mode==="stop"){
+      const next=frontsRef.current.filter(front=>front.groupId!==groupId);
+      frontsRef.current=next;setFrontDirectives(next);
+      if(multiplayerRef.current&&!multiplayerRef.current.isHost)sendNetwork("front-remove",{groupId});
+      return;
+    }
+    const front={...current,mode,lastIssued:elapsedHoursRef.current-4};
+    const next=frontsRef.current.map(f=>f.id===front.id?front:f);
+    frontsRef.current=next;setFrontDirectives(next);
+    if(multiplayerRef.current&&!multiplayerRef.current.isHost)sendNetwork("front-upsert",{front});
+    if(historyRef.current)addBattleEvent(historyRef.current,{hour:elapsedHoursRef.current,side:front.side,kind:"front",title:"Front posture: "+mode.toUpperCase()});
   }
 
   function assignGroup(groupId:string){
@@ -1861,6 +1885,7 @@ export default function Home(){
     const group=primary?.groupId;
     const force=units.filter(u=>u.side===playerSide&&(group?u.groupId===group:selected.includes(u.id)));
     const targets=units.filter(u=>massTargets.includes(u.id)&&u.side!==playerSide&&u.strength>1);
+    if(group&&frontsRef.current.some(f=>f.groupId===group))changeFrontMode(group,"stop");
     if(!force.length||!targets.length)return;
     const load=new Map<string,number>(targets.map(t=>[t.id,0]));
     const assignments=new Map<string,Formation>();
@@ -1995,6 +2020,16 @@ export default function Home(){
     if((pendingOrder==="assault"||pendingOrder==="relieve")&&!pendingStrategicBuild)return;
     const point=mapPoint(clientX,clientY);if(!point)return;
     const tx=clamp(point.x,1,mapW-1),ty=clamp(point.y,1,mapH-1);const targetTerrain=terrainAt(activeScenario,tx,ty).terrain;if(targetTerrain==="water")return;
+    if(pendingDecoy){
+      const recon=selectedUnits.find(u=>u.side===playerSide&&u.kind==="recon"&&u.supply>8&&Math.hypot(u.x-tx,u.y-ty)<780);
+      if(!recon)return;
+      const decoy:DecoyContact={id:"decoy-"+playerSide+"-"+decoySerialRef.current++,owner:playerSide,x:tx,y:ty,kind:"infantry",
+        createdAt:elapsedHoursRef.current,expiresAt:elapsedHoursRef.current+20};
+      const next=[...decoysRef.current,decoy].slice(-32);decoysRef.current=next;setDecoys(next);
+      if(multiplayerRef.current&&!multiplayerRef.current.isHost)sendNetwork("decoy-create",{decoy});
+      if(historyRef.current)addBattleEvent(historyRef.current,{hour:elapsedHoursRef.current,side:playerSide,kind:"intel",title:"Recon deception deployed"});
+      setPendingDecoy(false);return;
+    }
     if(pendingStrategicBuild&&openWorldRef.current){
       if(pendingStrategicBuild==="city"){
         if(targetTerrain==="mountain"||targetTerrain==="highmountain"||citiesRef.current.some(c=>Math.hypot(c.x-tx,c.y-ty)<360))return;
@@ -2104,7 +2139,7 @@ export default function Home(){
       e.currentTarget.setPointerCapture(e.pointerId);
       if(touchPoints.current.size>=2){beginPinch();return}
       const screen=viewportPoint(e.clientX,e.clientY);if(!screen)return;
-      const targeting=Boolean(pendingOrder||pendingPlan||pendingMassAttack||pendingBuild||pendingStrategicBuild);
+      const targeting=Boolean(pendingOrder||pendingPlan||pendingMassAttack||pendingDecoy||pendingBuild||pendingStrategicBuild);
       const mode:"pan"|"front"|"target"=targeting?"target":mobileTool==="front"&&selected.length>0?"front":"pan";
       drag.current={mode,startClientX:e.clientX,startClientY:e.clientY,px:pan.x,py:pan.y,moved:false};
       if(mode==="front")setFrontPreview({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
@@ -2204,6 +2239,9 @@ export default function Home(){
   const currentLogisticsGraph=computeLogisticsLinks(activeScenario,units,cities,currentSupplyNetwork,emplacements);
   const primaryAccess=primary?supplyAccess(activeScenario,primary,units,cities,currentSupplyNetwork,emplacements,currentLogisticsGraph,openWorld):null;
   const canRetreat=selectedUnits.some(u=>isInCombat(u,units));
+  const activeFront=primary?.groupId?frontDirectives.find(f=>f.groupId===primary.groupId):undefined;
+  const observerForces=units.filter(u=>u.side===playerSide);
+  const revealedContacts=contacts.filter(c=>!units.some(u=>u.id===c.id&&isDetected(u,observerForces,cities,emplacements,activeScenario,playerSide)));
 
   return <main className={"game-shell theme-"+activeScenario.theme}>
     <header className="topbar">
@@ -2227,13 +2265,19 @@ export default function Home(){
         <button className={pendingMassAttack?"active":""} disabled={!selected.length} onClick={()=>{setPendingMassAttack(true);setMassTargets([]);setPendingOrder(null);setPendingPlan(false)}}>H · MARK MULTIPLE ENEMIES</button>
         {pendingMassAttack&&<div className="mass-target-tools"><span>{massTargets.length} ENEMY TARGET{massTargets.length===1?"":"S"} MARKED</span><button disabled={!massTargets.length} onClick={launchGroupAttack}>LAUNCH GROUP ATTACK</button><button onClick={()=>{setPendingMassAttack(false);setMassTargets([])}}>CANCEL</button></div>}
       </section>
+      <section><div className="section-title">ACTIVE FRONTS · OPERATIONAL ORDERS</div>
+        <div className="front-directive-list">{frontDirectives.filter(f=>f.side===playerSide).map(f=><div key={f.id} className="front-directive">
+          <b>{f.groupId.replace(playerSide+"-army-","ARMY ")} · {f.mode.toUpperCase()}</b><small>{units.filter(u=>u.groupId===f.groupId&&u.side===f.side).length} FORMATIONS · RESERVE {Math.round(f.reserveFraction*100)}%</small>
+          <div className="front-modes">{(["hold","advance","push","retreat","stop"] as const).map(mode=><button key={mode} className={f.mode===mode?"active":""} onClick={()=>changeFrontMode(f.groupId,mode)}>{mode.toUpperCase()}</button>)}</div>
+        </div>)}{!frontDirectives.some(f=>f.side===playerSide)&&<small className="muted-line">Draw a front using CTRL + drag to create a persistent army command.</small>}</div>
+      </section>
       <section><div className="section-title">ATTACK PLANS · B THEN RMB</div><div className="plan-list">{attackPlans.length?attackPlans.map(p=><div className={"plan-row "+p.status} key={p.id}><button onClick={()=>setSelected(p.formationIds)}><b>{p.name}</b><small>{p.formationIds.length} formations · {p.status}</small></button>{p.status==="draft"&&<button onClick={()=>executePlan(p.id)}>GO</button>}<button onClick={()=>cancelPlan(p.id)}>×</button></div>):<small className="muted-line">No plans drafted.</small>}</div></section>
       {openWorld&&<section className="openworld-panel"><div className="section-title">DOMINION</div><div className="resource-strip"><b>MP {Math.floor(openWorld.resources[playerSide].manpower)}</b><b>MAT {Math.floor(openWorld.resources[playerSide].materials)}</b><b>FUEL {Math.floor(openWorld.resources[playerSide].fuel)}</b></div><div className="section-title">RAISE FORMATIONS</div><div className="recruit-grid">{(["infantry","mountaineer","special_forces","engineer","cavalry","recon","mechanized","tank","mortar","artillery","heavy_artillery","logistics"] as Formation["kind"][]).map(kind=>{const cost=UNIT_COST[kind];const barracks=openWorld.structures.find(b=>b.side===playerSide&&b.kind===cost?.family);return <button key={kind} disabled={!cost||!barracks} onClick={()=>{if(!cost||!barracks)return;const next=queueRecruitment(openWorldRef.current!,playerSide,kind,barracks.id);openWorldRef.current=next;setOpenWorld(next)}}><b>{UNIT_LABEL[kind]}</b><small>{cost?cost.manpower+" MP · "+cost.materials+" MAT · "+cost.fuel+" F":"—"}</small></button>})}</div><div className="section-title">BUILD</div><div className="strategic-build-grid">{(["infantry_barracks","mobile_barracks","support_barracks","city","fort","wall"] as OpenWorldBuildKind[]).map(kind=><button key={kind} className={pendingStrategicBuild===kind?"active":""} onClick={()=>{setPendingStrategicBuild(kind);setStrategicBuildAnchor(null);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);setConstructionAnchor(null)}}>{kind.replaceAll("_"," ").toUpperCase()}</button>)}</div><small className="muted-line">Roads are built by logistics formations. Owned territory yields resources automatically.</small></section>}
       <section><div className="section-title">FIELD WORKS</div><div className="construction-list">{constructionProjects.length?constructionProjects.filter(p=>localSides.has(p.side)).map(project=><div className="construction-row" key={project.id}><b>{constructionLabel(project.kind)}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span><i><em style={{width:Math.min(100,project.progress/project.requiredHours*100)+"%"}}/></i></div>):<small className="muted-line">No active construction.</small>}</div></section>
       <section><div className="section-title">ORDER OF BATTLE</div><div className="oob-list">{blue.map(u=><button key={u.id} onClick={()=>{setSelected([u.id]);if(isMobile)setMobilePanel("unit")}} className={selected.includes(u.id)?"selected":""}><span className="oob-code">{UNIT_LABEL[u.kind]}</span><span><b>{u.name}</b><small>{pct(u.strength)} STR · {pct(u.organization)} ORG</small></span></button>)}</div></section>
     </aside>
 
-    <div ref={viewport} className={pendingOrder||pendingPlan||pendingMassAttack||frontToolActive||pendingBuild||pendingStrategicBuild?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenuCapture={suppressNativeContextMenu} onContextMenu={issueTarget}>
+    <div ref={viewport} className={pendingOrder||pendingPlan||pendingMassAttack||pendingDecoy||frontToolActive||pendingBuild||pendingStrategicBuild?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenuCapture={suppressNativeContextMenu} onContextMenu={issueTarget}>
       <div className="world" style={{width:mapW,height:mapH,transform:"translate("+pan.x+"px,"+pan.y+"px) scale("+zoom+")"}}>
         <svg className="terrain" width={mapW} height={mapH} viewBox={"0 0 "+mapW+" "+mapH}>
           <defs><linearGradient id="sea" x1="0" x2="1"><stop offset="0" stopColor="#1c313c"/><stop offset="1" stopColor="#29424b"/></linearGradient><linearGradient id="intelShade" x1="0" x2="1"><stop offset="0" stopColor="#71846a" stopOpacity=".08"/><stop offset=".55" stopColor="#151b18" stopOpacity=".22"/><stop offset="1" stopColor="#050806" stopOpacity=".68"/></linearGradient><clipPath id="landClip"><path d={activeScenario.landPath}/></clipPath><mask id="fogMask" maskUnits="userSpaceOnUse"><rect width={mapW} height={mapH} fill="white"/>{blue.map(u=><circle key={"fog-u-"+u.id} cx={u.x} cy={u.y} r={visionRange(u)} fill="black"/>)}{cities.filter(c=>localSides.has(c.owner)).map(c=><circle key={"fog-c-"+c.name} cx={c.x} cy={c.y} r="270" fill="black"/>)}{emplacements.filter(e=>localSides.has(e.side)&&e.kind==="observatory").map(e=><circle key={"fog-e-"+e.id} cx={e.x} cy={e.y} r={e.range} fill="black"/>)}</mask></defs>
@@ -2279,10 +2323,12 @@ export default function Home(){
         {selectedUnits.some(u=>ARTILLERY_KINDS.has(u.kind))&&<svg className="artillery-ranges" width={mapW} height={mapH}>{selectedUnits.filter(u=>ARTILLERY_KINDS.has(u.kind)).map(u=>{const r=u.kind==="mortar"?mortarMaxRange(activeScenario,u):u.kind==="heavy_artillery"?820:540;return <g key={"range-"+u.id}><circle cx={u.x} cy={u.y} r={r}/><text x={u.x+10} y={u.y-r+22}>{Math.round(r)} RANGE</text></g>})}</svg>}
         {pendingOrder==="fire"&&aimPoint&&selectedUnits.some(u=>u.kind==="mortar")&&<svg className="mortar-aim" width={mapW} height={mapH}><circle cx={aimPoint.x} cy={aimPoint.y} r={mortarDispersion(activeScenario,aimPoint.x,aimPoint.y,Math.min(1,Math.min(...selectedUnits.filter(u=>u.kind==="mortar").map(u=>Math.hypot(aimPoint.x-u.x,aimPoint.y-u.y)/mortarMaxRange(activeScenario,u)))))} /><circle className="mortar-aim-core" cx={aimPoint.x} cy={aimPoint.y} r="7"/></svg>}
         {units.map(u=>{
-          const visible=localSides.has(u.side)||blue.some(b=>Math.hypot(b.x-u.x,b.y-u.y)<visionRange(b))||cities.some(c=>localSides.has(c.owner)&&Math.hypot(c.x-u.x,c.y-u.y)<270)||emplacements.some(e=>localSides.has(e.side)&&e.kind==="observatory"&&Math.hypot(e.x-u.x,e.y-u.y)<e.range);
+          const visible=localSides.has(u.side)||isDetected(u,observerForces,cities,emplacements,activeScenario,playerSide);
           if(!visible)return null;
           return <button key={u.id} className={"unit-counter "+u.side+" kind-"+u.kind+" "+(selected.includes(u.id)?"selected ":"")+(massTargets.includes(u.id)?"mass-target ":"")+(u.organization<30?"shaken ":"")+(u.order?.type==="retreat"?"retreating":"")} style={{left:u.x-16,top:u.y-16,background:"linear-gradient(90deg,"+(u.side==="blue"?"#5f8199":u.side==="red"?"#9c5f59":"#71846a")+" 0 50%,"+armyGroupColor(u.groupId)+" 50% 100%)"}} onPointerDown={e=>{if(e.button===2)e.preventDefault();e.stopPropagation()}} onClick={e=>selectUnit(e,u)} onContextMenuCapture={e=>e.preventDefault()} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{localSides.has(u.side)?u.groupId?.split("-").pop()??"·":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
         })}
+        {revealedContacts.map(c=><div key={"contact-"+c.id} className="stale-contact" style={{left:c.x-17,top:c.y-17,opacity:Math.max(.2,c.confidence)}} title={"LAST CONTACT · "+Math.round((elapsedHoursRef.current-c.seenAt)*10)/10+"h AGO"}><b>?</b><small>{UNIT_LABEL[c.kind]}</small></div>)}
+        {decoys.filter(d=>d.owner===playerSide||decoyVisibleTo(d,playerSide,units,activeScenario,elapsedHoursRef.current)).map(d=><div key={d.id} className={"deception-counter "+(d.owner===playerSide?"friendly":"enemy")} style={{left:d.x-16,top:d.y-16}} title={d.owner===playerSide?"Friendly deception marker":"Unconfirmed hostile formation"}><b>{d.owner===playerSide?"△":"INF"}</b><small>{d.owner===playerSide?"DECOY":"?"}</small></div>)}
         {openWorld?.structures.filter(s=>s.kind!=="road"&&s.kind!=="wall").map(s=><div key={s.id} className={"ow-structure "+s.kind+" "+s.side} style={{left:s.x-16,top:s.y-16}} title={s.kind}><b>{s.kind==="infantry_barracks"?"INF":s.kind==="mobile_barracks"?"MOB":s.kind==="support_barracks"?"SUP":"FORT"}</b></div>)}
         {emplacements.filter(e=>!isLinearConstruction(e.kind)).map(e=>{
           return <div key={e.id} className={"emplacement "+e.kind+" "+e.side} style={{left:e.x-18,top:e.y-18}} title={constructionLabel(e.kind)}><b>{constructionShort(e.kind)}</b><small>{Math.round(e.strength)}</small></div>
@@ -2292,6 +2338,7 @@ export default function Home(){
           return <div key={project.id} className={"construction-site "+project.kind} style={{left:x-15,top:y-15}}><b>{constructionShort(project.kind)}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span></div>
         })}
         {primary&&primaryTargetX!==undefined&&primaryTargetY!==undefined&&<svg className="order-line" width={mapW} height={mapH}><polyline points={[{x:primary.x,y:primary.y},{x:primaryTargetX,y:primaryTargetY},...(primary.order?.waypoints??[])].map(point=>point.x+","+point.y).join(" ")} /><circle cx={primaryTargetX} cy={primaryTargetY} r="10"/>{(primary.order?.waypoints??[]).map((point,i)=><circle key={i} cx={point.x} cy={point.y} r="8"/>)}</svg>}
+        {frontDirectives.length>0&&<svg className="operational-front-overlay" width={mapW} height={mapH}>{frontDirectives.map(f=><g key={f.id} className={"front-posture "+f.mode+" "+f.side}><line x1={f.start.x} y1={f.start.y} x2={f.end.x} y2={f.end.y}/><text x={(f.start.x+f.end.x)/2} y={(f.start.y+f.end.y)/2-28}>{f.groupId.replace(f.side+"-army-","ARMY ")} · {f.mode.toUpperCase()}</text></g>)}</svg>}
         {attackPlans.length>0&&<svg className="attack-plans" width={mapW} height={mapH}>{attackPlans.map(plan=>{const o=planOrigin(plan);return <g key={plan.id} className={plan.status}><line x1={o.x} y1={o.y} x2={plan.targetX} y2={plan.targetY}/><circle cx={plan.targetX} cy={plan.targetY} r="18"/><text x={plan.targetX+24} y={plan.targetY-18}>{plan.name}</text></g>})}</svg>}
       </div>
 
@@ -2301,6 +2348,7 @@ export default function Home(){
       <div className="map-hud"><div><span className="dot friendly"/>FRIENDLY {blue.length}</div><div><span className="dot hostile"/>CONTACTS {enemy.length}</div><div>CITIES {blueCities}/{cities.length}</div><div>{hovered?TERRAIN_RULES[hovered.terrain].label.toUpperCase()+" · "+(hovered.road?"SUPPLY ROAD":"OFF ROAD"):activeScenario.location.toUpperCase()}</div><div>ZOOM {Math.round(zoom*100)}%</div></div>
       {pendingStrategicBuild&&<div className="target-banner">BUILD {pendingStrategicBuild.replaceAll("_"," ").toUpperCase()} · {(pendingStrategicBuild==="road"||pendingStrategicBuild==="wall")?(strategicBuildAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP":"RMB")+" LOCATION"} <button onClick={()=>{setPendingStrategicBuild(null);setStrategicBuildAnchor(null)}}>CANCEL</button></div>}
       {pendingBuild&&<div className="target-banner">{constructionLabel(pendingBuild)} · {isLinearConstruction(pendingBuild)?(constructionAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP CONSTRUCTION SITE":"RMB CONSTRUCTION SITE")} <button onClick={()=>{setPendingBuild(null);setConstructionAnchor(null)}}>CANCEL</button></div>}
+      {pendingDecoy&&<div className="target-banner">RECON DECOY · PLACE WITHIN RECON RANGE <button onClick={()=>setPendingDecoy(false)}>CANCEL</button></div>}
       {pendingMassAttack&&<div className="target-banner">MARK ENEMY UNITS · {massTargets.length} TARGET{massTargets.length===1?"":"S"} <button disabled={!massTargets.length} onClick={launchGroupAttack}>LAUNCH · ENTER</button><button onClick={()=>{setPendingMassAttack(false);setMassTargets([])}}>CANCEL</button></div>}
       {pendingPlan&&<div className="target-banner">ATTACK PLAN · {isMobile?"TAP OBJECTIVE":"RMB OBJECTIVE"} <button onClick={()=>setPendingPlan(false)}>CANCEL</button></div>}
       {pendingOrder&&<div className="target-banner">{pendingOrder==="relieve"?"RELIEVE ARMED · "+(isMobile?"TAP FRIENDLY":"RMB FRIENDLY FRONTLINE"):pendingOrder==="fire"&&selectedUnits.some(u=>u.kind==="mortar")?"MORTAR FIRE · "+(isMobile?"TAP IMPACT AREA":"RMB IMPACT AREA"):pendingOrder==="assault"||pendingOrder==="fire"?pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP ENEMY":"RMB ENEMY FORMATION"):pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP TARGET":"RMB TARGET")} <button onClick={()=>setPendingOrder(null)}>CANCEL</button></div>}
@@ -2344,7 +2392,10 @@ export default function Home(){
         </div>
         <div className="section-title">FORMATION</div><div className="formation-controls">{(["line","column","wedge","echelon"] as FormationShape[]).map(shape=><button key={shape} onClick={()=>arrangeFormation(shape)} disabled={selectedUnits.length<2}>{shape.toUpperCase()}</button>)}</div>
         <div className="section-title">ARMY GROUP</div><div className="group-assign">{armyGroups.map(g=><button key={g.id} className={selectedUnits.length>0&&selectedUnits.every(u=>u.groupId===g.id)?"active":""} onClick={()=>assignGroup(g.id)}>{g.hotkey}</button>)}</div>
-        <div className="section-title">FRONT COMMAND</div><div className="front-command"><button className={frontToolActive?"active":""} onClick={()=>{setFrontToolActive(v=>!v);setPendingMassAttack(false);setPendingOrder(null)}}>DRAW FRONT · CTRL+DRAG</button><small>Deploy entire group; infantry ahead, guns and logistics behind; engineers build trenches/barriers.</small></div>
+        <div className="section-title">FRONT COMMAND</div><div className="front-command"><button className={frontToolActive?"active":""} onClick={()=>{setFrontToolActive(v=>!v);setPendingMassAttack(false);setPendingOrder(null)}}>DRAW FRONT · CTRL+DRAG</button><small>Deploy group and create a persistent frontline with autonomous reserves.</small>
+          {activeFront&&<div className="front-modes">{(["hold","advance","push","retreat","stop"] as const).map(mode=><button key={mode} className={activeFront.mode===mode?"active":""} onClick={()=>changeFrontMode(activeFront.groupId,mode)}>{mode.toUpperCase()}</button>)}</div>}
+          {selectedUnits.some(u=>u.kind==="recon")&&<button className={pendingDecoy?"active":""} onClick={()=>{setPendingDecoy(true);setPendingOrder(null);setPendingPlan(false)}}>RECON DECOY · Y + MAP</button>}
+        </div>
         <div className="section-title">ORDERS</div><div className="orders">
           <button className={pendingMassAttack?"active plan-button":""} onClick={()=>{setPendingMassAttack(true);setMassTargets([]);setPendingOrder(null);setPendingPlan(false)}}>GROUP ATTACK <kbd>H</kbd></button>
           <button className={pendingPlan?"active plan-button":""} onClick={()=>{setPendingPlan(true);setPendingOrder(null)}}>ATTACK PLAN <kbd>B</kbd></button>
