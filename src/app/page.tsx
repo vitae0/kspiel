@@ -8,6 +8,14 @@ import {addStrategicStructure,advanceOpenWorld,buildStrategicCity,createOpenWorl
 import {closeMultiplayerRoom,createPrivateMatch,findQuickPlay,inviteUrl,joinPrivateMatch,supabase,type MultiplayerSession,type MultiplayerSnapshot,type MultiplayerTeamSize,type UnitCommandPatch} from "@/lib/multiplayer";
 import type {AttackPlan,CityState,ConstructionProject,Emplacement,EmplacementKind,FlagStyle,Formation,FormationShape,OrderType,Scenario,Side,TerrainSample} from "@/sim/types";
 
+const COMMAND_GUIDE=[
+  {title:"SELECT YOUR ARMY",body:"Click a unit or drag a selection box. Keys 1–6 select army groups; Ctrl+1–6 assigns selected units. Nearby units start in the same group."},
+  {title:"MOVE AND ATTACK",body:"Right-click the map to move. Press A then right-click an enemy to assault; F then an enemy to fire artillery. Shift+right-click queues additional waypoints."},
+  {title:"GROUP ATTACK · H",body:"Select an army group, press H, click multiple visible enemy units, then press ENTER or LAUNCH. The command distributes targets and chooses routes and supporting gun positions."},
+  {title:"DRAW A FRONT",body:"Select any formation in an army group and Ctrl+left-drag a slanted line, or use FRONT mode. Infantry goes forward, artillery and logistics move behind, engineers build field works."},
+  {title:"SUPPLY AND ROADS",body:"Supplied cities anchor supply. Only interrupted road sections turn red. Terrain and unit type change supply consumption; tanks are less hindered by trenches."},
+  {title:"REINFORCEMENTS",body:"In scenario battles, after four in-game days, armies below two-thirds of their initial number receive up to three formations per reserve wave from a safe rear city."}
+] as const;
 const SPEED_MULTIPLIER=[0,1,2.5,6];
 const SIM_HOURS_PER_REAL_SECOND=.75;
 const MAX_FRAME_SECONDS=.12;
@@ -1822,6 +1830,7 @@ export default function Home(){
 
   function issueMapTargetAt(clientX:number,clientY:number,append=false){
     if(!selected.length&&!pendingStrategicBuild)return;
+    if(pendingMassAttack)return;
     if((pendingOrder==="assault"||pendingOrder==="relieve")&&!pendingStrategicBuild)return;
     const point=mapPoint(clientX,clientY);if(!point)return;
     const tx=clamp(point.x,1,mapW-1),ty=clamp(point.y,1,mapH-1);const targetTerrain=terrainAt(activeScenario,tx,ty).terrain;if(targetTerrain==="water")return;
@@ -1934,7 +1943,7 @@ export default function Home(){
       e.currentTarget.setPointerCapture(e.pointerId);
       if(touchPoints.current.size>=2){beginPinch();return}
       const screen=viewportPoint(e.clientX,e.clientY);if(!screen)return;
-      const targeting=Boolean(pendingOrder||pendingPlan||pendingBuild||pendingStrategicBuild);
+      const targeting=Boolean(pendingOrder||pendingPlan||pendingMassAttack||pendingBuild||pendingStrategicBuild);
       const mode:"pan"|"front"|"target"=targeting?"target":mobileTool==="front"&&selected.length>0?"front":"pan";
       drag.current={mode,startClientX:e.clientX,startClientY:e.clientY,px:pan.x,py:pan.y,moved:false};
       if(mode==="front")setFrontPreview({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
@@ -2040,21 +2049,30 @@ export default function Home(){
       <div className="brand"><span className="brand-mark">K</span><div><b>KSPIEL</b><small>{activeScenario.title.toUpperCase()} · #{activeScenario.seed.toString(16).toUpperCase()}</small></div></div>
       <div className="theater-state"><span className="command-side"><Flag styleName={activeScenario.sideFlags[playerSide]??"generic-blue"}/>{activeScenario.sideNames[playerSide]}</span><span>DAY {day}</span><strong>{timeLabel(hour)}</strong><span className={running?"live":"paused"}>{running?"RUNNING":"PAUSED"}</span>{multiplayer&&<span className={"network-badge "+networkPhase}>{multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.code}</span>}</div>
       <div className="global-metrics"><div><small>SUPPLY</small><b>{pct(averageSupply)}%</b></div><div><small>ORG</small><b>{pct(averageOrg)}%</b></div><div><small>CITIES</small><b>{blueCities}/{cities.length}</b></div><div><small>CONTACTS</small><b>{enemy.length}</b></div></div>
-      <div className="time-controls"><button className="setup-return" onClick={returnToSetup}>SETUP</button><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)} className="icon-btn">{running?"Ⅱ":"▶"}</button>{[1,2,3].map(s=><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} key={s} onClick={()=>{if(!warResult){setSpeed(s);setRunning(true)}}} className={speed===s?"active":""}>×{s}</button>)}</div>
+      <div className="time-controls"><button className="guide-toggle" onClick={()=>{setShowTutorial(true);setTutorialStep(0)}}>GUIDE ?</button><button className="setup-return" onClick={returnToSetup}>SETUP</button><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)} className="icon-btn">{running?"Ⅱ":"▶"}</button>{[1,2,3].map(s=><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} key={s} onClick={()=>{if(!warResult){setSpeed(s);setRunning(true)}}} className={speed===s?"active":""}>×{s}</button>)}</div>
     </header>
 
+    {showTutorial&&<div className="guide-backdrop" role="dialog" aria-modal="true" aria-label="Game tutorial"><div className="guide-card">
+      <small>KSPIEL COMMAND ACADEMY · {tutorialStep+1}/{COMMAND_GUIDE.length}</small>
+      <h2>{COMMAND_GUIDE[tutorialStep].title}</h2><p>{COMMAND_GUIDE[tutorialStep].body}</p>
+      <div className="guide-actions"><button onClick={()=>setShowTutorial(false)}>CLOSE</button><button disabled={tutorialStep===0} onClick={()=>setTutorialStep(s=>Math.max(0,s-1))}>PREVIOUS</button><button onClick={()=>tutorialStep===COMMAND_GUIDE.length-1?setShowTutorial(false):setTutorialStep(s=>s+1)}>{tutorialStep===COMMAND_GUIDE.length-1?"FINISH":"NEXT"}</button></div>
+    </div></div>}
     {multiplayer&&networkPhase==="opponent-left"&&<div className="network-status-banner">PLAYER DISCONNECTED · MATCH PAUSED</div>}
     {isMobile&&mobilePanel!=="none"&&<button className="mobile-backdrop" aria-label="Close panel" onClick={()=>setMobilePanel("none")}/>}
     <aside className={"left-panel "+(mobilePanel==="forces"?"mobile-open":"")}>
       <button className="mobile-panel-close" onClick={()=>setMobilePanel("none")}>CLOSE</button>
-      <section><div className="section-title">ARMY GROUPS · CTRL+1…6 ASSIGN</div><div className="army-group-grid">{armyGroups.map(g=><button key={g.id} onClick={()=>selectGroup(g.id)}><b>{g.hotkey}</b><span>{g.name}<small>{blue.filter(u=>u.groupId===g.id).length} formations</small></span></button>)}</div></section>
+      <section><div className="section-title">ARMY GROUPS · CTRL+1…6 ASSIGN</div><div className="army-group-grid">{armyGroups.map(g=><button key={g.id} onClick={()=>selectGroup(g.id)} style={{borderLeft:"4px solid "+armyGroupColor(g.id)}}><b>{g.hotkey}</b><span>{g.name}<small>{blue.filter(u=>u.groupId===g.id).length} formations</small></span></button>)}</div></section>
+      <section className="combined-order"><div className="section-title">COORDINATED GROUP ATTACK</div>
+        <button className={pendingMassAttack?"active":""} disabled={!selected.length} onClick={()=>{setPendingMassAttack(true);setMassTargets([]);setPendingOrder(null);setPendingPlan(false)}}>H · MARK MULTIPLE ENEMIES</button>
+        {pendingMassAttack&&<div className="mass-target-tools"><span>{massTargets.length} ENEMY TARGET{massTargets.length===1?"":"S"} MARKED</span><button disabled={!massTargets.length} onClick={launchGroupAttack}>LAUNCH GROUP ATTACK</button><button onClick={()=>{setPendingMassAttack(false);setMassTargets([])}}>CANCEL</button></div>}
+      </section>
       <section><div className="section-title">ATTACK PLANS · B THEN RMB</div><div className="plan-list">{attackPlans.length?attackPlans.map(p=><div className={"plan-row "+p.status} key={p.id}><button onClick={()=>setSelected(p.formationIds)}><b>{p.name}</b><small>{p.formationIds.length} formations · {p.status}</small></button>{p.status==="draft"&&<button onClick={()=>executePlan(p.id)}>GO</button>}<button onClick={()=>cancelPlan(p.id)}>×</button></div>):<small className="muted-line">No plans drafted.</small>}</div></section>
       {openWorld&&<section className="openworld-panel"><div className="section-title">DOMINION</div><div className="resource-strip"><b>MP {Math.floor(openWorld.resources[playerSide].manpower)}</b><b>MAT {Math.floor(openWorld.resources[playerSide].materials)}</b><b>FUEL {Math.floor(openWorld.resources[playerSide].fuel)}</b></div><div className="section-title">RAISE FORMATIONS</div><div className="recruit-grid">{(["infantry","mountaineer","special_forces","engineer","cavalry","recon","mechanized","tank","mortar","artillery","heavy_artillery","logistics"] as Formation["kind"][]).map(kind=>{const cost=UNIT_COST[kind];const barracks=openWorld.structures.find(b=>b.side===playerSide&&b.kind===cost?.family);return <button key={kind} disabled={!cost||!barracks} onClick={()=>{if(!cost||!barracks)return;const next=queueRecruitment(openWorldRef.current!,playerSide,kind,barracks.id);openWorldRef.current=next;setOpenWorld(next)}}><b>{UNIT_LABEL[kind]}</b><small>{cost?cost.manpower+" MP · "+cost.materials+" MAT · "+cost.fuel+" F":"—"}</small></button>})}</div><div className="section-title">BUILD</div><div className="strategic-build-grid">{(["infantry_barracks","mobile_barracks","support_barracks","city","fort","wall"] as OpenWorldBuildKind[]).map(kind=><button key={kind} className={pendingStrategicBuild===kind?"active":""} onClick={()=>{setPendingStrategicBuild(kind);setStrategicBuildAnchor(null);setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);setConstructionAnchor(null)}}>{kind.replaceAll("_"," ").toUpperCase()}</button>)}</div><small className="muted-line">Roads are built by logistics formations. Owned territory yields resources automatically.</small></section>}
       <section><div className="section-title">FIELD WORKS</div><div className="construction-list">{constructionProjects.length?constructionProjects.filter(p=>localSides.has(p.side)).map(project=><div className="construction-row" key={project.id}><b>{constructionLabel(project.kind)}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span><i><em style={{width:Math.min(100,project.progress/project.requiredHours*100)+"%"}}/></i></div>):<small className="muted-line">No active construction.</small>}</div></section>
       <section><div className="section-title">ORDER OF BATTLE</div><div className="oob-list">{blue.map(u=><button key={u.id} onClick={()=>{setSelected([u.id]);if(isMobile)setMobilePanel("unit")}} className={selected.includes(u.id)?"selected":""}><span className="oob-code">{UNIT_LABEL[u.kind]}</span><span><b>{u.name}</b><small>{pct(u.strength)} STR · {pct(u.organization)} ORG</small></span></button>)}</div></section>
     </aside>
 
-    <div ref={viewport} className={pendingOrder||pendingPlan||pendingBuild||pendingStrategicBuild?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenuCapture={suppressNativeContextMenu} onContextMenu={issueTarget}>
+    <div ref={viewport} className={pendingOrder||pendingPlan||pendingMassAttack||frontToolActive||pendingBuild||pendingStrategicBuild?"viewport targeting":"viewport"} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onContextMenuCapture={suppressNativeContextMenu} onContextMenu={issueTarget}>
       <div className="world" style={{width:mapW,height:mapH,transform:"translate("+pan.x+"px,"+pan.y+"px) scale("+zoom+")"}}>
         <svg className="terrain" width={mapW} height={mapH} viewBox={"0 0 "+mapW+" "+mapH}>
           <defs><linearGradient id="sea" x1="0" x2="1"><stop offset="0" stopColor="#1c313c"/><stop offset="1" stopColor="#29424b"/></linearGradient><linearGradient id="intelShade" x1="0" x2="1"><stop offset="0" stopColor="#71846a" stopOpacity=".08"/><stop offset=".55" stopColor="#151b18" stopOpacity=".22"/><stop offset="1" stopColor="#050806" stopOpacity=".68"/></linearGradient><clipPath id="landClip"><path d={activeScenario.landPath}/></clipPath><mask id="fogMask" maskUnits="userSpaceOnUse"><rect width={mapW} height={mapH} fill="white"/>{blue.map(u=><circle key={"fog-u-"+u.id} cx={u.x} cy={u.y} r={visionRange(u)} fill="black"/>)}{cities.filter(c=>localSides.has(c.owner)).map(c=><circle key={"fog-c-"+c.name} cx={c.x} cy={c.y} r="270" fill="black"/>)}{emplacements.filter(e=>localSides.has(e.side)&&e.kind==="observatory").map(e=><circle key={"fog-e-"+e.id} cx={e.x} cy={e.y} r={e.range} fill="black"/>)}</mask></defs>
@@ -2082,14 +2100,14 @@ export default function Home(){
               const friendlyA=localSides.has(road.a.owner),friendlyB=localSides.has(road.b.owner);
               const hostile=!friendlyA&&!friendlyB;
               const cuts=road.cuts[playerSide];
-              const state=cuts.length?"cut":friendlyA&&friendlyB?"friendly":friendlyA||friendlyB?"local":hostile?"hostile":"contested";
-              return <path key={"supply-road-"+road.index} d={polylinePath(road.route)} className={"supply-route "+state}/>;
+              const state=friendlyA&&friendlyB?"friendly":friendlyA||friendlyB?"local":hostile?"hostile":"contested";
+              return <g key={"supply-road-"+road.index}>{roadVisualPieces(road.route,cuts).map((piece,j)=><path key={j} d={polylinePath(piece.points)} className={"supply-route "+(piece.cut?"cut":state)}/>)}</g>;
             })}
             {[...emplacements.filter(e=>e.kind==="road"&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined),...(openWorld?.structures.filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined)??[])].map(s=>{
               const route=[{x:s.x,y:s.y},{x:s.x2!,y:s.y2!}],cuts=routeInterdictionPoints(route,playerSide,units);
               const connected=Boolean(supplySourceAtPoint(playerSide,route[0],cities,currentSupplyNetwork))||Boolean(supplySourceAtPoint(playerSide,route[1],cities,currentSupplyNetwork))||currentSupplyNetwork.roads.some(base=>base.route.slice(0,-1).some((p,i)=>segmentsIntersect(route[0].x,route[0].y,route[1].x,route[1].y,p.x,p.y,base.route[i+1].x,base.route[i+1].y)));
-              const state=cuts.length?"cut":connected?"local":"contested";
-              return <path key={"built-supply-"+s.id} d={polylinePath(route)} className={"supply-route built "+state}/>;
+              const state=connected?"local":"contested";
+              return <g key={"built-supply-"+s.id}>{roadVisualPieces(route,cuts).map((piece,j)=><path key={j} d={polylinePath(piece.points)} className={"supply-route built "+(piece.cut?"cut":state)}/>)}</g>;
             })}
           </g>
           {selectedUnits.filter(u=>u.kind==="logistics").map(u=><g key={"logistics-range-"+u.id} className="logistics-range-display">
@@ -2106,7 +2124,7 @@ export default function Home(){
         {units.map(u=>{
           const visible=localSides.has(u.side)||blue.some(b=>Math.hypot(b.x-u.x,b.y-u.y)<visionRange(b))||cities.some(c=>localSides.has(c.owner)&&Math.hypot(c.x-u.x,c.y-u.y)<270)||emplacements.some(e=>localSides.has(e.side)&&e.kind==="observatory"&&Math.hypot(e.x-u.x,e.y-u.y)<e.range);
           if(!visible)return null;
-          return <button key={u.id} className={"unit-counter "+u.side+" kind-"+u.kind+" "+(selected.includes(u.id)?"selected ":"")+(u.organization<30?"shaken ":"")+(u.order?.type==="retreat"?"retreating":"")} style={{left:u.x-16,top:u.y-16}} onPointerDown={e=>{if(e.button===2)e.preventDefault();e.stopPropagation()}} onClick={e=>selectUnit(e,u)} onContextMenuCapture={e=>e.preventDefault()} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{localSides.has(u.side)?"Ⅰ":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
+          return <button key={u.id} className={"unit-counter "+u.side+" kind-"+u.kind+" "+(selected.includes(u.id)?"selected ":"")+(massTargets.includes(u.id)?"mass-target ":"")+(u.organization<30?"shaken ":"")+(u.order?.type==="retreat"?"retreating":"")} style={{left:u.x-16,top:u.y-16,background:"linear-gradient(90deg,"+(u.side==="blue"?"#5f8199":u.side==="red"?"#9c5f59":"#71846a")+" 0 50%,"+armyGroupColor(u.groupId)+" 50% 100%)"}} onPointerDown={e=>{if(e.button===2)e.preventDefault();e.stopPropagation()}} onClick={e=>selectUnit(e,u)} onContextMenuCapture={e=>e.preventDefault()} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{localSides.has(u.side)?u.groupId?.split("-").pop()??"·":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
         })}
         {openWorld?.structures.filter(s=>s.kind!=="road"&&s.kind!=="wall").map(s=><div key={s.id} className={"ow-structure "+s.kind+" "+s.side} style={{left:s.x-16,top:s.y-16}} title={s.kind}><b>{s.kind==="infantry_barracks"?"INF":s.kind==="mobile_barracks"?"MOB":s.kind==="support_barracks"?"SUP":"FORT"}</b></div>)}
         {emplacements.filter(e=>!isLinearConstruction(e.kind)).map(e=>{
@@ -2126,6 +2144,7 @@ export default function Home(){
       <div className="map-hud"><div><span className="dot friendly"/>FRIENDLY {blue.length}</div><div><span className="dot hostile"/>CONTACTS {enemy.length}</div><div>CITIES {blueCities}/{cities.length}</div><div>{hovered?TERRAIN_RULES[hovered.terrain].label.toUpperCase()+" · "+(hovered.road?"SUPPLY ROAD":"OFF ROAD"):activeScenario.location.toUpperCase()}</div><div>ZOOM {Math.round(zoom*100)}%</div></div>
       {pendingStrategicBuild&&<div className="target-banner">BUILD {pendingStrategicBuild.replaceAll("_"," ").toUpperCase()} · {(pendingStrategicBuild==="road"||pendingStrategicBuild==="wall")?(strategicBuildAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP":"RMB")+" LOCATION"} <button onClick={()=>{setPendingStrategicBuild(null);setStrategicBuildAnchor(null)}}>CANCEL</button></div>}
       {pendingBuild&&<div className="target-banner">{constructionLabel(pendingBuild)} · {isLinearConstruction(pendingBuild)?(constructionAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP CONSTRUCTION SITE":"RMB CONSTRUCTION SITE")} <button onClick={()=>{setPendingBuild(null);setConstructionAnchor(null)}}>CANCEL</button></div>}
+      {pendingMassAttack&&<div className="target-banner">MARK ENEMY UNITS · {massTargets.length} TARGET{massTargets.length===1?"":"S"} <button disabled={!massTargets.length} onClick={launchGroupAttack}>LAUNCH · ENTER</button><button onClick={()=>{setPendingMassAttack(false);setMassTargets([])}}>CANCEL</button></div>}
       {pendingPlan&&<div className="target-banner">ATTACK PLAN · {isMobile?"TAP OBJECTIVE":"RMB OBJECTIVE"} <button onClick={()=>setPendingPlan(false)}>CANCEL</button></div>}
       {pendingOrder&&<div className="target-banner">{pendingOrder==="relieve"?"RELIEVE ARMED · "+(isMobile?"TAP FRIENDLY":"RMB FRIENDLY FRONTLINE"):pendingOrder==="fire"&&selectedUnits.some(u=>u.kind==="mortar")?"MORTAR FIRE · "+(isMobile?"TAP IMPACT AREA":"RMB IMPACT AREA"):pendingOrder==="assault"||pendingOrder==="fire"?pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP ENEMY":"RMB ENEMY FORMATION"):pendingOrder.toUpperCase()+" ARMED · "+(isMobile?"TAP TARGET":"RMB TARGET")} <button onClick={()=>setPendingOrder(null)}>CANCEL</button></div>}
       {warResult&&<div className={"war-result "+warResult}><b>{localSides.has(warResult)?"VICTORY":"DEFEAT"}</b><span>ALL STRATEGIC CITIES CONTROLLED BY {activeScenario.sideNames[warResult]??warResult.toUpperCase()}</span></div>}
@@ -2168,7 +2187,9 @@ export default function Home(){
         </div>
         <div className="section-title">FORMATION</div><div className="formation-controls">{(["line","column","wedge","echelon"] as FormationShape[]).map(shape=><button key={shape} onClick={()=>arrangeFormation(shape)} disabled={selectedUnits.length<2}>{shape.toUpperCase()}</button>)}</div>
         <div className="section-title">ARMY GROUP</div><div className="group-assign">{armyGroups.map(g=><button key={g.id} className={selectedUnits.length>0&&selectedUnits.every(u=>u.groupId===g.id)?"active":""} onClick={()=>assignGroup(g.id)}>{g.hotkey}</button>)}</div>
+        <div className="section-title">FRONT COMMAND</div><div className="front-command"><button className={frontToolActive?"active":""} onClick={()=>{setFrontToolActive(v=>!v);setPendingMassAttack(false);setPendingOrder(null)}}>DRAW FRONT · CTRL+DRAG</button><small>Deploy entire group; infantry ahead, guns and logistics behind; engineers build trenches/barriers.</small></div>
         <div className="section-title">ORDERS</div><div className="orders">
+          <button className={pendingMassAttack?"active plan-button":""} onClick={()=>{setPendingMassAttack(true);setMassTargets([]);setPendingOrder(null);setPendingPlan(false)}}>GROUP ATTACK <kbd>H</kbd></button>
           <button className={pendingPlan?"active plan-button":""} onClick={()=>{setPendingPlan(true);setPendingOrder(null)}}>ATTACK PLAN <kbd>B</kbd></button>
           <button className={!pendingOrder?"active":""} onClick={()=>startOrder("move")}>MOVE <kbd>M</kbd></button>
           <button disabled={!selectedUnits.some(u=>DIRECT_COMBAT_KINDS.has(u.kind))} className={pendingOrder==="assault"?"active":""} onClick={()=>startOrder("assault")}>ASSAULT <kbd>A</kbd></button>
@@ -2183,12 +2204,12 @@ export default function Home(){
 
     <nav className="mobile-toolbar" aria-label="Mobile controls">
       <button className={mobileTool==="pan"?"active":""} onClick={()=>{setMobileTool("pan");setMobilePanel("none")}}><b>✥</b><span>PAN</span></button>
-      <button disabled={selected.length<2} className={mobileTool==="front"?"active":""} onClick={()=>{setMobileTool("front");setMobilePanel("none")}}><b>╱</b><span>FRONT</span></button>
+      <button disabled={selected.length<1} className={mobileTool==="front"?"active":""} onClick={()=>{setMobileTool("front");setMobilePanel("none")}}><b>╱</b><span>FRONT</span></button>
       <button className={mobilePanel==="forces"?"active":""} onClick={()=>setMobilePanel(v=>v==="forces"?"none":"forces")}><b>☷</b><span>FORCES</span></button>
       <button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)}><b>{running?"Ⅱ":"▶"}</b><span>{running?"PAUSE":"PLAY"}</span></button>
     </nav>
 
-    <footer className="statusbar">{multiplayer&&<span className="status-room">{multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.nickname} · {multiplayer.side.toUpperCase()} · ROOM {multiplayer.code}</span>}<span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB: MOVE · SHIFT/CTRL+RMB: QUEUE</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: FORM FRONT</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><span>ALL TROOPS: FIELD WORKS · LOGISTICS: ROADS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
+    <footer className="statusbar">{multiplayer&&<span className="status-room">{multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.nickname} · {multiplayer.side.toUpperCase()} · ROOM {multiplayer.code}</span>}<span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB: MOVE · SHIFT/CTRL+RMB: QUEUE</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: GROUP FRONT</span><span>H: GROUP ASSAULT</span><span>GUIDE: ?</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><span>ALL TROOPS: FIELD WORKS · LOGISTICS: ROADS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
   </main>
 }
 

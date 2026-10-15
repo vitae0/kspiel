@@ -417,3 +417,18 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 }
 
 .field-line{fill:none;pointer-events:none}.field-line.trench path{stroke:#5e5541;stroke-width:18;stroke-dasharray:34 10;stroke-linecap:butt;filter:drop-shadow(0 2px 1px #1118)}.field-line.barricade path{stroke:#a69a78;stroke-width:14;stroke-dasharray:10 8;stroke-linecap:square;filter:drop-shadow(0 2px 1px #111b)}.field-line.blue path{opacity:.95}.field-line.red path{opacity:.9}.field-line.green path{opacity:.9}
+
+/* Army counters are divided exactly halfway between team identity and army identity. */
+.unit-counter.mass-target{outline:3px dashed #fff0a3;outline-offset:4px;z-index:14}
+.combined-order>button,.mass-target-tools button,.front-command button{width:100%;background:#292c21;border:1px solid #a08b54;padding:7px 6px;color:#eee0ab;cursor:pointer;font-size:9px}
+.combined-order>button.active,.front-command button.active{background:#464028;border-color:#ebcf7d}
+.combined-order button:disabled,.mass-target-tools button:disabled{opacity:.4;cursor:not-allowed}
+.mass-target-tools{margin-top:7px;display:grid;gap:5px}.mass-target-tools span{color:#e4d39b;font-size:8px}
+.front-command{display:grid;gap:5px;margin:0 0 13px}.front-command small{color:#a0a79a;font-size:8px}
+.guide-backdrop{position:absolute;inset:0;z-index:100;background:#050807cc;display:grid;place-items:center;padding:16px}
+.guide-card{width:min(460px,95vw);background:#1d241c;border:1px solid #aba078;box-shadow:0 15px 60px #000b;padding:28px}
+.guide-card>small{letter-spacing:.12em;color:#cdbf8f}.guide-card h2{font:700 23px/1.25 system-ui,sans-serif;margin:18px 0 12px}
+.guide-card p{font:14px/1.7 system-ui,sans-serif;color:#d4daca;min-height:105px}
+.guide-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:24px}
+.guide-actions button,.guide-toggle{border:1px solid #746d50;background:#2e3124;padding:7px 10px;cursor:pointer}
+.guide-actions button:disabled{opacity:.35}
