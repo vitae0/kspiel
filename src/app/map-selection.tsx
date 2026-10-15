@@ -135,7 +135,7 @@ export function MapSelection({presets,selectedPresetId,onSelect,mode,locked=fals
   useEffect(()=>{
     const resize=()=>{
       const width=window.innerWidth,height=window.innerHeight;
-      setPageSize(width<=900?1:height>=880&&width>=1260?4:2);
+      setPageSize(width<=900?1:height>=1030&&width>=1260?4:2);
     };
     resize();
     window.addEventListener("resize",resize);
