@@ -117,23 +117,24 @@ export function supplySourceAtPoint(side:Side,point:{x:number;y:number},cities:C
   return roadSource.capacity>citySource.capacity?roadSource:citySource;
 }
 
-export function builtRoadSupplyAccess(u:Pick<Formation,"side"|"x"|"y">,units:Formation[],cities:CityState[],network:SupplyNetwork,emplacements:Emplacement[],openWorld:OpenWorldState|null){
-  const roads=[
-    ...emplacements
-      .filter(e=>e.kind==="road"&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined)
+type BuiltRoad={route:Array<{x:number;y:number}>;side:Side};
+type RoadSource={capacity:number;source:CityState;distance:number};
+type BuiltRoadContext={
+  cities:CityState[];network:SupplyNetwork;emplacements:Emplacement[];openWorld:OpenWorldState|null;
+  roads:BuiltRoad[];adjacency:Array<Set<number>>;
+  usable:Map<Side,boolean[]>;sources:Map<Side,Map<number,RoadSource[]>>;
+};
+/** One context per immutable unit snapshot. Geometry/topology is shared by all unit supply queries. */
+const roadContexts=new WeakMap<Formation[],BuiltRoadContext>();
+function builtRoadContext(units:Formation[],cities:CityState[],network:SupplyNetwork,emplacements:Emplacement[],openWorld:OpenWorldState|null){
+  const old=roadContexts.get(units);
+  if(old&&old.cities===cities&&old.network===network&&old.emplacements===emplacements&&old.openWorld===openWorld)return old;
+  const roads:BuiltRoad[]=[
+    ...emplacements.filter(e=>e.kind==="road"&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined)
       .map(e=>({route:[{x:e.x,y:e.y},{x:e.x2!,y:e.y2!}],side:e.side})),
-    ...(openWorld?.structures??[])
-      .filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined)
+    ...(openWorld?.structures??[]).filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined)
       .map(s=>({route:[{x:s.x,y:s.y},{x:s.x2!,y:s.y2!}],side:s.side}))
   ];
-  if(!roads.length)return null;
-
-  const near=roads
-    .map((road,index)=>({road,index,pos:routePosition(road.route,u.x,u.y)}))
-    .filter(x=>x.pos.distance<=62);
-  if(!near.length)return null;
-
-  const usable=roads.map(road=>routeInterdictionPoints(road.route,u.side,units).length===0);
   const adjacency=roads.map(()=>new Set<number>());
   for(let i=0;i<roads.length;i++)for(let j=i+1;j<roads.length;j++){
     const a=roads[i].route,b=roads[j].route;
@@ -146,42 +147,59 @@ export function builtRoadSupplyAccess(u:Pick<Formation,"side"|"x"|"y">,units:For
     )<=34;
     if(crosses||close){adjacency[i].add(j);adjacency[j].add(i)}
   }
+  const next:BuiltRoadContext={cities,network,emplacements,openWorld,roads,adjacency,usable:new Map(),sources:new Map()};
+  roadContexts.set(units,next);
+  return next;
+}
 
-  const roadSources=(index:number)=>{
+export function builtRoadSupplyAccess(u:Pick<Formation,"side"|"x"|"y">,units:Formation[],cities:CityState[],network:SupplyNetwork,emplacements:Emplacement[],openWorld:OpenWorldState|null){
+  const context=builtRoadContext(units,cities,network,emplacements,openWorld);
+  const {roads,adjacency}=context;
+  if(!roads.length)return null;
+  const near=roads.map((road,index)=>({road,index,pos:routePosition(road.route,u.x,u.y)})).filter(x=>x.pos.distance<=62);
+  if(!near.length)return null;
+  let usable=context.usable.get(u.side);
+  if(!usable){
+    usable=roads.map(road=>routeInterdictionPoints(road.route,u.side,units).length===0);
+    context.usable.set(u.side,usable);
+  }
+  let sources=context.sources.get(u.side);
+  if(!sources){sources=new Map();context.sources.set(u.side,sources)}
+  const roadSources=(index:number):RoadSource[]=>{
+    const cached=sources!.get(index);
+    if(cached)return cached;
     const route=roads[index].route;
-    const candidates:Array<{capacity:number;source:CityState;distance:number}>=[];
+    const candidates:RoadSource[]=[];
     for(const point of route){
       const source=supplySourceAtPoint(u.side,point,cities,network);
       if(source)candidates.push(source);
     }
     for(const generated of network.roads){
       for(let s=0;s<generated.route.length-1;s++){
-        const p=segmentIntersectionPoint(
-          route[0].x,route[0].y,route[1].x,route[1].y,
-          generated.route[s].x,generated.route[s].y,generated.route[s+1].x,generated.route[s+1].y
-        );
+        const p=segmentIntersectionPoint(route[0].x,route[0].y,route[1].x,route[1].y,
+          generated.route[s].x,generated.route[s].y,generated.route[s+1].x,generated.route[s+1].y);
         if(!p)continue;
         const source=supplySourceAtPoint(u.side,p,cities,network);
         if(source)candidates.push(source);
       }
     }
+    sources!.set(index,candidates);
     return candidates;
   };
-
-  let best:{capacity:number;source:CityState;distance:number}|null=null;
+  let best:RoadSource|null=null;
   for(const entry of near){
     const queue=[{index:entry.index,distance:entry.pos.distance}],seen=new Set<number>();
     while(queue.length){
-      const current=queue.shift()!;if(seen.has(current.index)||!usable[current.index])continue;
+      const current=queue.shift()!;
+      if(seen.has(current.index)||!usable[current.index])continue;
       seen.add(current.index);
       for(const source of roadSources(current.index)){
         const distance=current.distance+source.distance;
-        if(!best||source.capacity>best.capacity||(source.capacity===best.capacity&&distance<best.distance))best={capacity:source.capacity,source:source.source,distance};
+        if(!best||source.capacity>best.capacity||(source.capacity===best.capacity&&distance<best.distance))
+          best={capacity:source.capacity,source:source.source,distance};
       }
-      const len=Math.hypot(
-        roads[current.index].route[1].x-roads[current.index].route[0].x,
-        roads[current.index].route[1].y-roads[current.index].route[0].y
-      );
+      const len=Math.hypot(roads[current.index].route[1].x-roads[current.index].route[0].x,
+        roads[current.index].route[1].y-roads[current.index].route[0].y);
       for(const next of adjacency[current.index])if(!seen.has(next))queue.push({index:next,distance:current.distance+len*.5});
     }
   }

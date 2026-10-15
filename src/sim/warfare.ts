@@ -74,7 +74,8 @@ export function updateContacts(existing:LastSeenContact[],formations:Formation[]
   const cache=new Map(existing.filter(c=>hour-c.seenAt<24).map(c=>[c.id,{...c,confidence:Math.max(0,1-(hour-c.seenAt)/24)}]));
   const existingIds=new Set(formations.map(u=>u.id));
   for(const [id] of cache)if(!existingIds.has(id))cache.delete(id);
-  for(const u of formations)if(u.side!==observer&&isDetected(u,formations.filter(v=>v.side===observer),cities,emplacements,scenario,observer))
+  const friendly=formations.filter(v=>v.side===observer);
+  for(const u of formations)if(u.side!==observer&&isDetected(u,friendly,cities,emplacements,scenario,observer))
     cache.set(u.id,{id:u.id,side:u.side,kind:u.kind,x:u.x,y:u.y,strength:u.strength,seenAt:hour,confidence:1});
   return [...cache.values()];
 }

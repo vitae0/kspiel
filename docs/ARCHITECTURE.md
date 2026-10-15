@@ -27,3 +27,6 @@ The simulation has been extracted from the original monolithic `src/app/page.tsx
 - Combat pairs use local spatial queries, preserving original pair order.
 - Territory path calculations are presentation-only snapshots updated at most every 600ms, immediately on owner changes.
 - React hover changes no longer rebuild derived supply/link graphs.
+
+- Constructed-road topology and connection-source calculations are shared between units in a simulation snapshot; caches are invalidated on input identity changes.
+- Scouting visibility calculations are reused inside a view, and hover sampling is limited to 70ms.
