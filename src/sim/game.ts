@@ -413,7 +413,7 @@ function unit(id:string,name:string,side:Side,kind:UnitKind,x:number,y:number,rn
 
 function repeated(kind:UnitKind,count:number){return Array.from({length:count},()=>kind)}
 
-function rosterForScenario(scenario:Scenario,side:Side):UnitKind[]{
+function rosterForScenario(scenario:Pick<Scenario,"presetId"|"era"|"theme">,side:Side):UnitKind[]{
   if(scenario.presetId==="yugoslav-partisans-1943"||scenario.presetId==="central-highlands-1968"){
     if(side==="blue")return[
       ...repeated("partisan",23),...repeated("militia",13),...repeated("raider",11),
@@ -483,6 +483,13 @@ function rosterForScenario(scenario:Scenario,side:Side):UnitKind[]{
     ...repeated("mortar",5),...repeated("artillery",6),...repeated("heavy_artillery",3),...repeated("recon",4),...repeated("engineer",4),...repeated("logistics",4)
   ];
 }
+/** Exact initial formation composition, shared by simulation and map-selection UI.
+ * Does not generate world geometry and therefore stays cheap for every card. */
+export function presetRoster(presetId:string,side:Side):UnitKind[]{
+  const preset=SCENARIO_PRESETS.find(p=>p.id===presetId)??SCENARIO_PRESETS[0];
+  return rosterForScenario({presetId:preset.id,era:preset.era,theme:preset.theme},side);
+}
+
 function spawnPoint(side:Side,cities:CityState[],scenario:Scenario,rnd:()=>number){
   const owned=cities.filter(c=>c.owner===side);
   if(!owned.length)throw new Error("Cannot deploy formations without a friendly supply city");
