@@ -7,38 +7,56 @@ export function armyGroupColor(groupId?:string){
 }
 
 /** Stable spatial grouping at deployment. Never reassign a manual player group in the tick loop. */
-export function groupNearbyFormations(formations:Formation[],side:Side,maxGroups=6):Formation[]{
+export function recommendedArmyGroupCount(unitCount:number):number{
+  // Small theaters have fewer commands; giant theaters have separate sectors.
+  return Math.max(1,Math.min(12,Math.ceil(unitCount/16)));
+}
+
+/** Build spatially coherent, balanced mixed-arms groups at initial deployment.
+ * Each army receives the rare support/armor/infantry types before duplicates,
+ * while the distance penalty keeps its formations in the same sector. */
+export function groupNearbyFormations(formations:Formation[],side:Side,maxGroups?:number):Formation[]{
   if(!formations.length)return formations;
-  const uniquePlaces=new Map<string,{x:number;y:number}>();
-  for(const unit of formations)uniquePlaces.set(Math.round(unit.x/180)+":"+Math.round(unit.y/180),{x:unit.x,y:unit.y});
-  const positions=[...uniquePlaces.values()];
-  const k=Math.min(maxGroups,positions.length);
-  const seeds=[positions[0]];
+  const k=Math.min(formations.length,maxGroups??recommendedArmyGroupCount(formations.length));
+  const sortedPositions=[...formations].sort((a,b)=>a.x-b.x||a.y-b.y);
+  const seeds=[{x:sortedPositions[0].x,y:sortedPositions[0].y}];
   while(seeds.length<k){
-    const ranked=positions.filter(p=>!seeds.includes(p)).map(p=>({p,d:Math.min(...seeds.map(c=>Math.hypot(c.x-p.x,c.y-p.y)))})).sort((a,b)=>b.d-a.d);
-    if(!ranked.length)break;
-    seeds.push(ranked[0].p);
+    const remaining=sortedPositions.map(u=>({u,d:Math.min(...seeds.map(c=>Math.hypot(c.x-u.x,c.y-u.y)))}))
+      .sort((a,b)=>b.d-a.d);
+    if(!remaining.length)break;
+    seeds.push({x:remaining[0].u.x,y:remaining[0].u.y});
   }
-  let centers=seeds.map(p=>({...p}));
-  for(let pass=0;pass<7;pass++){
-    const buckets=centers.map(()=>[] as Formation[]);
-    for(const u of formations){
-      let best=0,dist=Infinity;
-      centers.forEach((c,i)=>{const d=Math.hypot(u.x-c.x,u.y-c.y);if(d<dist){dist=d;best=i}});
-      buckets[best].push(u);
+  const centers=seeds.map(point=>({...point}));
+  const groups=centers.map(()=>[] as Formation[]);
+  const targetSize=Math.ceil(formations.length/k);
+  // Deploy the least common branches first so each group gets a representative
+  // share rather than placing all artillery and logistics in one command.
+  const frequency=new Map<Formation["kind"],number>();
+  for(const unit of formations)frequency.set(unit.kind,(frequency.get(unit.kind)??0)+1);
+  const queue=[...formations].sort((a,b)=>
+    (frequency.get(a.kind)??0)-(frequency.get(b.kind)??0)||a.x-b.x||a.y-b.y);
+  const assignments=new Map<string,number>();
+  for(const unit of queue){
+    let best=0,bestScore=Infinity;
+    for(let i=0;i<groups.length;i++){
+      const group=groups[i];
+      if(group.length>=targetSize)continue;
+      const distance=Math.hypot(unit.x-centers[i].x,unit.y-centers[i].y);
+      const duplicates=group.filter(existing=>existing.kind===unit.kind).length;
+      // Capacity + duplicate pressure are measured in world coordinate units.
+      const score=distance+duplicates*125+group.length*35;
+      if(score<bestScore){bestScore=score;best=i}
     }
-    centers=centers.map((c,i)=>buckets[i].length?{
-      x:buckets[i].reduce((sum,u)=>sum+u.x,0)/buckets[i].length,
-      y:buckets[i].reduce((sum,u)=>sum+u.y,0)/buckets[i].length
-    }:c);
+    groups[best].push(unit);
+    assignments.set(unit.id,best);
+    // Slowly adapt each command center to its actual assigned formations.
+    const n=groups[best].length;
+    centers[best]={x:centers[best].x+(unit.x-centers[best].x)/n,
+      y:centers[best].y+(unit.y-centers[best].y)/n};
   }
-  const sorted=centers.map((c,i)=>({...c,i})).sort((a,b)=>a.x-b.x||a.y-b.y);
-  const labels=new Map(sorted.map((c,i)=>[c.i,i+1]));
-  return formations.map(u=>{
-    let best=0,dist=Infinity;
-    centers.forEach((c,i)=>{const d=Math.hypot(u.x-c.x,u.y-c.y);if(d<dist){best=i;dist=d}});
-    return {...u,groupId:side+"-army-"+labels.get(best)};
-  });
+  const ranked=centers.map((point,i)=>({...point,i})).sort((a,b)=>a.x-b.x||a.y-b.y);
+  const labels=new Map(ranked.map((point,i)=>[point.i,i+1]));
+  return formations.map(unit=>({...unit,groupId:side+"-army-"+labels.get(assignments.get(unit.id)??0)}));
 }
 
 export type RoadVisualPiece={points:{x:number;y:number}[];cut:boolean};
