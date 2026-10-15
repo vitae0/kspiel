@@ -358,7 +358,7 @@ export default function Home(){
   const matchConfig=createMatchConfig(multiplayer?"pvp":"singleplayer",localPlayerId,playerSide);
   const localSides=new Set(localControlledSides(matchConfig,localPlayerId));
   const botSides=multiplayer?[]:openWorld?(["blue","red","green"] as Side[]).filter(side=>!localSides.has(side)):botControlledSides(matchConfig);
-  const armyGroups=defaultArmyGroups(playerSide);
+  const armyGroups=defaultArmyGroups(playerSide,units.filter(u=>u.side===playerSide).length||64);
 
   const selectedUnits=units.filter(u=>selected.includes(u.id));
   const primary=selectedUnits[0];
