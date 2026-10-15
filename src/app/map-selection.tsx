@@ -3,6 +3,9 @@
 import {useEffect,useMemo,useRef,useState} from "react";
 import {generateScenario,polylinePath,presetRoster,UNIT_LABEL} from "@/sim/game";
 import {createOpenWorldState} from "@/sim/openworld";
+import {scenarioTerritoryCells} from "@/sim/territory";
+import {organicTerritoryBoundaryPath} from "@/sim/organic-territory";
+import {Flag} from "@/app/components/ui-primitives";
 import type {Scenario,ScenarioPreset,Side,UnitKind} from "@/sim/types";
 
 type MapMode="scenario"|"openworld";
@@ -75,6 +78,27 @@ function TheaterThumbnail({presetId,mode,priority=false}:{presetId:string;mode:M
       ?createOpenWorldState(scene,scene.formations,scene.cities)
       :{cities:scene.cities,units:scene.formations};
   },[scene,mode]);
+  const territories=useMemo(()=>{
+    if(!scene||!preview)return null;
+    const step=mode==="openworld"?560:scene.worldWidth>8400?560:360;
+    const cells=mode==="openworld"&&"state" in preview
+      ?preview.state.resourceNodes:scenarioTerritoryCells(scene,preview.cities,preview.units,step);
+    return {
+      blue:organicTerritoryBoundaryPath(cells,"blue",step),
+      red:organicTerritoryBoundaryPath(cells,"red",step),
+      green:organicTerritoryBoundaryPath(cells,"green",step)
+    };
+  },[scene,preview,mode]);
+  const flags=useMemo(()=>{
+    if(!preview)return [];
+    const sides:Side[]=mode==="openworld"?["blue","red","green"]:["blue","red"];
+    return sides.flatMap(side=>{
+      const owned=preview.cities.filter(city=>city.owner===side);
+      return [owned[0],owned[Math.floor(owned.length*.72)]]
+        .filter((city,index,array)=>city&&array.indexOf(city)===index)
+        .map(city=>({...city,side}));
+    });
+  },[preview,mode]);
   const w=scene?.worldWidth??8400,h=scene?.worldHeight??5600;
   return <div ref={element} className="theater-thumb" aria-label={"Tactical preview of "+presetId}>
     {scene&&preview?<svg className="theater-thumb-svg" viewBox={"0 0 "+w+" "+h} preserveAspectRatio="xMidYMid meet" role="img" aria-label={"Terrain, roads, objectives and formations of "+scene.title}>
@@ -82,11 +106,19 @@ function TheaterThumbnail({presetId,mode,priority=false}:{presetId:string;mode:M
       <path d={scene.landPath} fill="#65705a" stroke="#bec2a2" strokeWidth={w*.0018}/>
       {scene.terrainFeatures.map(feature=><path key={feature.id} className={"theater-thumb-terrain theater-thumb-"+feature.terrain} d={feature.path}/>)}
       {scene.riverRoutes.map((route,i)=><path key={"river-"+i} className="theater-thumb-river" d={polylinePath(route)} strokeWidth={w*.0035}/>)}
-      {scene.roadRoutes.map((route,i)=><path key={"road-"+i} className="theater-thumb-road" d={polylinePath(route)} strokeWidth={w*.0024}/>)}
+      <defs><clipPath id={"preview-land-"+presetId}><path d={scene.landPath}/></clipPath></defs>
+      {territories&&<g className="theater-thumb-control" clipPath={"url(#preview-land-"+presetId+")"}>
+        {(["blue","red","green"] as Side[]).map(side=><path key={side} className={"theater-thumb-control-area "+side} d={territories[side]} fillRule="evenodd"/>)}
+      </g>}
+      {scene.roadRoutes.map((route,i)=><path key={"road-"+i} className="theater-thumb-road" d={polylinePath(route)} strokeWidth={w*.0024}/>)} 
       {preview.cities.map(city=><g key={city.name} className={"theater-thumb-city "+city.owner}>
         <circle cx={city.x} cy={city.y} r={w*.0052}/>
         <circle className="theater-thumb-city-core" cx={city.x} cy={city.y} r={w*.0022}/>
       </g>)}
+      {flags.map(city=><foreignObject key={"flag-"+city.name} x={city.x-w*.021} y={city.y-w*.039}
+        width={w*.042} height={w*.027} className="theater-thumb-flag">
+        <span className="theater-thumb-flag-surface"><Flag styleName={scene.sideFlags[city.side]??"generic-blue"}/></span>
+      </foreignObject>)}
       {preview.units.filter((_,i)=>i%Math.max(1,Math.ceil(preview.units.length/90))===0).map(unit=><rect
         key={unit.id} className={"theater-thumb-unit "+unit.side} x={unit.x-w*.003} y={unit.y-w*.003}
         width={w*.006} height={w*.006} rx={w*.0005}/>)}
@@ -118,8 +150,9 @@ export function MapSelection({presets,selectedPresetId,onSelect,mode,locked=fals
           <strong>{preset.title}</strong>
           <p>{preset.subtitle}</p>
           <div className="theater-option-force">
-            <span className="blue"><b>{blue}</b> BLUE</span><i>VS</i><span className="red"><b>{red}</b> RED</span>
-            {mode==="openworld"&&<><i>VS</i><span className="green"><b>{OPENWORLD.green}</b> GREEN</span></>}
+            <span className="blue"><Flag styleName={preset.sideFlags.blue}/><b>{blue}</b> BLUE</span><i>VS</i>
+            <span className="red"><Flag styleName={preset.sideFlags.red}/><b>{red}</b> RED</span>
+            {mode==="openworld"&&<><i>VS</i><span className="green"><Flag styleName="generic-blue"/><b>{OPENWORLD.green}</b> GREEN</span></>}
           </div>
           <div className="theater-option-unit-types">
             {roster.map(kind=><span key={kind} title={KIND_NAMES[kind]}>{UNIT_LABEL[kind]}</span>)}
@@ -145,7 +178,7 @@ export function MapDeploymentBrief({preset,mode}:{preset:ScenarioPreset;mode:Map
       {sides.map(side=>{
         const rows=rosterRows(preset.id,side,mode);
         return <div key={side} className={"theater-roster "+side}>
-          <header><span className="theater-side-dot"/><strong>{mode==="openworld"?side.toUpperCase()+" DOMINION":preset.sideNames[side]??side.toUpperCase()}</strong>
+          <header><span className="theater-side-dot"/><Flag styleName={preset.sideFlags[side]??"generic-blue"}/><strong>{mode==="openworld"?side.toUpperCase()+" DOMINION":preset.sideNames[side]??side.toUpperCase()}</strong>
             <b>{sideCount(preset.id,side,mode)} UNITS</b></header>
           <div className="theater-roster-rows">
             {rows.map(({kind,count})=><span key={kind}><span>{KIND_NAMES[kind]}</span><b>×{count}</b></span>)}
