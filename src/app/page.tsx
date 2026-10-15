@@ -5,6 +5,7 @@ import {generateScenario,polylinePath,SCENARIO_PRESETS,terrainAt,TERRAIN_RULES,U
 import {armyGroupColor,roadVisualPieces} from "@/sim/operations";
 import {AMMO_TYPES,SHELL_INTERVAL,constructionWork,fireBudget,marchPaces,marchSlots,replenish,type GunEvent} from "@/sim/attrition";
 import {advanceDirective,applyEncirclement,decoyVisibleTo,frontAssignments,isDetected,updateContacts,type FrontDirective,type FrontMode,type LastSeenContact,type DecoyContact} from "@/sim/warfare";
+import {frontPathFrame,frontPathLength,frontPathPoints,nearestFrontFraction,simplifyFrontPath,type FrontPoint} from "@/sim/front-path";
 import {startHistory,updateHistory,finishHistory,addBattleEvent,type BattleHistory} from "@/sim/telemetry";
 import AfterActionReport from "./after-action";
 import BrandMark from "./brand-mark";
@@ -64,7 +65,7 @@ export default function Home(){
   const [aimPoint,setAimPoint]=useState<{x:number;y:number}|null>(null);
   const [warResult,setWarResult]=useState<Side|null>(null);
   const [selectionBox,setSelectionBox]=useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
-  const [frontPreview,setFrontPreview]=useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
+  const [frontPreview,setFrontPreview]=useState<FrontPoint[]|null>(null);
   const [frontDirectives,setFrontDirectives]=useState<FrontDirective[]>([]);
   const [contacts,setContacts]=useState<LastSeenContact[]>([]);
   const [decoys,setDecoys]=useState<DecoyContact[]>([]);
@@ -101,7 +102,7 @@ export default function Home(){
   const [pendingInviteCode,setPendingInviteCode]=useState("");
   const [onlinePlayers,setOnlinePlayers]=useState<Array<{token:string;nickname:string;side:Side;slot:number}>>([]);
 
-  const drag=useRef<{mode:"pan"|"box"|"front"|"select"|"target";startClientX:number;startClientY:number;px:number;py:number;moved:boolean}|null>(null);
+  const drag=useRef<{mode:"pan"|"box"|"front"|"select"|"target";startClientX:number;startClientY:number;px:number;py:number;moved:boolean;frontPoints?:FrontPoint[]}|null>(null);
   const touchPoints=useRef<Map<number,{x:number;y:number}>>(new Map());
   const pinch=useRef<{distance:number;zoom:number;worldX:number;worldY:number}|null>(null);
   const longPressTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
@@ -708,35 +709,40 @@ export default function Home(){
     return{x:cx,y:cy};
   }
 
-  function deployFront(start:{x:number;y:number},end:{x:number;y:number}){
+  function deployFront(rawPath:FrontPoint[]){
+    const points=simplifyFrontPath(rawPath,Math.max(3,4/zoom)),length=frontPathLength(points);
     const lead=units.find(u=>u.id===selected[0]);
     const chosen=lead?.groupId?units.filter(u=>u.side===lead.side&&u.groupId===lead.groupId):units.filter(u=>selected.includes(u.id));
-    if(chosen.length<2)return;
-    const dx=end.x-start.x,dy=end.y-start.y,length=Math.hypot(dx,dy);if(length<80)return;
-    const tx=dx/length,ty=dy/length,mid={x:(start.x+end.x)/2,y:(start.y+end.y)/2};
-    const threat=units.filter(u=>u.side!==chosen[0].side).sort((a,b)=>Math.hypot(a.x-mid.x,a.y-mid.y)-Math.hypot(b.x-mid.x,b.y-mid.y))[0];
-    const sign=threat&&((threat.x-mid.x)*(-ty)+(threat.y-mid.y)*tx)<0?-1:1;
-    const normal={x:-ty*sign,y:tx*sign};
+    if(chosen.length<2||points.length<2||length<80)return;
+    const middle=frontPathFrame(points,.5);
+    const threat=units.filter(u=>u.side!==chosen[0].side)
+      .sort((a,b)=>Math.hypot(a.x-middle.x,a.y-middle.y)-Math.hypot(b.x-middle.x,b.y-middle.y))[0];
+    const sign:1|-1=threat&&((threat.x-middle.x)*middle.nx+(threat.y-middle.y)*middle.ny)<0?-1:1;
+    const frameAt=(t:number)=>{const f=frontPathFrame(points,t);return{...f,nx:f.nx*sign,ny:f.ny*sign}};
     const depth=(u:Formation)=>u.kind==="logistics"?-360:u.kind==="heavy_artillery"?-310
       :u.kind==="artillery"?-255:u.kind==="mortar"?-165:u.kind==="engineer"?-85
       :u.kind==="recon"?35:u.kind==="tank"||u.kind==="armor"?-12:u.kind==="mechanized"?8:42;
     const targets=new Map<string,{x:number;y:number}>(),rows=new Map<number,Formation[]>();
     for(const u of chosen){const d=depth(u),row=rows.get(d)??[];row.push(u);rows.set(d,row)}
     for(const [d,row] of rows){
-      row.sort((a,b)=>(a.x-b.x)*tx+(a.y-b.y)*ty);
-      row.forEach((u,i)=>{const t=(i+1)/(row.length+1);targets.set(u.id,nearestLandPoint(start.x+dx*t+normal.x*d,start.y+dy*t+normal.y*d))});
+      row.sort((a,b)=>nearestFrontFraction(points,a)-nearestFrontFraction(points,b));
+      row.forEach((u,i)=>{
+        const f=frameAt((i+1)/(row.length+1));
+        targets.set(u.id,nearestLandPoint(f.x+f.nx*d,f.y+f.ny*d));
+      });
     }
-    // Form a rear-city-to-front relay chain with hops shorter than logistics range.
+    // Rear logistics follow the new curvature without abandoning city-side supply.
     const logistics=chosen.filter(u=>u.kind==="logistics");
-    const city=cities.filter(c=>c.owner===chosen[0].side).sort((a,b)=>Math.hypot(a.x-mid.x,a.y-mid.y)-Math.hypot(b.x-mid.x,b.y-mid.y))[0];
+    const city=cities.filter(c=>c.owner===chosen[0].side)
+      .sort((a,b)=>Math.hypot(a.x-middle.x,a.y-middle.y)-Math.hypot(b.x-middle.x,b.y-middle.y))[0];
     if(city&&logistics.length){
-      const head=nearestLandPoint(mid.x-normal.x*320,mid.y-normal.y*320);
+      const center=frameAt(.5),head=nearestLandPoint(center.x-center.nx*320,center.y-center.ny*320);
       const toHead=Math.hypot(head.x-city.x,head.y-city.y);
       if(toHead>1){
         const hop=Math.min(760,toHead/(logistics.length+1));
         logistics.forEach((u,i)=>{
-          const part=Math.min(1,(i+1)*hop/toHead);
-          targets.set(u.id,nearestLandPoint(city.x+(head.x-city.x)*part,city.y+(head.y-city.y)*part));
+          const t=Math.min(1,(i+1)*hop/toHead);
+          targets.set(u.id,nearestLandPoint(city.x+(head.x-city.x)*t,city.y+(head.y-city.y)*t));
         });
       }
     }
@@ -744,30 +750,32 @@ export default function Home(){
       const target=targets.get(u.id);if(!target)return u;
       const route=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},target,emplacementsRef.current,openWorldRef.current);
       const [first,...rest]=route;
-      return{...u,formationShape:"line",order:first?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest}:{type:"move",targetX:target.x,targetY:target.y}};
+      return{...u,formationShape:"line",order:first
+        ?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest}
+        :{type:"move",targetX:target.x,targetY:target.y}};
     }));
-    const engineers=chosen.filter(u=>u.kind==="engineer").sort((a,b)=>(a.x-b.x)*tx+(a.y-b.y)*ty);
+    const engineers=chosen.filter(u=>u.kind==="engineer")
+      .sort((a,b)=>nearestFrontFraction(points,a)-nearestFrontFraction(points,b));
     const actor=multiplayerRef.current?.playerToken.slice(0,8)??"local",projects:ConstructionProject[]=[];
     engineers.forEach((u,i)=>{
-      const t=(i+.5)/engineers.length,center=nearestLandPoint(start.x+dx*t-normal.x*70,start.y+dy*t-normal.y*70);
-      const half=Math.min(185,length/Math.max(2,engineers.length*2));
-      const a=nearestLandPoint(center.x-tx*half,center.y-ty*half),b=nearestLandPoint(center.x+tx*half,center.y+ty*half);
+      const t=(i+.5)/engineers.length,half=Math.min(185,length/Math.max(2,engineers.length*2));
+      const left=frameAt(Math.max(0,t-half/length)),right=frameAt(Math.min(1,t+half/length));
+      const a=nearestLandPoint(left.x-left.nx*70,left.y-left.ny*70);
+      const b=nearestLandPoint(right.x-right.nx*70,right.y-right.ny*70);
       if([a,b].some(p=>["water","highmountain"].includes(terrainAt(activeScenario,p.x,p.y).terrain)))return;
       const kind:EmplacementKind=engineers.length>1&&i%2===1?"barricade":"trench";
       projects.push({id:"front-"+chosen[0].side+"-"+actor+"-"+buildCounter.current++,kind,side:u.side,
         x:a.x,y:a.y,x2:b.x,y2:b.y,builderIds:[u.id],progress:0,
-        requiredHours:(kind==="trench"?10:12)+half*2*(kind==="trench"?.02:.024)});
+        requiredHours:(kind==="trench"?10:12)+Math.hypot(b.x-a.x,b.y-a.y)*(kind==="trench"?.02:.024)});
     });
     if(projects.length){
       const next=[...projectsRef.current,...projects];projectsRef.current=next;setConstructionProjects(next);
       if(multiplayerRef.current&&!multiplayerRef.current.isHost)for(const project of projects)sendNetwork("construction-create",{project});
     }
-    const cx=(start.x+end.x)/2,cy=(start.y+end.y)/2,flen=Math.max(1,Math.hypot(end.x-start.x,end.y-start.y));
-    const closest=[...units.filter(u=>u.side!==chosen[0].side)].sort((a,b)=>Math.hypot(a.x-cx,a.y-cy)-Math.hypot(b.x-cx,b.y-cy))[0];
-    const facing:1|-1=closest&&((closest.x-cx)*(-(end.y-start.y)/flen)+(closest.y-cy)*((end.x-start.x)/flen))<0?-1:1;
     const front:FrontDirective={id:"front-"+chosen[0].side+"-"+(chosen[0].groupId??"field"),side:chosen[0].side,
-      groupId:chosen[0].groupId??chosen[0].side+"-army-1",start,end,mode:"hold",facing,
-      lastIssued:elapsedHoursRef.current,createdAt:elapsedHoursRef.current,reserveFraction:.22};
+      groupId:chosen[0].groupId??chosen[0].side+"-army-1",start:points[0],end:points[points.length-1],
+      points,mode:"hold",facing:sign,lastIssued:elapsedHoursRef.current,
+      createdAt:elapsedHoursRef.current,reserveFraction:.22};
     const nextFronts=[...frontsRef.current.filter(f=>f.groupId!==front.groupId),front];
     frontsRef.current=nextFronts;setFrontDirectives(nextFronts);
     if(multiplayerRef.current&&!multiplayerRef.current.isHost)sendNetwork("front-upsert",{front});
@@ -1079,7 +1087,10 @@ export default function Home(){
       const targeting=Boolean(pendingOrder||pendingPlan||pendingMassAttack||pendingDecoy||pendingBuild||pendingStrategicBuild);
       const mode:"pan"|"front"|"target"=targeting?"target":mobileTool==="front"&&selected.length>0?"front":"pan";
       drag.current={mode,startClientX:e.clientX,startClientY:e.clientY,px:pan.x,py:pan.y,moved:false};
-      if(mode==="front")setFrontPreview({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
+      if(mode==="front"){
+        const start=mapPoint(e.clientX,e.clientY);
+        if(start){drag.current!.frontPoints=[start];setFrontPreview([start])}
+      }
       if(mode==="pan"){
         if(longPressTimer.current)clearTimeout(longPressTimer.current);
         longPressTimer.current=setTimeout(()=>{
@@ -1102,7 +1113,10 @@ export default function Home(){
     if(mode==="pan")e.preventDefault();
     drag.current={mode,startClientX:e.clientX,startClientY:e.clientY,px:pan.x,py:pan.y,moved:false};
     if(mode==="box")setSelectionBox({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
-    if(mode==="front")setFrontPreview({x1:screen.x,y1:screen.y,x2:screen.x,y2:screen.y});
+    if(mode==="front"){
+        const start=mapPoint(e.clientX,e.clientY);
+        if(start){drag.current!.frontPoints=[start];setFrontPreview([start])}
+      }
     e.currentTarget.setPointerCapture(e.pointerId);
   }
 
@@ -1135,7 +1149,17 @@ export default function Home(){
     if(d.mode==="target"||d.mode==="select")return;
     const screen=viewportPoint(e.clientX,e.clientY),start=viewportPoint(d.startClientX,d.startClientY);if(!screen||!start)return;
     if(d.mode==="box")setSelectionBox({x1:start.x,y1:start.y,x2:screen.x,y2:screen.y});
-    if(d.mode==="front")setFrontPreview({x1:start.x,y1:start.y,x2:screen.x,y2:screen.y});
+    if(d.mode==="front"&&d.frontPoints){
+      const events=[...(e.nativeEvent.getCoalescedEvents?.()??[]),e.nativeEvent];
+      let changed=false;
+      for(const event of events){
+        const p=mapPoint(event.clientX,event.clientY),previous=d.frontPoints[d.frontPoints.length-1];
+        if(!p||p.x<0||p.y<0||p.x>mapW||p.y>mapH||Math.hypot(p.x-previous.x,p.y-previous.y)<Math.max(3,6/zoom))continue;
+        d.frontPoints.push(p);changed=true;
+      }
+      if(d.frontPoints.length>650){d.frontPoints=simplifyFrontPath(d.frontPoints,Math.max(3,4/zoom),300);changed=true}
+      if(changed)setFrontPreview([...d.frontPoints]);
+    }
   }
 
   function onPointerUp(e:ReactPointerEvent<HTMLDivElement>){
@@ -1159,7 +1183,12 @@ export default function Home(){
       const minX=Math.min(a.x,b.x),maxX=Math.max(a.x,b.x),minY=Math.min(a.y,b.y),maxY=Math.max(a.y,b.y);
       setSelected(units.filter(u=>localSides.has(u.side)&&u.x>=minX&&u.x<=maxX&&u.y>=minY&&u.y<=maxY).map(u=>u.id));setPendingOrder(null);return;
     }
-    setFrontPreview(null);if(!d.moved)return;const a=mapPoint(d.startClientX,d.startClientY),b=mapPoint(e.clientX,e.clientY);if(a&&b)deployFront(a,b);
+    setFrontPreview(null);
+    if(d.mode!=="front"||!d.moved||!d.frontPoints)return;
+    const end=mapPoint(e.clientX,e.clientY);
+    const points=[...d.frontPoints];
+    if(end&&end.x>=0&&end.y>=0&&end.x<=mapW&&end.y<=mapH)points.push(end);
+    if(frontPathLength(points)>=80)deployFront(points);
   }
 
   function onPointerCancel(e:ReactPointerEvent<HTMLDivElement>){
@@ -1284,12 +1313,13 @@ export default function Home(){
           return <div key={project.id} className={"construction-site "+project.kind} style={{left:x-15,top:y-15}}><b>{constructionShort(project.kind)}</b><span>{Math.round(project.progress/project.requiredHours*100)}%</span></div>
         })}
         {primary&&primaryTargetX!==undefined&&primaryTargetY!==undefined&&<svg className="order-line" width={mapW} height={mapH}><polyline points={[{x:primary.x,y:primary.y},{x:primaryTargetX,y:primaryTargetY},...(primary.order?.waypoints??[])].map(point=>point.x+","+point.y).join(" ")} /><circle cx={primaryTargetX} cy={primaryTargetY} r="10"/>{(primary.order?.waypoints??[]).map((point,i)=><circle key={i} cx={point.x} cy={point.y} r="8"/>)}</svg>}
-        {frontDirectives.length>0&&<svg className="operational-front-overlay" width={mapW} height={mapH}>{frontDirectives.map(f=><g key={f.id} className={"front-posture "+f.mode+" "+f.side}><line x1={f.start.x} y1={f.start.y} x2={f.end.x} y2={f.end.y}/><text x={(f.start.x+f.end.x)/2} y={(f.start.y+f.end.y)/2-28}>{f.groupId.replace(f.side+"-army-","ARMY ")} · {f.mode.toUpperCase()}</text></g>)}</svg>}
+        {frontDirectives.length>0&&<svg className="operational-front-overlay" width={mapW} height={mapH}>{frontDirectives.map(f=>{const center=frontPathFrame(frontPathPoints(f),.5);return <g key={f.id} className={"front-posture "+f.mode+" "+f.side}><path d={polylinePath(frontPathPoints(f))}/><text x={center.x} y={center.y-28}>{f.groupId.replace(f.side+"-army-","ARMY ")} · {f.mode.toUpperCase()}</text></g>})}</svg>}
+        {frontPreview&&frontPreview.length>1&&<svg className="front-preview" width={mapW} height={mapH}><path d={polylinePath(frontPreview)}/></svg>}
         {attackPlans.length>0&&<svg className="attack-plans" width={mapW} height={mapH}>{attackPlans.map(plan=>{const o=planOrigin(plan);return <g key={plan.id} className={plan.status}><line x1={o.x} y1={o.y} x2={plan.targetX} y2={plan.targetY}/><circle cx={plan.targetX} cy={plan.targetY} r="18"/><text x={plan.targetX+24} y={plan.targetY-18}>{plan.name}</text></g>})}</svg>}
       </div>
 
       {selectionBox&&<div className="selection-box" style={{left:Math.min(selectionBox.x1,selectionBox.x2),top:Math.min(selectionBox.y1,selectionBox.y2),width:Math.abs(selectionBox.x2-selectionBox.x1),height:Math.abs(selectionBox.y2-selectionBox.y1)}}/>}
-      {frontPreview&&<svg className="front-preview"><line x1={frontPreview.x1} y1={frontPreview.y1} x2={frontPreview.x2} y2={frontPreview.y2}/></svg>}
+      
       <GameMinimap {...{openWorld,mapW,mapH,territoryPaths,cities,units}}/>
       <GameMapHud {...{blue,enemy,detectedEnemies,blueCities,cities,hovered,activeScenario,zoom}}/>
       {pendingStrategicBuild&&<div className="target-banner">BUILD {pendingStrategicBuild.replaceAll("_"," ").toUpperCase()} · {(pendingStrategicBuild==="road"||pendingStrategicBuild==="wall")?(strategicBuildAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP":"RMB")+" LOCATION"} <button onClick={()=>{setPendingStrategicBuild(null);setStrategicBuildAnchor(null)}}>CANCEL</button></div>}
