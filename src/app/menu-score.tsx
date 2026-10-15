@@ -137,8 +137,8 @@ export default function MenuScore(){
           const position=index%MELODY.length,beat=index%4,bar=Math.floor(index/4)%8;
           const root=BASS[bar],pitch=MELODY[position],full=Math.floor(index/32)%2===1;
           const intensity=full?1:.78;
-          if(pitch)horn(context,master,pitch,nextAt,BEAT*.88,.15*intensity,true);
-          if(full&&pitch&&beat===0)horn(context,master,pitch+12,nextAt,BEAT*.74,.055,true);
+          if(pitch)horn(context,master,pitch,nextAt,BEAT*.88,.15*intensity);
+          if(full&&pitch&&beat===0)horn(context,master,pitch+12,nextAt,BEAT*.74,.055);
           if(beat===0){
             const minor=bar!==2&&bar!==3;
             horn(context,master,root+12,nextAt,BEAT*3.7,.087*intensity);

@@ -20,5 +20,11 @@ jobs:
         run: node scripts/smoke-theaters.cjs
       - name: Attrition and synchronized march tests
         run: node scripts/smoke-attrition.cjs
+      - name: Spatial index parity checks
+        run: node scripts/smoke-spatial.cjs
+      - name: Supply route parity test
+        run: node scripts/smoke-supply.cjs
+      - name: Simulation performance sample (non-gating)
+        run: KSPIEL_BENCH_UNITS=100 npm run bench:sim
       - name: Typecheck and static build
         run: npm run build

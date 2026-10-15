@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "bench:sim": "node scripts/bench-sim.cjs"
   },
   "dependencies": {
     "next": "^16.0.0",
