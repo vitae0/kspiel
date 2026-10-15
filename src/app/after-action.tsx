@@ -48,8 +48,22 @@ export default function AfterActionReport({history,winner,playerSide,onExit}:{hi
   const [visible,setVisible]=useState<Side[]>(["blue","red","green"]);
   const duration=history.finishedAt??history.samples[history.samples.length-1]?.hour??0;
   const final=history.samples[history.samples.length-1];
-  const toggle=(side:Side)=>setVisible(prev=>prev.includes(side)?prev.length>1?prev.filter(x=>x!==side):prev:[...prev,side]);
   const activeSides=SIDES.filter(side=>history.records.some(u=>u.side===side)||history.startingCities[side]>0||final.values[side].cities>0);
+  const toggle=(side:Side)=>setVisible(prev=>{
+    const currentlyVisible=prev.filter(s=>activeSides.includes(s));
+    if(prev.includes(side)&&currentlyVisible.length<=1)return prev;
+    return prev.includes(side)?prev.filter(s=>s!==side):[...prev,side];
+  });
+  const downloadCSV=()=>{
+    const fields=Object.keys(METRICS) as NumericMetric[];
+    const rows=["hour,side,"+fields.join(",")];
+    for(const sample of history.samples)for(const side of activeSides)
+      rows.push([sample.hour,side,...fields.map(key=>sample.values[side][key])].join(","));
+    const blob=new Blob([rows.join("\n")],{type:"text/csv;charset=utf-8"});
+    const url=URL.createObjectURL(blob),link=document.createElement("a");
+    link.href=url;link.download="kspiel-after-action-"+history.seed+".csv";
+    document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);
+  };
   const ranks=activeSides.map(side=>{
     const snap=final.values[side],total=history.totals[side];
     const score=snap.effectiveStrength*18+snap.cities*220+snap.territory*7+total.captures*65+total.damage*2
@@ -62,7 +76,7 @@ export default function AfterActionReport({history,winner,playerSide,onExit}:{hi
       <header className="aar-header"><div><small>KSPIEL // AFTER-ACTION REPORT</small><h1>{winner?(winner===playerSide?"VICTORY":"DEFEAT"):"SESSION CONCLUDED"}</h1><p>{history.title} · SEED #{history.seed.toString(16).toUpperCase()} · {format(duration,1)} SIMULATION HOURS</p></div><div><span className="aar-winner">{winner?winner.toUpperCase()+" VICTORIOUS":history.reason??"ENDED"}</span><button onClick={onExit}>RETURN TO MENU ×</button></div></header>
       <div className="aar-tabs" role="tablist">{TABS.map(t=><button role="tab" aria-selected={tab===t} className={tab===t?"active":""} key={t} onClick={()=>setTab(t)}>{t}</button>)}</div>
       <div className="aar-content">
-        <div className="aar-scoreboard">{ranks.map((r,i)=>{
+        <div className="aar-scoreboard" style={{gridTemplateColumns:"repeat("+Math.max(1,ranks.length)+", minmax(0,1fr))"}}>{ranks.map((r,i)=>{
           const snap=final.values[r.side],total=history.totals[r.side];
           return <div key={r.side} className={"aar-score "+r.side}><div className="aar-side"><i style={{background:COLORS[r.side]}}/><b>{r.side.toUpperCase()} COMMAND</b><small>#{i+1} / KSPIEL SCORE</small></div><strong>{format(r.score)}</strong>
             <div className="aar-kpis"><span>ARMY <b>{format(snap.units)}</b></span><span>CITIES <b>{format(snap.cities)}</b></span><span>DAMAGE <b>{format(total.damage,1)}</b></span><span>LOSSES <b>{format(total.losses)}</b></span></div></div>;
@@ -91,7 +105,7 @@ export default function AfterActionReport({history,winner,playerSide,onExit}:{hi
         </tbody></table></section>}
         {tab==="TIMELINE"?<section className="aar-table-wrap aar-event-section"><h2>CHRONICLE OF THE BATTLE ({history.events.length} EVENTS)</h2>{history.events.length?history.events.slice().reverse().map((event,i)=><div key={i} className="aar-event"><time>{format(event.hour,1)}H</time><span style={{color:COLORS[event.side]}}>{event.side.toUpperCase()}</span><b>{event.title}</b><small>{event.kind.toUpperCase()}</small></div>):<p>No major events recorded.</p>}</section>
         :<div className="aar-charts">{CHARTS[tab].filter(metric=>!["resources","manpowerStock","materialsStock","fuelStock"].includes(metric)||SIDES.some(side=>final.values[side].resources>0)).map(metric=><TrendChart key={metric} history={history} metric={metric} sides={visible.filter(side=>activeSides.includes(side))}/>)}</div>}
-        <footer className="aar-footer"><small>Score is a KSpiel comparative index, not the Age of Empires scoring formula. Events and trend data were recorded during play.</small><button onClick={onExit}>CLOSE REPORT / MAIN MENU</button></footer>
+        <footer className="aar-footer"><small>Score is a KSpiel comparative index, not the Age of Empires scoring formula. Events and trend data were recorded during play.</small><div className="aar-downloads"><button onClick={downloadCSV}>EXPORT ALL TIMELINE DATA · CSV</button><button onClick={onExit}>CLOSE REPORT / MAIN MENU</button></div></footer>
       </div>
     </div>
   </div>;
