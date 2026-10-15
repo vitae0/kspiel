@@ -1,5 +1,5 @@
 import {terrainAt} from "./game";
-import type {CityState,Emplacement,Formation,Scenario,Side} from "./types";
+import {ALL_SIDES,type CityState,type Emplacement,type Formation,type Scenario,type Side} from "./types";
 
 export type FrontMode="hold"|"advance"|"push"|"retreat";
 export type FrontDirective={
@@ -11,7 +11,7 @@ export type LastSeenContact={id:string;side:Side;kind:Formation["kind"];x:number
 export type DecoyContact={id:string;owner:Side;x:number;y:number;kind:Formation["kind"];createdAt:number;expiresAt:number};
 const clamp=(n:number,a:number,b:number)=>Math.max(a,Math.min(b,n));
 const dist=(a:{x:number;y:number},b:{x:number;y:number})=>Math.hypot(a.x-b.x,a.y-b.y);
-export const SIDES:Side[]=["blue","red","green"];
+export const SIDES:Side[]=[...ALL_SIDES];
 
 /** Estimate encirclement from independent hostile sectors AND blocked rear-city escape corridors.
  * This deliberately does not mistake a single nearby enemy for a sealed pocket. */
