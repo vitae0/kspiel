@@ -1,9 +1,9 @@
 "use client";
 import {useState} from "react";
 import type {BattleHistory,StatSide} from "@/sim/telemetry";
-import type {Side} from "@/sim/types";
+import {ALL_SIDES,type Side} from "@/sim/types";
 
-const COLORS:Record<Side,string>={blue:"#71a9e7",red:"#ee8c84",green:"#87c599"};
+const COLORS:Record<Side,string>={blue:"#71a9e7",red:"#ee8c84",green:"#87c599",yellow:"#e7c66c",purple:"#b49be0"};
 type NumericMetric=Exclude<keyof StatSide,"side">;
 const METRICS:Record<NumericMetric,{label:string;unit?:string}>={
   units:{label:"Fielded formations"},effectiveStrength:{label:"Effective army strength"},cities:{label:"Cities controlled"},
@@ -22,7 +22,7 @@ const CHARTS:Record<Exclude<Tab,"TIMELINE">,NumericMetric[]>={
   LOGISTICS:["supply","shortage","isolated","morale","reinforcements","resources","manpowerStock","materialsStock","fuelStock"],
   TERRITORY:["territory","cities","captures","construction"]
 };
-const SIDES:Side[]=["blue","red","green"];
+const SIDES:Side[]=[...ALL_SIDES];
 const format=(v:number,digits=0)=>Number.isFinite(v)?v.toLocaleString("en-US",{maximumFractionDigits:digits}):"0";
 function TrendChart({history,metric,sides}:{history:BattleHistory;metric:NumericMetric;sides:Side[]}){
   const samples=history.samples;
@@ -45,7 +45,7 @@ function TrendChart({history,metric,sides}:{history:BattleHistory;metric:Numeric
 }
 export default function AfterActionReport({history,winner,playerSide,onExit}:{history:BattleHistory;winner:Side|null;playerSide:Side;onExit:()=>void}){
   const [tab,setTab]=useState<Tab>("OVERVIEW");
-  const [visible,setVisible]=useState<Side[]>(["blue","red","green"]);
+  const [visible,setVisible]=useState<Side[]>([...ALL_SIDES]);
   const duration=history.finishedAt??history.samples[history.samples.length-1]?.hour??0;
   const final=history.samples[history.samples.length-1];
   const activeSides=SIDES.filter(side=>history.records.some(u=>u.side===side)||history.startingCities[side]>0||final.values[side].cities>0);
