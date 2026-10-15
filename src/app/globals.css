@@ -707,3 +707,32 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 @media(prefers-reduced-motion:reduce){
   .menu-theater-scene,.menu-map-art,.setup-shell .scenario-card{animation:none!important;transition:none!important}
 }
+
+/* Multilateral FFA faction identities. */
+.flag-generic-green{background:#639468}.flag-generic-yellow{background:#c6a54d}.flag-generic-purple{background:#8b70bb}
+.unit-counter.green{--role:#91b37a;color:#10190e}.unit-counter.yellow{--role:#e9c76a;color:#292013}.unit-counter.purple{--role:#c3a8ed;color:#1c142e}
+.site-label.green .site-core{fill:#86b875}.site-label.green .site-ring{stroke:#83b572}
+.site-label.yellow .site-core{fill:#dfbc59}.site-label.yellow .site-ring{stroke:#e4c76f}
+.site-label.purple .site-core{fill:#ad89d2}.site-label.purple .site-ring{stroke:#b5a1e0}
+.territory-mass.yellow path{fill:#c2a354;stroke:#dfbf72}.territory-mass.purple path{fill:#876fb5;stroke:#a78ed1}
+.territory-mini.yellow{fill:#c2a354}.territory-mini.purple{fill:#876fb5}
+.minimap .yellow{fill:#d8b454}.minimap .purple{fill:#9e83cd}
+.setup-shell .mode-list button.active{border-color:#c9b477;background:#3b412b99}
+.setup-shell .bot-match-options{margin:0 0 18px;padding:14px;background:#15221ad4;border:1px solid #b2a77b69}
+.bot-match-options>strong{display:block;letter-spacing:.15em;color:#f1ddb0;font-size:10px;margin-bottom:10px}
+.bot-match-options .bot-team-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.bot-team-choices button{border:1px solid #7c816b;background:#1c2a21;padding:11px 8px;cursor:pointer;font-weight:800;letter-spacing:.07em;font-size:10px}
+.bot-team-choices button.active{background:#75633871;border-color:#e3c883;color:#ffe9b1}
+.bot-match-options p{color:#b8c4b0;margin:11px 0 0;line-height:1.5;font-size:9px}
+.ffa-map-picker{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:0 0 20px}
+.ffa-map-picker button{padding:18px 12px;background:#1c2c26bb;border:1px solid #9b966f88;color:#eee6d0;cursor:pointer;text-align:left;min-height:124px}
+.ffa-map-picker button.selected{background:#645b38a3;border-color:#e4c67f;box-shadow:inset 0 0 0 1px #e4c67f44}
+.ffa-map-picker b{display:block;font:700 18px Georgia,serif;margin:6px 0}
+.ffa-map-picker small,.ffa-map-picker span{display:block;font-size:9px;color:#c0c5b4}
+.ffa-map-picker span{color:#d9bc79;letter-spacing:.14em}
+.ffa-rules{background:#14221dba;border:1px solid #9e99754e;padding:17px;margin:0 0 14px}
+.ffa-rules b{color:#ecd49d;font-size:13px;letter-spacing:.08em}
+.ffa-rules p{color:#c4c9b9;font-size:11px;line-height:1.7}
+.ffa-rules small{color:#a9b39e}
+.ffa-mode-banner{border:1px solid #ccb6796f;color:#e8d6a6;background:#292a1bbc;padding:7px 11px;margin:0 0 15px;letter-spacing:.12em;font-size:9px}
+@media(max-width:760px){.ffa-map-picker{grid-template-columns:1fr}.ffa-map-picker button{min-height:86px}}
