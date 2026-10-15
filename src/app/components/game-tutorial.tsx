@@ -11,7 +11,7 @@ const COMMAND_GUIDE=[
   {title:"MULTIPLAYER SPEED",body:"The host controls the shared clock with 0.5×, 1× and 2× multiplayer speeds. Other commanders receive authoritative snapshots and do not run a separate simulation."},
   {title:"REINFORCEMENTS",body:"In scenario battles, after four in-game days, armies below two-thirds of their initial number receive up to three formations per reserve wave from a safe rear city."}
 ] as const;
-type Props={showTutorial:boolean;battleReport:boolean;tutorialStep:number;setShowTutorial:Dispatch<SetStateAction<boolean>>;setTutorialStep:Dispatch<SetStateAction<number>>};
+type Props={showTutorial:boolean;battleReport:unknown;tutorialStep:number;setShowTutorial:Dispatch<SetStateAction<boolean>>;setTutorialStep:Dispatch<SetStateAction<number>>};
 export function GameTutorial({showTutorial,battleReport,tutorialStep,setShowTutorial,setTutorialStep}:Props){
  return <>{showTutorial&&!battleReport&&<div className="guide-backdrop" role="dialog" aria-modal="true" aria-label="Game tutorial"><div className="guide-card">
       <small>KSPIEL COMMAND ACADEMY · {tutorialStep+1}/{COMMAND_GUIDE.length}</small>
