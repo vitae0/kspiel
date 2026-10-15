@@ -3,6 +3,7 @@ import {type OpenWorldState} from "@/sim/openworld";
 import {type CityState,type Emplacement,type Formation,type Scenario,type Side} from "@/sim/types";
 import {clamp,segmentContact,segmentsIntersect,segmentIntersectionPoint,nearestCityTo,cityAtPoint,routePosition} from "@/sim/geometry";
 import {DIRECT_COMBAT_KINDS} from "@/sim/rules";
+import {SpatialGrid} from "@/sim/spatial-grid";
 
 export function roadControlPower(u:Formation){
   const role=u.kind==="tank"||u.kind==="armor"||u.kind==="mechanized"?1.2
@@ -14,15 +15,36 @@ export function roadControlPower(u:Formation){
 
 export type RoadCutPoint={x:number;y:number;along:number;pressure:number};
 
+type IndexedUnit={x:number;y:number;unit:Formation;index:number};
+const cachedUnits=new WeakMap<Formation[],SpatialGrid<IndexedUnit>>();
+function localUnits(units:Formation[],x:number,y:number){
+  let grid=cachedUnits.get(units);
+  if(!grid){
+    grid=new SpatialGrid(units.map((unit,index)=>({x:unit.x,y:unit.y,unit,index})),256);
+    cachedUnits.set(units,grid);
+  }
+  // Preserve floating point addition and tie order from the original global scan.
+  return grid.within(x,y,155).sort((a,b)=>a.index-b.index);
+}
+
 export function routeInterdictionPoints(route:{x:number;y:number}[],side:Side,units:Formation[]):RoadCutPoint[]{
+  if(!route.length)return [];
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for(const point of route){
+    minX=Math.min(minX,point.x);maxX=Math.max(maxX,point.x);
+    minY=Math.min(minY,point.y);maxY=Math.max(maxY,point.y);
+  }
   const cuts:RoadCutPoint[]=[];
   for(const hostile of units){
     if(hostile.side===side||!DIRECT_COMBAT_KINDS.has(hostile.kind)||hostile.strength<=18||hostile.organization<=20)continue;
+    // No point on a segment can be within 125 units beyond its bounding rectangle.
+    if(hostile.x<minX-125||hostile.x>maxX+125||hostile.y<minY-125||hostile.y>maxY+125)continue;
     const pos=routePosition(route,hostile.x,hostile.y);
     if(pos.distance>(hostile.kind==="raider"?125:hostile.kind==="partisan"?98:58))continue;
     let hostilePower=0,friendlyPower=0;
-    for(const unit of units){
-      if(!DIRECT_COMBAT_KINDS.has(unit.kind)||unit.strength<=8||Math.hypot(unit.x-hostile.x,unit.y-hostile.y)>155)continue;
+    for(const entry of localUnits(units,hostile.x,hostile.y)){
+      const unit=entry.unit;
+      if(!DIRECT_COMBAT_KINDS.has(unit.kind)||unit.strength<=8)continue;
       if(unit.side===side)friendlyPower+=roadControlPower(unit);
       else hostilePower+=roadControlPower(unit);
     }
