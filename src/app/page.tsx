@@ -1393,7 +1393,7 @@ export default function Home(){
     if(isMobile&&(pendingOrder||pendingPlan||pendingBuild||pendingDecoy))setMobilePanel("none");
   },[isMobile,pendingOrder,pendingPlan,pendingBuild,pendingDecoy]);
   useEffect(()=>{
-    if(!scenario||multiplayer?.isHost)return;
+    if(!scenario||!multiplayer||multiplayer.isHost)return;
     const observed=updateContacts(contactsRef.current,units,cities,emplacements,scenario,playerSide,(day-1)*24+hour-6);
     contactsRef.current=observed;setContacts(observed);
   },[scenario,multiplayer?.isHost,units,cities,emplacements,playerSide,day,hour]);
