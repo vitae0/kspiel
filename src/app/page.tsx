@@ -1114,6 +1114,11 @@ export default function Home(){
   const [frontPreview,setFrontPreview]=useState<{x1:number;y1:number;x2:number;y2:number}|null>(null);
   const [attackPlans,setAttackPlans]=useState<AttackPlan[]>([]);
   const [pendingPlan,setPendingPlan]=useState(false);
+  const [pendingMassAttack,setPendingMassAttack]=useState(false);
+  const [massTargets,setMassTargets]=useState<string[]>([]);
+  const [frontToolActive,setFrontToolActive]=useState(false);
+  const [showTutorial,setShowTutorial]=useState(false);
+  const [tutorialStep,setTutorialStep]=useState(0);
   const [selectedPresetId,setSelectedPresetId]=useState("frontier");
   const [selectedGameMode,setSelectedGameMode]=useState<"scenario"|"openworld">("scenario");
   const [openWorld,setOpenWorld]=useState<OpenWorldState|null>(null);
@@ -1148,6 +1153,11 @@ export default function Home(){
   const warResultRef=useRef<Side|null>(null);
   const planCounter=useRef(1);
   const buildCounter=useRef(1);
+  const initialRosterRef=useRef<Formation[]>([]);
+  const initialCountRef=useRef<Record<Side,number>>({blue:0,red:0,green:0});
+  const elapsedHoursRef=useRef(0);
+  const lastReserveRef=useRef<Record<Side,number>>({blue:0,red:0,green:0});
+  const reserveSerialRef=useRef(1);
   const emplacementsRef=useRef<Emplacement[]>([]);
   const projectsRef=useRef<ConstructionProject[]>([]);
   const openWorldRef=useRef<OpenWorldState|null>(null);
@@ -1358,6 +1368,33 @@ export default function Home(){
       let working=unitsRef.current;
       if(aiElapsed>=AI_COMMAND_INTERVAL_SECONDS){for(const side of botSides)working=enemyAI(scenario,working,citiesRef.current,side);aiElapsed=0}
       let nextUnits=simulate(scenario,working,simHours,citiesRef.current,emplacementsRef.current,openWorldRef.current);
+      elapsedHoursRef.current+=simHours;
+      if(!openWorldRef.current&&elapsedHoursRef.current>=96){
+        for(const side of ["blue","red"] as Side[]){
+          const original=initialCountRef.current[side];
+          if(!original||nextUnits.filter(u=>u.side===side).length>=original*2/3)continue;
+          if(elapsedHoursRef.current-lastReserveRef.current[side]<36)continue;
+          const owned=citiesRef.current.filter(c=>c.owner===side),hostile=citiesRef.current.filter(c=>c.owner!==side);
+          const rear=[...owned].sort((a,b)=>{
+            const depth=(c:CityState)=>hostile.length?Math.min(...hostile.map(h=>Math.hypot(h.x-c.x,h.y-c.y))):0;
+            return depth(b)-depth(a);
+          })[0];
+          if(!rear)continue;
+          const pool=initialRosterRef.current.filter(u=>u.side===side);
+          const reserves:Formation[]=[];
+          for(let i=0;i<3;i++){
+            const template=pool[(reserveSerialRef.current+i)%pool.length];
+            const angle=(reserveSerialRef.current+i)*2.399963229728653,radius=16+((reserveSerialRef.current+i)%3)*10;
+            const x=rear.x+Math.cos(angle)*radius,y=rear.y+Math.sin(angle)*radius;
+            if(terrainAt(scenario,x,y).objective!==rear.name)continue;
+            if(nextUnits.some(u=>u.side!==side&&Math.hypot(u.x-x,u.y-y)<170))continue;
+            const nearest=nextUnits.filter(u=>u.side===side&&u.groupId).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0];
+            reserves.push({...template,id:side[0]+"-reserve-"+reserveSerialRef.current+"-"+i,name:"Reserve "+template.name,
+              x,y,groupId:nearest?.groupId??template.groupId,strength:100,supply:94,organization:85,fuel:94,entrenchment:0,order:{type:"defend"}});
+          }
+          if(reserves.length){nextUnits=[...nextUnits,...reserves];lastReserveRef.current[side]=elapsedHoursRef.current;reserveSerialRef.current++}
+        }
+      }
       if(openWorldRef.current){
         // Validate each completed recruit against the same supply state used by
         // the map, including interdicted roads, depots and logistics relays.
@@ -1406,6 +1443,7 @@ export default function Home(){
   function selectUnit(e:ReactMouseEvent,u:Formation){
     e.stopPropagation();
     if(!localSides.has(u.side)){
+      if(pendingMassAttack){setMassTargets(prev=>prev.includes(u.id)?prev.filter(id=>id!==u.id):[...prev,u.id]);return}
       if(pendingOrder==="assault"||pendingOrder==="fire"||pendingOrder==="probe")issueUnitTargetCore(u,false);
       return;
     }
@@ -1439,20 +1477,22 @@ export default function Home(){
     const onKey=(e:KeyboardEvent)=>{
       const el=e.target as HTMLElement|null;if(el?.tagName==="INPUT"||el?.tagName==="TEXTAREA"||el?.isContentEditable)return;
       const key=e.key.toLowerCase();
-      if(key==="escape"){setPendingOrder(null);setPendingPlan(false);setPendingBuild(null);setConstructionAnchor(null);return}
+      if(key==="escape"){setPendingOrder(null);setPendingPlan(false);setPendingMassAttack(false);setMassTargets([]);setPendingBuild(null);setConstructionAnchor(null);setFrontToolActive(false);return}
       const digit=/^Digit([1-6])$/.exec(e.code);
       if(digit){
         const group=armyGroups[Number(digit[1])-1];
         if(e.ctrlKey){e.preventDefault();assignGroup(group.id)}else if(!e.metaKey&&!e.altKey){e.preventDefault();selectGroup(group.id)}
         return;
       }
-      if(key==="b"){setPendingPlan(true);setPendingOrder(null);setPendingBuild(null);setConstructionAnchor(null);return}
+      if(key==="b"){setPendingPlan(true);setPendingOrder(null);setPendingMassAttack(false);setPendingBuild(null);setConstructionAnchor(null);return}
+      if(key==="h"){setPendingMassAttack(true);setMassTargets([]);setPendingPlan(false);setPendingOrder(null);return}
+      if(key==="enter"&&pendingMassAttack){launchGroupAttack();return}
       if(key==="m")startOrder("move");else if(key==="a")startOrder("assault");else if(key==="p")startOrder("probe");
       else if(key==="f")startOrder("fire");else if(key==="d")startOrder("defend");else if(key==="g")startOrder("dig");
       else if(key==="r")startOrder("resupply");else if(key==="t")startOrder("relieve");else if(key==="x")startOrder("retreat");
     };
     window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey);
-  },[selected,units,cities]);
+  },[selected,units,cities,pendingMassAttack,massTargets]);
 
   function startGame(network?:MultiplayerSession){
     const seed=network?.seed??(typeof crypto!=="undefined"&&"getRandomValues" in crypto?crypto.getRandomValues(new Uint32Array(1))[0]:Date.now()>>>0);
@@ -1462,7 +1502,10 @@ export default function Home(){
     if(network){setPlayerSide(network.side);setSelectedPresetId(network.presetId);setSelectedGameMode("scenario")}
     let generated=generateScenario(seed,presetId);
     if(gameMode==="openworld")generated={...generated,presetId:"open-world",title:"Open World Dominion",historical:false,sideNames:{blue:"Blue Dominion",red:"Red Dominion",green:"Green Dominion"},sideFlags:{blue:"generic-blue",red:"generic-red",green:"generic-blue"}};
-    warResultRef.current=null;setWarResult(null);setAttackPlans([]);setPendingPlan(false);setPendingOrder(null);setPendingBuild(null);setConstructionAnchor(null);setStrategicBuildAnchor(null);
+    warResultRef.current=null;setWarResult(null);setAttackPlans([]);setPendingPlan(false);setPendingMassAttack(false);setMassTargets([]);setFrontToolActive(false);setPendingOrder(null);setPendingBuild(null);setConstructionAnchor(null);setStrategicBuildAnchor(null);
+    initialRosterRef.current=generated.formations;
+    initialCountRef.current={blue:generated.formations.filter(u=>u.side==="blue").length,red:generated.formations.filter(u=>u.side==="red").length,green:0};
+    elapsedHoursRef.current=0;lastReserveRef.current={blue:0,red:0,green:0};reserveSerialRef.current=1;
     setEmplacements([]);emplacementsRef.current=[];setConstructionProjects([]);projectsRef.current=[];setMobilePanel("none");
     if(gameMode==="openworld"){
       const ow=createOpenWorldState(generated,generated.formations,generated.cities);openWorldRef.current=ow.state;setOpenWorld(ow.state);
@@ -1774,6 +1817,7 @@ export default function Home(){
 
   function issueUnitTargetCore(target:Formation,allowDefaultMove:boolean){
     if(!selected.length||selected.includes(target.id))return;
+    if(pendingMassAttack&&target.side!==playerSide){setMassTargets(prev=>prev.includes(target.id)?prev.filter(id=>id!==target.id):[...prev,target.id]);return}
     const requested=pendingOrder;
     if(!requested&&!allowDefaultMove)return;
 
