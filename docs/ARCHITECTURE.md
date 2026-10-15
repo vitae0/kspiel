@@ -30,3 +30,5 @@ The simulation has been extracted from the original monolithic `src/app/page.tsx
 
 - Constructed-road topology and connection-source calculations are shared between units in a simulation snapshot; caches are invalidated on input identity changes.
 - Scouting visibility calculations are reused inside a view, and hover sampling is limited to 70ms.
+
+- Static geography paths are separately memoized. Offscreen army counter DOM nodes are skipped without changing simulation, fog, or minimap rules.

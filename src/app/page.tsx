@@ -11,6 +11,8 @@ import BrandMark from "./brand-mark";
 import MenuAtmosphere from "./menu-atmosphere";
 import MenuScore from "./menu-score";
 import {useTerritoryView} from "@/app/hooks/use-territory-view";
+import {StaticLand,StaticRoutes} from "@/app/components/static-terrain";
+import {useViewportSize} from "@/app/hooks/use-viewport-size";
 import {botControlledSides,createMatchConfig,defaultArmyGroups,localControlledSides} from "@/sim/session";
 import {addStrategicStructure,advanceOpenWorld,buildStrategicCity,createOpenWorldState,queueRecruitment,UNIT_COST,type OpenWorldBuildKind,type OpenWorldState} from "@/sim/openworld";
 import {closeMultiplayerRoom,createPrivateMatch,findQuickPlay,inviteUrl,joinPrivateMatch,supabase,type MultiplayerSession,type MultiplayerSnapshot,type MultiplayerTeamSize,type UnitCommandPatch} from "@/lib/multiplayer";
@@ -661,6 +663,7 @@ export default function Home(){
   const territoryLayerOpacity=1-.88*territoryZoomEase;
 
   const {theaterTerritory,territoryPaths}=useTerritoryView(scenario,cities,units,openWorld);
+  const viewportSize=useViewportSize(viewport,Boolean(scenario));
 
   if(!scenario){
     const presets=SCENARIO_PRESETS.filter(p=>setupCategory==="all"||
@@ -1222,6 +1225,12 @@ export default function Home(){
     &&isDetected(u,observerForces,cities,emplacements,activeScenario,playerSide)).map(u=>u.id));
   scoutViewRef.current={scenario:activeScenario,units,cities,emplacements,side:playerSide,friendly:observerForces,ids:detectedEnemies};
   const revealedContacts=contacts.filter(c=>!detectedEnemies.has(c.id));
+  // This only reduces DOM nodes, never authoritative units or the minimap.
+  const renderedUnits=!viewportSize.width||!viewportSize.height?units:units.filter(u=>{
+    const margin=120;
+    return u.x>=-pan.x/zoom-margin&&u.x<=(viewportSize.width-pan.x)/zoom+margin
+      &&u.y>=-pan.y/zoom-margin&&u.y<=(viewportSize.height-pan.y)/zoom+margin;
+  });
 
   return <main className={"game-shell theme-"+activeScenario.theme}>
     <header className="topbar">
@@ -1261,16 +1270,16 @@ export default function Home(){
       <div className="world" style={{width:mapW,height:mapH,transform:"translate("+pan.x+"px,"+pan.y+"px) scale("+zoom+")"}}>
         <svg className="terrain" width={mapW} height={mapH} viewBox={"0 0 "+mapW+" "+mapH}>
           <defs><linearGradient id="sea" x1="0" x2="1"><stop offset="0" stopColor="#1c313c"/><stop offset="1" stopColor="#29424b"/></linearGradient><linearGradient id="intelShade" x1="0" x2="1"><stop offset="0" stopColor="#71846a" stopOpacity=".08"/><stop offset=".55" stopColor="#151b18" stopOpacity=".22"/><stop offset="1" stopColor="#050806" stopOpacity=".68"/></linearGradient><clipPath id="landClip"><path d={activeScenario.landPath}/></clipPath><mask id="fogMask" maskUnits="userSpaceOnUse"><rect width={mapW} height={mapH} fill="white"/>{blue.map(u=><circle key={"fog-u-"+u.id} cx={u.x} cy={u.y} r={visionRange(u)} fill="black"/>)}{cities.filter(c=>localSides.has(c.owner)).map(c=><circle key={"fog-c-"+c.name} cx={c.x} cy={c.y} r="270" fill="black"/>)}{emplacements.filter(e=>localSides.has(e.side)&&e.kind==="observatory").map(e=><circle key={"fog-e-"+e.id} cx={e.x} cy={e.y} r={e.range} fill="black"/>)}</mask></defs>
-          <rect width={mapW} height={mapH} fill="url(#sea)"/><path d={activeScenario.landPath} className="land-base"/>
-          {activeScenario.terrainFeatures.map(f=><path key={f.id} d={f.path} className={"terrain-region "+f.terrain}/>)}
+          <rect width={mapW} height={mapH} fill="url(#sea)"/><StaticLand scenario={activeScenario}/>
+          
           <g className="territory-layer" clipPath="url(#landClip)" style={{opacity:territoryLayerOpacity}}>
             {(["blue","red","green"] as Side[]).map(side=><g key={"zone-"+side} className={"territory-mass "+side}>
               <path d={territoryPaths[side]} fillRule="evenodd"/>
             </g>)}
             {(openWorld?openWorld.resourceNodes:theaterTerritory).filter(cell=>cell.contested>.7&&cell.control<.67).map(cell=><circle key={"uncertain-"+cell.x+"-"+cell.y} className="territory-disputed" cx={cell.x} cy={cell.y} r={openWorld?165:105} opacity={Math.min(.26,cell.contested*.24)}/>)}
           </g>
-          {activeScenario.riverRoutes.map((route,i)=><path key={"river"+i} d={polylinePath(route)} className="river"/>)}
-          {activeScenario.roadRoutes.map((route,i)=><path key={"road"+i} d={polylinePath(route)} className="road"/>)}{activeScenario.roadNodes.map(node=><circle key={node.id} cx={node.x} cy={node.y} r="7" className="road-node"/>)}
+          <StaticRoutes scenario={activeScenario}/>
+          
           {emplacements.filter(e=>e.kind==="road"&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined).map(e=><path key={e.id} d={"M "+e.x+" "+e.y+" L "+e.x2+" "+e.y2} className="road"/>)}
           {openWorld?.structures.filter(s=>s.kind==="road"&&s.strength>0&&s.x2!==undefined&&s.y2!==undefined).map(s=><path key={s.id} d={"M "+s.x+" "+s.y+" L "+s.x2+" "+s.y2} className="road"/>)}
           {emplacements.filter(e=>(e.kind==="trench"||e.kind==="barricade")&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined).map(e=><g key={e.id} className={"field-line "+e.kind+" "+e.side} opacity={.4+.6*e.strength/145}><path d={"M "+e.x+" "+e.y+" L "+e.x2+" "+e.y2}/></g>)}
@@ -1311,7 +1320,7 @@ export default function Home(){
         </svg>}
         {selectedUnits.some(u=>ARTILLERY_KINDS.has(u.kind))&&<svg className="artillery-ranges" width={mapW} height={mapH}>{selectedUnits.filter(u=>ARTILLERY_KINDS.has(u.kind)).map(u=>{const r=u.kind==="mortar"?mortarMaxRange(activeScenario,u):u.kind==="heavy_artillery"?820:540;return <g key={"range-"+u.id}><circle cx={u.x} cy={u.y} r={r}/><text x={u.x+10} y={u.y-r+22}>{Math.round(r)} RANGE</text></g>})}</svg>}
         {pendingOrder==="fire"&&aimPoint&&selectedUnits.some(u=>u.kind==="mortar")&&<svg className="mortar-aim" width={mapW} height={mapH}><circle cx={aimPoint.x} cy={aimPoint.y} r={mortarDispersion(activeScenario,aimPoint.x,aimPoint.y,Math.min(1,Math.min(...selectedUnits.filter(u=>u.kind==="mortar").map(u=>Math.hypot(aimPoint.x-u.x,aimPoint.y-u.y)/mortarMaxRange(activeScenario,u)))))} /><circle className="mortar-aim-core" cx={aimPoint.x} cy={aimPoint.y} r="7"/></svg>}
-        {units.map(u=>{
+        {renderedUnits.map(u=>{
           const visible=localSides.has(u.side)||detectedEnemies.has(u.id);
           if(!visible)return null;
           return <button key={u.id} className={"unit-counter "+u.side+" kind-"+u.kind+" "+(selected.includes(u.id)?"selected ":"")+(massTargets.includes(u.id)?"mass-target ":"")+(u.organization<30||(u.suppression??0)>50||(u.morale??82)<25?"shaken ":"")+(u.isolationHours&&u.isolationHours>6?" encircled ":"")+(u.order?.type==="retreat"?"retreating":"")+(AMMO_TYPES.has(u.kind)&&(u.ammo??100)<12?" low-ammo":"")} style={{left:u.x-16,top:u.y-16,background:"linear-gradient(90deg,"+(u.side==="blue"?"#5f8199":u.side==="red"?"#9c5f59":"#71846a")+" 0 50%,"+armyGroupColor(u.groupId)+" 50% 100%)"}} onPointerDown={e=>{if(e.button===2)e.preventDefault();e.stopPropagation()}} onClick={e=>selectUnit(e,u)} onContextMenuCapture={e=>e.preventDefault()} onContextMenu={e=>issueUnitTarget(e,u)}><span className="unit-top">{UNIT_LABEL[u.kind]}<i>{localSides.has(u.side)?u.groupId?.split("-").pop()??"·":"◆"}</i></span><b>{pct(u.strength)}</b><span className="unit-bars"><i style={{width:pct(u.organization)+"%"}}/><em style={{width:pct(u.supply)+"%"}}/></span></button>
