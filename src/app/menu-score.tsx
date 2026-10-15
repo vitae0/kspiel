@@ -12,10 +12,10 @@ type PlayingScore={context:AudioContext;timer:number;master:GainNode};
 
 function frequency(midi:number){return 440*Math.pow(2,(midi-69)/12)}
 
-function horn(ctx:AudioContext,out:AudioNode,midi:number,at:number,length:number,volume:number){
+function horn(ctx:AudioContext,out:AudioNode,midi:number,at:number,length:number,volume:number,bright=false){
   const amp=ctx.createGain();
   const filter=ctx.createBiquadFilter();
-  filter.type="lowpass";filter.frequency.setValueAtTime(1880,at);
+  filter.type="lowpass";filter.frequency.setValueAtTime(bright?2450:1880,at);
   filter.frequency.exponentialRampToValueAtTime(850,at+length);
   amp.gain.setValueAtTime(.0001,at);
   amp.gain.exponentialRampToValueAtTime(volume,at+.055);
@@ -74,8 +74,38 @@ function cymbal(ctx:AudioContext,out:AudioNode,at:number,length:number,volume:nu
   src.start(at);src.stop(at+length+.01);
 }
 
+
+// Short procedural interface cues, independent of the music mute switch.
+type MenuEffect="hover"|"select"|"deploy";
+function uiTone(ctx:AudioContext,midi:number,at:number,length:number,volume:number,wave:OscillatorType){
+  const osc=ctx.createOscillator(),gain=ctx.createGain(),filter=ctx.createBiquadFilter();
+  osc.type=wave;osc.frequency.setValueAtTime(frequency(midi),at);
+  osc.frequency.exponentialRampToValueAtTime(frequency(midi-2),at+length);
+  filter.type="lowpass";filter.frequency.value=2100;
+  gain.gain.setValueAtTime(.0001,at);
+  gain.gain.exponentialRampToValueAtTime(volume,at+.008);
+  gain.gain.exponentialRampToValueAtTime(.0001,at+length);
+  osc.connect(filter);filter.connect(gain);gain.connect(ctx.destination);
+  osc.start(at);osc.stop(at+length+.01);
+}
+function uiCue(ctx:AudioContext,kind:MenuEffect){
+  const t=ctx.currentTime+.008;
+  if(kind==="hover"){uiTone(ctx,77,t,.065,.013,"triangle");return}
+  if(kind==="select"){
+    uiTone(ctx,57,t,.085,.029,"triangle");
+    uiTone(ctx,69,t+.035,.095,.018,"sine");
+    return;
+  }
+  uiTone(ctx,62,t,.16,.046,"sawtooth");
+  uiTone(ctx,69,t+.09,.21,.043,"triangle");
+  uiTone(ctx,74,t+.16,.27,.05,"sawtooth");
+}
+
 export default function MenuScore(){
   const playing=useRef<PlayingScore|null>(null);
+  const effects=useRef<AudioContext|null>(null);
+  const lastHover=useRef(0);
+  const [effectsEnabled,setEffectsEnabled]=useState(true);
   const [enabled,setEnabled]=useState(true);
   const [audible,setAudible]=useState(false);
 
@@ -136,6 +166,7 @@ export default function MenuScore(){
 
   useEffect(()=>{
     if(window.localStorage.getItem("kspiel.menuMusic")==="off")setEnabled(false);
+    if(window.localStorage.getItem("kspiel.menuSfx")==="off")setEffectsEnabled(false);
   },[]);
 
   useEffect(()=>{
@@ -150,13 +181,71 @@ export default function MenuScore(){
     };
   },[enabled,start,stop]);
 
-  useEffect(()=>()=>{const current=playing.current;if(current){window.clearInterval(current.timer);void current.context.close().catch(()=>{});playing.current=null}},[]);
+  const playEffect=useCallback((kind:MenuEffect)=>{
+    if(!effectsEnabled||!window.AudioContext)return;
+    try{
+      let ctx=effects.current;
+      // Avoid creating a suspended audio context on an unsolicited hover.
+      if(!ctx){
+        if(kind==="hover")return;
+        ctx=new AudioContext();
+        effects.current=ctx;
+      }
+      if(ctx.state==="suspended")void ctx.resume();
+      if(ctx.state!=="closed")uiCue(ctx,kind);
+    }catch{/* Audio cannot interfere with game controls. */}
+  },[effectsEnabled]);
 
-  return <button type="button" className={"menu-music-toggle "+(enabled?"is-enabled":"")} aria-label={enabled?"Mute menu music":"Enable menu music"} aria-pressed={enabled} title="Original cinematic brass, strings and marching-percussion theme" onClick={()=>{
+  useEffect(()=>{
+    const onOver=(event:PointerEvent)=>{
+      if(event.pointerType==="touch"||!(event.target instanceof Element))return;
+      const button=event.target.closest(".setup-shell button");
+      if(!(button instanceof HTMLButtonElement)||button.disabled)return;
+      if(event.relatedTarget instanceof Node&&button.contains(event.relatedTarget))return;
+      const now=performance.now();
+      if(now-lastHover.current<65)return;
+      lastHover.current=now;
+      playEffect("hover");
+    };
+    const onFocus=(event:FocusEvent)=>{
+      const target=event.target;
+      if(target instanceof HTMLButtonElement&&target.closest(".setup-shell")&&!target.disabled)playEffect("hover");
+    };
+    const onClick=(event:MouseEvent)=>{
+      if(!(event.target instanceof Element))return;
+      const button=event.target.closest(".setup-shell button");
+      if(!(button instanceof HTMLButtonElement)||button.disabled)return;
+      playEffect(button.classList.contains("launch-button")?"deploy":"select");
+    };
+    document.addEventListener("pointerover",onOver);
+    document.addEventListener("focusin",onFocus);
+    document.addEventListener("click",onClick);
+    return()=>{
+      document.removeEventListener("pointerover",onOver);
+      document.removeEventListener("focusin",onFocus);
+      document.removeEventListener("click",onClick);
+    };
+  },[playEffect]);
+
+  useEffect(()=>()=>{const current=playing.current;if(current){window.clearInterval(current.timer);void current.context.close().catch(()=>{});playing.current=null}
+    const sfx=effects.current;if(sfx){void sfx.close().catch(()=>{});effects.current=null}
+  },[]);
+
+  return <><button type="button" className={"menu-music-toggle "+(enabled?"is-enabled":"")} aria-label={enabled?"Mute menu music":"Enable menu music"} aria-pressed={enabled} title="Original cinematic brass, strings and marching-percussion theme" onClick={()=>{
     if(enabled){window.localStorage.setItem("kspiel.menuMusic","off");setEnabled(false);stop()}
     else{window.localStorage.setItem("kspiel.menuMusic","on");setEnabled(true);start()}
   }}>
     <span aria-hidden="true">{enabled?"♫":"♪"}</span>
     <span>{!enabled?"MUSIC OFF":audible?"MUSIC ON":"ENABLE AUDIO"}</span>
-  </button>;
+  </button>
+  <button type="button" className={"menu-sfx-toggle "+(effectsEnabled?"is-enabled":"")}
+    aria-label={effectsEnabled?"Mute menu sound effects":"Enable menu sound effects"}
+    aria-pressed={effectsEnabled} title="UI sound effects" onClick={()=>{
+      const value=!effectsEnabled;
+      window.localStorage.setItem("kspiel.menuSfx",value?"on":"off");
+      setEffectsEnabled(value);
+    }}>
+    <span aria-hidden="true">{effectsEnabled?"◉":"◎"}</span>
+    <span>{effectsEnabled?"SFX ON":"SFX OFF"}</span>
+  </button></>;
 }
