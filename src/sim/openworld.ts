@@ -120,7 +120,7 @@ export function createOpenWorldState(scenario:Scenario,units:Formation[],cities:
     structures.push({id:"b-sup-"+side,kind:"support_barracks",side,x:city.x+70,y:city.y+70,strength:100});
   }
   return{state:{resources:{
-    blue:{manpower:650,materials:500,fuel:280},red:{manpower:650,materials:500,fuel:280},green:{manpower:650,materials:500,fuel:280}
+    blue:{manpower:650,materials:500,fuel:280},red:{manpower:650,materials:500,fuel:280},green:{manpower:650,materials:500,fuel:280},yellow:{manpower:0,materials:0,fuel:0},purple:{manpower:0,materials:0,fuel:0}
   },structures,recruitment:[],resourceNodes,territoryClock:0,serial:100},units:[...groupNearbyFormations(blue,"blue"),...groupNearbyFormations(red,"red"),...groupNearbyFormations(green,"green")],cities:nextCities};
 }
 
