@@ -16,6 +16,13 @@ import {useViewportSize} from "@/app/hooks/use-viewport-size";
 import {botControlledSides,createMatchConfig,defaultArmyGroups,localControlledSides} from "@/sim/session";
 import {addStrategicStructure,advanceOpenWorld,buildStrategicCity,createOpenWorldState,queueRecruitment,UNIT_COST,type OpenWorldBuildKind,type OpenWorldState} from "@/sim/openworld";
 import {closeMultiplayerRoom,createPrivateMatch,findQuickPlay,inviteUrl,joinPrivateMatch,supabase,type MultiplayerSession,type MultiplayerSnapshot,type MultiplayerTeamSize,type UnitCommandPatch} from "@/lib/multiplayer";
+import {Stat,Row,Flag} from "@/app/components/ui-primitives";
+import {GameHeader} from "@/app/components/game-header";
+import {GameTutorial} from "@/app/components/game-tutorial";
+import {GameMinimap} from "@/app/components/game-minimap";
+import {GameMapHud} from "@/app/components/game-map-hud";
+import {MobileToolbar} from "@/app/components/mobile-toolbar";
+import {GameStatusbar} from "@/app/components/game-statusbar";
 import type {AttackPlan,CityState,ConstructionProject,Emplacement,EmplacementKind,FlagStyle,Formation,FormationShape,OrderType,Scenario,Side,TerrainSample} from "@/sim/types";
 
 import {clamp,segmentsIntersect} from "@/sim/geometry";
@@ -27,17 +34,7 @@ import {simulate} from "@/sim/simulation";
 import {applyEmplacementFire,advanceConstruction} from "@/sim/construction";
 import {pct,timeLabel,constructionLabel,constructionShort,isLinearConstruction} from "@/app/ui-utils";
 
-const COMMAND_GUIDE=[
-  {title:"SELECT YOUR ARMY",body:"Click a unit or drag a selection box. Keys 1–6 select army groups; Ctrl+1–6 assigns selected units. Nearby units start in the same group."},
-  {title:"MOVE AND ATTACK",body:"Right-click the map to move. Press A then right-click an enemy to assault; F then an enemy to fire artillery. Shift+right-click queues additional waypoints."},
-  {title:"GROUP ATTACK · H",body:"Select an army group, press H, click multiple visible enemy units, then press ENTER or LAUNCH. The command distributes targets and chooses routes and supporting gun positions."},
-  {title:"DRAW A FRONT",body:"Select any formation in an army group and Ctrl+left-drag a slanted line, or use FRONT mode. Infantry goes forward, artillery and logistics move behind, engineers build field works."},
-  {title:"SUPPLY AND ROADS",body:"Supplied cities anchor supply. Only interrupted road sections turn red. Terrain and unit type change supply consumption; tanks are less hindered by trenches."},
-  {title:"ATTRITION AND BARRAGES",body:"Mortars and artillery burn finite AMMO while firing. Engineers and other builders consume MATERIALS on every construction job. Strong connected supply routes refill both faster; isolated guns can run dry. Tracers, shell trails, dust and shock waves show active fire."},
-  {title:"COHESIVE MARCH",body:"Select units from multiple army groups, choose MARCH FORMATION (line, column, wedge or echelon) and right-click the map. Combat units keep separate slots and wait for lagging forces; artillery and logistics take rear positions. Army-group memberships stay intact."},
-  {title:"MULTIPLAYER SPEED",body:"The host controls the shared clock with 0.5×, 1× and 2× multiplayer speeds. Other commanders receive authoritative snapshots and do not run a separate simulation."},
-  {title:"REINFORCEMENTS",body:"In scenario battles, after four in-game days, armies below two-thirds of their initial number receive up to three formations per reserve wave from a safe rear city."}
-] as const;
+
 const IRREGULAR_TRAITS:Partial<Record<Formation["kind"],string>>={
   militia:"LOCAL DEFENSE · Low equipment cost · Strong city garrisons · Weak breakthrough · Modest supply use",
   partisan:"FOREST AMBUSH · Concealment · Rural foraging · Disrupts hostile road supply and favors irregular engagements",
@@ -1233,18 +1230,9 @@ export default function Home(){
   });
 
   return <main className={"game-shell theme-"+activeScenario.theme}>
-    <header className="topbar">
-      <div className="brand"><BrandMark/><div><b>KSPIEL</b><small>{activeScenario.title.toUpperCase()} · #{activeScenario.seed.toString(16).toUpperCase()}</small></div></div>
-      <div className="theater-state"><span className="command-side"><Flag styleName={activeScenario.sideFlags[playerSide]??"generic-blue"}/>{activeScenario.sideNames[playerSide]}</span><span>DAY {day}</span><strong>{timeLabel(hour)}</strong><span className={running?"live":"paused"}>{running?"RUNNING":"PAUSED"}</span>{multiplayer&&<span className={"network-badge "+networkPhase}>{multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.code}</span>}</div>
-      <div className="global-metrics"><div><small>SUPPLY</small><b>{pct(averageSupply)}%</b></div><div><small>ORG</small><b>{pct(averageOrg)}%</b></div><div><small>CITIES</small><b>{blueCities}/{cities.length}</b></div><div><small>CONTACTS</small><b>{enemy.filter(u=>detectedEnemies.has(u.id)).length}</b></div></div>
-      <div className="time-controls"><button className="guide-toggle" onClick={()=>{setShowTutorial(true);setTutorialStep(0)}}>GUIDE ?</button>{!multiplayer&&<button className="aar-end" onClick={concludeSession}>END MATCH · REPORT</button>}<button className="setup-return" onClick={returnToSetup}>SETUP</button><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)} className="icon-btn">{running?"Ⅱ":"▶"}</button>{[1,2,3].map(s=><button disabled={Boolean(multiplayer&&!multiplayer.isHost)} key={s} onClick={()=>{if(!warResult){setSpeed(s);setRunning(true)}}} className={speed===s?"active":""}>×{(multiplayer?MULTIPLAYER_SPEED:SOLO_SPEED)[s]}</button>)}</div>
-    </header>
+    <GameHeader {...{activeScenario,playerSide,day,hour,running,multiplayer,networkPhase,averageSupply,averageOrg,blueCities,cities,enemy,detectedEnemies,speed,warResult,setShowTutorial,setTutorialStep,concludeSession,returnToSetup,setRunning,setSpeed}}/>
 
-    {showTutorial&&!battleReport&&<div className="guide-backdrop" role="dialog" aria-modal="true" aria-label="Game tutorial"><div className="guide-card">
-      <small>KSPIEL COMMAND ACADEMY · {tutorialStep+1}/{COMMAND_GUIDE.length}</small>
-      <h2>{COMMAND_GUIDE[tutorialStep].title}</h2><p>{COMMAND_GUIDE[tutorialStep].body}</p>
-      <div className="guide-actions"><button onClick={()=>setShowTutorial(false)}>CLOSE</button><button disabled={tutorialStep===0} onClick={()=>setTutorialStep(s=>Math.max(0,s-1))}>PREVIOUS</button><button onClick={()=>tutorialStep===COMMAND_GUIDE.length-1?setShowTutorial(false):setTutorialStep(s=>s+1)}>{tutorialStep===COMMAND_GUIDE.length-1?"FINISH":"NEXT"}</button></div>
-    </div></div>}
+    <GameTutorial {...{showTutorial,battleReport,tutorialStep,setShowTutorial,setTutorialStep}}/>
     {multiplayer&&networkPhase==="opponent-left"&&<div className="network-status-banner">PLAYER DISCONNECTED · MATCH PAUSED</div>}
     {isMobile&&mobilePanel!=="none"&&<button className="mobile-backdrop" aria-label="Close panel" onClick={()=>setMobilePanel("none")}/>}
     <aside className={"left-panel "+(mobilePanel==="forces"?"mobile-open":"")}>
@@ -1342,8 +1330,8 @@ export default function Home(){
 
       {selectionBox&&<div className="selection-box" style={{left:Math.min(selectionBox.x1,selectionBox.x2),top:Math.min(selectionBox.y1,selectionBox.y2),width:Math.abs(selectionBox.x2-selectionBox.x1),height:Math.abs(selectionBox.y2-selectionBox.y1)}}/>}
       {frontPreview&&<svg className="front-preview"><line x1={frontPreview.x1} y1={frontPreview.y1} x2={frontPreview.x2} y2={frontPreview.y2}/></svg>}
-      {(openWorld||mapW>WORLD_W)&&<div className="minimap"><svg viewBox={"0 0 "+mapW+" "+mapH}>{openWorld&&(["blue","red","green"] as Side[]).map(side=><path key={"mt-"+side} d={territoryPaths[side]} fillRule="evenodd" className={"territory-mini "+side}/>) }{cities.map(city=><circle key={"mc-"+city.name} cx={city.x} cy={city.y} r="52" className={city.owner}/>) }{units.map(u=><circle key={u.id} cx={u.x} cy={u.y} r="32" className={u.side}/>)}</svg></div>}
-      <div className="map-hud"><div><span className="dot friendly"/>FRIENDLY {blue.length}</div><div><span className="dot hostile"/>CONTACTS {enemy.filter(u=>detectedEnemies.has(u.id)).length}</div><div>CITIES {blueCities}/{cities.length}</div><div>{hovered?TERRAIN_RULES[hovered.terrain].label.toUpperCase()+" · "+(hovered.road?"SUPPLY ROAD":"OFF ROAD"):activeScenario.location.toUpperCase()}</div><div>ZOOM {Math.round(zoom*100)}%</div></div>
+      <GameMinimap {...{openWorld,mapW,mapH,territoryPaths,cities,units}}/>}
+      <GameMapHud {...{blue,enemy,detectedEnemies,blueCities,cities,hovered,activeScenario,zoom}}/>
       {pendingStrategicBuild&&<div className="target-banner">BUILD {pendingStrategicBuild.replaceAll("_"," ").toUpperCase()} · {(pendingStrategicBuild==="road"||pendingStrategicBuild==="wall")?(strategicBuildAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP":"RMB")+" LOCATION"} <button onClick={()=>{setPendingStrategicBuild(null);setStrategicBuildAnchor(null)}}>CANCEL</button></div>}
       {pendingBuild&&<div className="target-banner">{constructionLabel(pendingBuild)} · {isLinearConstruction(pendingBuild)?(constructionAnchor?"SELECT END POINT":"SELECT START POINT"):(isMobile?"TAP CONSTRUCTION SITE":"RMB CONSTRUCTION SITE")} <button onClick={()=>{setPendingBuild(null);setConstructionAnchor(null)}}>CANCEL</button></div>}
       {pendingDecoy&&<div className="target-banner">RECON DECOY · PLACE WITHIN RECON RANGE <button onClick={()=>setPendingDecoy(false)}>CANCEL</button></div>}
@@ -1415,18 +1403,9 @@ export default function Home(){
       </div>:<div className="empty-inspector"><b>NO FORMATION SELECTED</b><span>Select a friendly counter on the map.</span></div>}
     </aside>
 
-    <nav className="mobile-toolbar" aria-label="Mobile controls">
-      <button className={mobileTool==="pan"?"active":""} onClick={()=>{setMobileTool("pan");setMobilePanel("none")}}><b>✥</b><span>PAN</span></button>
-      <button disabled={selected.length<1} className={mobileTool==="front"?"active":""} onClick={()=>{setMobileTool("front");setMobilePanel("none")}}><b>╱</b><span>FRONT</span></button>
-      <button className={mobilePanel==="forces"?"active":""} onClick={()=>setMobilePanel(v=>v==="forces"?"none":"forces")}><b>☷</b><span>FORCES</span></button>
-      <button disabled={Boolean(multiplayer&&!multiplayer.isHost)} onClick={()=>setRunning(v=>warResult?v:!v)}><b>{running?"Ⅱ":"▶"}</b><span>{running?"PAUSE":"PLAY"}</span></button>
-    </nav>
+    <MobileToolbar {...{mobileTool,setMobileTool,setMobilePanel,mobilePanel,selected,multiplayer,setRunning,warResult,running}}/>
 
     {battleReport&&<AfterActionReport history={battleReport} winner={warResult} playerSide={playerSide} onExit={returnToSetup}/>}
-    <footer className="statusbar">{multiplayer&&<span className="status-room">{multiplayer.teamSize}V{multiplayer.teamSize} · {multiplayer.nickname} · {multiplayer.side.toUpperCase()} · ROOM {multiplayer.code}</span>}<span>SPACE: PAUSE</span><span>MMB DRAG: PAN</span><span>RMB: MOVE · SHIFT/CTRL+RMB: QUEUE</span><span>LMB DRAG: BOX SELECT</span><span>CTRL+LMB: GROUP FRONT</span><span>H: GROUP ASSAULT</span><span>GUIDE: ?</span><span>CTRL+1…6: ASSIGN GROUP</span><span>B: ATTACK PLAN</span><span>ALL TROOPS: FIELD WORKS · LOGISTICS: ROADS</span><strong>{selectedUnits.length} FORMATION{selectedUnits.length===1?"":"S"} SELECTED</strong></footer>
+    <GameStatusbar {...{multiplayer,selectedUnits}}/>
   </main>
 }
-
-function Stat({label,value}:{label:string;value:number}){return <div className="stat"><span><small>{label}</small><b>{pct(value)}%</b></span><i><em style={{width:pct(value)+"%"}}/></i></div>}
-function Row({k,v}:{k:string;v:string}){return <div className="row"><span>{k}</span><b>{v}</b></div>}
-function Flag({styleName}:{styleName:FlagStyle}){return <span className={"flag flag-"+styleName} aria-label={styleName}><i/><em/></span>}
