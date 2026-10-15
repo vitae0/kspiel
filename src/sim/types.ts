@@ -80,7 +80,7 @@ export type Formation={
   morale?:number;suppression?:number;isolationHours?:number;damageDealt?:number;suppressionInflicted?:number;
   /** 0-100 tactical ammunition for guns and field engineering material stores. */
   ammo?:number;materials?:number;shotClock?:number;
-  order?:{type:OrderType;targetX?:number;targetY?:number;targetUnitId?:string;finalType?:OrderType;finalTargetUnitId?:string;waypoints?:Array<{x:number;y:number}>;marchId?:string};
+  order?:{type:OrderType;targetX?:number;targetY?:number;targetUnitId?:string;finalType?:OrderType;finalTargetUnitId?:string;waypoints?:Array<{x:number;y:number}>;marchId?:string;marchInitialDistance?:number;marchGoalX?:number;marchGoalY?:number};
 };
 
 export type GameCommand=
@@ -104,6 +104,8 @@ export type Emplacement={
   y2?:number;
   strength:number;
   range:number;
+  ammo?:number;
+  shotClock?:number;
 };
 export type ConstructionProject={
   id:string;

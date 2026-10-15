@@ -497,3 +497,7 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .unit-counter.low-ammo{box-shadow:inset 0 4px 0 var(--role,#9d946a),0 0 10px #df986575}
 .unit-counter.low-ammo .unit-top::after{content:"!";color:#ffbe6b;font-weight:900}
 @media(prefers-reduced-motion:reduce){.combat-effects{display:none}}
+
+.combat-effect.effect-rifle .blast-core,.combat-effect.effect-rifle .blast-ring,.combat-effect.effect-rifle .smoke-plume{display:none}
+.combat-effect.effect-rifle .shell-trace{stroke-width:2;stroke:#ffd58b;stroke-dasharray:6 9;animation-duration:430ms}
+.combat-effect.effect-rifle .muzzle-flash{fill:#f8d991;stroke:#e1c47c;animation-duration:440ms}

@@ -900,6 +900,12 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
     const ground=terrainAt(scenario,u.x,u.y);
     return u.speed*movementTerrainFactor(u,ground.terrain)*movementSupplyFactor(u)*(ground.road?roadMovementBonus(u):1);
   });
+  const lagging=new Map<string,number>();
+  for(const u of units)if(u.order?.type==="move"&&u.order.marchId&&u.order.marchGoalX!==undefined&&u.order.marchGoalY!==undefined){
+    const remaining=Math.hypot(u.x-u.order.marchGoalX,u.y-u.order.marchGoalY);
+    const progress=clamp(1-remaining/Math.max(1,u.order.marchInitialDistance??remaining),0,1);
+    lagging.set(u.order.marchId,Math.min(lagging.get(u.order.marchId)??1,progress));
+  }
   const supplyNetwork=computeSupplyNetwork(scenario,units,cities);
   const logisticsGraph=computeLogisticsLinks(scenario,units,cities,supplyNetwork,emplacements);
   const next=units.map(u=>{
@@ -987,7 +993,11 @@ function simulate(scenario:Scenario,units:Formation[],hours:number,cities:CitySt
         // Each independent march column advances no faster than its current slowest
         // combat member. Guns/logistics travel separately and are not pace-limited.
         const marchLimit=n.order.marchId?marching.get(n.order.marchId):undefined;
-        const travel=Math.min(dist,Math.min(ordinaryPace,marchLimit??Infinity)*hours*MOVEMENT_SCALE);
+        const finishedDistance=n.order.marchGoalX!==undefined&&n.order.marchGoalY!==undefined
+          ?Math.hypot(u.x-n.order.marchGoalX,u.y-n.order.marchGoalY):Infinity;
+        const fraction=n.order.marchId?clamp(1-finishedDistance/Math.max(1,n.order.marchInitialDistance??finishedDistance),0,1):0;
+        const waiting=Boolean(n.order.marchId)&&fraction>(lagging.get(n.order.marchId!)??fraction)+.11;
+        const travel=waiting?0:Math.min(dist,Math.min(ordinaryPace,marchLimit??Infinity)*hours*MOVEMENT_SCALE);
         let nx=clamp(u.x+dx/dist*travel,1,scenario.worldWidth-1),ny=clamp(u.y+dy/dist*travel,1,scenario.worldHeight-1);
 
         if(DIRECT_COMBAT_KINDS.has(u.kind)&&n.order.type!=="retreat"){
@@ -2228,9 +2238,13 @@ export default function Home(){
         const route=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},destination,emplacementsRef.current,openWorldRef.current);
         const [first,...rest]=route;
         const inColumn=Boolean(marchId)&&!AMMO_TYPES.has(u.kind)&&u.kind!=="logistics";
+        const marchMeta=inColumn?{
+          marchId,marchGoalX:destination.x,marchGoalY:destination.y,
+          marchInitialDistance:Math.max(1,Math.hypot(destination.x-u.x,destination.y-u.y))
+        }:{};
         const order:NonNullable<Formation["order"]>=first
-          ?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest,...(inColumn?{marchId}:{})}
-          :{type:"move",targetX:destination.x,targetY:destination.y,...(inColumn?{marchId}:{})};
+          ?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest,...marchMeta}
+          :{type:"move",targetX:destination.x,targetY:destination.y,...marchMeta};
         return{...u,order};
       });
     });
