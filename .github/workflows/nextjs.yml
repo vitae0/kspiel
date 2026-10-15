@@ -73,7 +73,12 @@ jobs:
           done
 
           test -n "$html"
-          printf '%s' "$html" | grep -q 'CREATE GAME'
+          # Stable brand invariant. The old "CREATE GAME" label was removed from the UI.
+          # Avoid grep -q on a pipe under pipefail: an early match can cause SIGPIPE.
+          if [[ "$html" != *"KSPIEL"* ]]; then
+            echo "::error::Deployed HTML does not contain the KSpiel application brand"
+            exit 1
+          fi
 
           asset="$(printf '%s' "$html" | grep -oE '/kspiel/_next/static/[^"]+\.(js|css)' | head -n 1 || true)"
           test -n "$asset"
