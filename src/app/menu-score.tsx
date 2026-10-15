@@ -219,11 +219,11 @@ export default function MenuScore(){
     };
     document.addEventListener("pointerover",onOver);
     document.addEventListener("focusin",onFocus);
-    document.addEventListener("click",onClick);
+    document.addEventListener("click",onClick,true);
     return()=>{
       document.removeEventListener("pointerover",onOver);
       document.removeEventListener("focusin",onFocus);
-      document.removeEventListener("click",onClick);
+      document.removeEventListener("click",onClick,true);
     };
   },[playEffect]);
 
