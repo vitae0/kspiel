@@ -7,9 +7,11 @@ import type {supplyAccess} from "@/sim/logistics";
 import {AMMO_TYPES} from "@/sim/attrition";
 import {DIRECT_COMBAT_KINDS,ARTILLERY_KINDS} from "@/sim/rules";
 import {UNIT_LABEL} from "@/sim/game";
+import {UnitTypeMark} from "./unit-type-mark";
 import {Stat,Row} from "./ui-primitives";
 type Props={
  openWorld:OpenWorldState|null;primary:Formation|undefined;cities:CityState[];playerSide:Side;
+ unitSymbols:boolean;
  orderLabel:(unit:Formation)=>string;
  primaryAccess:ReturnType<typeof supplyAccess>|null;selectedUnits:Formation[];
  pendingBuild:EmplacementKind|null;armConstruction:(kind:EmplacementKind)=>void;
@@ -30,10 +32,10 @@ export function UnitInspector({openWorld,primary,cities,playerSide,orderLabel,pr
 pendingBuild,armConstruction,marchShape,setMarchShape,armyGroups,assignGroup,frontToolActive,
 setFrontToolActive,setPendingMassAttack,pendingOrder,setPendingOrder,activeFront,changeFrontMode,pendingDecoy,
 setPendingDecoy,setPendingPlan,pendingMassAttack,setMassTargets,pendingPlan,startOrder,canRetreat,
-arrangeFormation,IRREGULAR_TRAITS}:Props){
+arrangeFormation,IRREGULAR_TRAITS,unitSymbols}:Props){
  return <aside className="right-panel">
       {openWorld&&!primary?<div className="openworld-inspector"><div className="section-title">OPEN WORLD</div><b>{cities.filter(c=>c.owner===playerSide).length} CONTROLLED CITIES</b><span>{openWorld.recruitment.filter(q=>q.side===playerSide).length} formations recruiting</span><span>Keep forces concentrated on empty land to urbanize it into a permanent city.</span></div>:primary?<div className="inspector">
-        <div className="unit-heading"><div className="big-counter">{UNIT_LABEL[primary.kind]}</div><div><small>{primary.kind.toUpperCase()} FORMATION</small><h2>{primary.name}</h2><span>{orderLabel(primary)}</span></div></div>
+        <div className="unit-heading"><div className="big-counter">{unitSymbols?<UnitTypeMark kind={primary.kind}/>:UNIT_LABEL[primary.kind]}</div><div><small>{primary.kind.toUpperCase()} FORMATION</small><h2>{primary.name}</h2><span>{orderLabel(primary)}</span></div></div>
         {IRREGULAR_TRAITS[primary.kind]&&<div className="irregular-doctrine">{IRREGULAR_TRAITS[primary.kind]}</div>}
         <div className="stat-grid"><Stat label="Strength" value={primary.strength}/><Stat label="Organization" value={primary.organization}/><Stat label="Supply" value={primary.supply}/><Stat label="Fuel" value={primary.fuel}/>{AMMO_TYPES.has(primary.kind)&&<Stat label="Ammunition" value={primary.ammo??100}/>}<Stat label="Materials" value={primary.materials??100}/><Stat label="Entrenchment" value={primary.entrenchment}/><Stat label="Readiness" value={primary.readiness}/><Stat label="Morale" value={primary.morale??82}/><Stat label="Suppression" value={primary.suppression??0}/><Stat label="Isolation" value={Math.min(100,(primary.isolationHours??0)*1.15)}/></div>
         <div className="section-title">COMBAT MODEL</div><div className="numbers"><Row k="Manpower" v={primary.manpower.toLocaleString()}/><Row k="Soft attack" v={String(primary.softAttack)}/><Row k="Hard attack" v={String(primary.hardAttack)}/><Row k="Defense" v={String(primary.defense)}/><Row k="Breakthrough" v={String(primary.breakthrough)}/><Row k="Recon" v={String(primary.recon)}/><Row k="Speed" v={primary.speed+" km/h"}/></div>
@@ -54,7 +56,7 @@ arrangeFormation,IRREGULAR_TRAITS}:Props){
         <div className="section-title">MARCH FORMATION · INDEPENDENT OF GROUPS</div>
         <div className="formation-controls">{(["line","column","wedge","echelon"] as FormationShape[]).map(shape=><button key={"march-"+shape} className={marchShape===shape?"active":""} onClick={()=>setMarchShape(shape)}>{shape.toUpperCase()}</button>)}</div>
         <small className="muted-line">Select units from any armies. Right-click to march in separate slots at the slowest combat unit's pace. Guns and logistics follow in the rear.</small>
-        <div className="section-title">ARMY GROUP</div><div className="group-assign">{armyGroups.map(g=><button key={g.id} className={selectedUnits.length>0&&selectedUnits.every(u=>u.groupId===g.id)?"active":""} onClick={()=>assignGroup(g.id)}>{g.hotkey}</button>)}</div>
+        <div className="section-title">ARMY GROUP</div><div className="group-assign">{armyGroups.map(g=><button key={g.id} className={selectedUnits.length>0&&selectedUnits.every(u=>u.groupId===g.id)?"active":""} onClick={()=>assignGroup(g.id)}>{g.hotkey||"·"}</button>)}</div>
         <div className="section-title">FRONT COMMAND</div><div className="front-command"><button className={frontToolActive?"active":""} onClick={()=>{setFrontToolActive(v=>!v);setPendingMassAttack(false);setPendingOrder(null)}}>DRAW FRONT · CTRL+DRAG</button><small>Deploy group and create a persistent frontline with autonomous reserves.</small>
           {activeFront&&<div className="front-modes">{(["hold","advance","push","retreat","stop"] as const).map(mode=><button key={mode} className={activeFront.mode===mode?"active":""} onClick={()=>changeFrontMode(activeFront.groupId,mode)}>{mode.toUpperCase()}</button>)}</div>}
           {selectedUnits.some(u=>u.kind==="recon")&&<button className={pendingDecoy?"active":""} onClick={()=>{setPendingDecoy(true);setPendingOrder(null);setPendingPlan(false)}}>RECON DECOY · Y + MAP</button>}
