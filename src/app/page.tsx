@@ -34,6 +34,7 @@ import type {AttackPlan,CityState,ConstructionProject,Emplacement,EmplacementKin
 import {clamp,segmentsIntersect} from "@/sim/geometry";
 import {SOLO_SPEED,MULTIPLAYER_SPEED,SIM_HOURS_PER_REAL_SECOND,MAX_FRAME_SECONDS,SIM_TICK_MS,AI_COMMAND_INTERVAL_SECONDS,RETREAT_SUPPLY_MIN,DIRECT_COMBAT_KINDS,ARTILLERY_KINDS,GUN_ARTILLERY_KINDS,isInCombat,retreatDestination,visionRange,mortarMaxRange,mortarDispersion} from "@/sim/rules";
 import {movementRoutePlan} from "@/sim/navigation";
+import {territoryOwnerAt} from "@/sim/territory";
 import {routeInterdictionPoints,type SupplyNetwork,computeSupplyNetwork,supplySourceAtPoint,logisticsDistributionRange,computeLogisticsLinks,supplyAccess} from "@/sim/logistics";
 import {updateCities,enemyAI} from "@/sim/strategy";
 import {simulate} from "@/sim/simulation";
@@ -411,7 +412,7 @@ export default function Home(){
           const assignments=frontAssignments(moved,nextUnits,citiesRef.current,scenario);
           for(const assignment of assignments){
             const unit=nextUnits.find(u=>u.id===assignment.unitId);
-            if(!unit||unit.order?.type==="retreat"||unit.order?.marchId||unit.organization<16||unit.strength<10)continue;
+            if(!unit||unit.order?.type==="retreat"||unit.order?.manual||unit.order?.marchId||unit.organization<16||unit.strength<10)continue;
             const objective={x:assignment.x,y:assignment.y};
             const targetEnemies=nextUnits.filter(u=>u.side!==unit.side&&u.strength>5);
             const range=unit.kind==="heavy_artillery"?820:unit.kind==="artillery"?540:unit.kind==="mortar"?mortarMaxRange(scenario,unit):0;
@@ -546,13 +547,13 @@ export default function Home(){
       commitUnits(prev=>prev.map(u=>{
         if(!selected.includes(u.id)||u.supply<RETREAT_SUPPLY_MIN)return u;
         const d=retreatDestination(u,prev,citiesRef.current);
-        return{...u,supply:clamp(u.supply-10,0,100),order:{type:"retreat",targetX:d.x,targetY:d.y}};
+        return{...u,supply:clamp(u.supply-10,0,100),order:{type:"retreat",targetX:d.x,targetY:d.y,manual:true}};
       }));
       setPendingOrder(null);return;
     }
 
     if(type==="dig"||type==="resupply"||type==="defend"){
-      commitUnits(prev=>prev.map(u=>selected.includes(u.id)?{...u,order:{type}}:u));setPendingOrder(null);
+      commitUnits(prev=>prev.map(u=>selected.includes(u.id)?{...u,order:{type,manual:true}}:u));setPendingOrder(null);
     }else setPendingOrder(type);
   }
 
@@ -837,12 +838,12 @@ export default function Home(){
       const standOff=support?440:u.kind==="heavy_artillery"?680:u.kind==="artillery"?450:u.kind==="mortar"?750:34;
       const dx=u.x-target.x,dy=u.y-target.y,distance=Math.max(1,Math.hypot(dx,dy));
       const staging=nearestLandPoint(target.x+dx/distance*standOff,target.y+dy/distance*standOff);
-      if(artillery&&distance<=standOff*1.08)return{...u,order:{type:"fire",targetUnitId:target.id}};
-      const path=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},staging,emplacementsRef.current,openWorldRef.current,units);
+      if(artillery&&distance<=standOff*1.08)return{...u,order:{type:"fire",targetUnitId:target.id,manual:true}};
+      const path=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},staging,emplacementsRef.current,openWorldRef.current,units,true);
       const [first,...rest]=path;
       const finalType:OrderType=artillery?"fire":support?"resupply":"assault";
-      if(!first)return{...u,order:artillery?{type:"fire",targetUnitId:target.id}:support?{type:"resupply"}:{type:"assault",targetUnitId:target.id}};
-      return{...u,order:{type:"move",targetX:first.x,targetY:first.y,waypoints:rest,finalType,finalTargetUnitId:support?undefined:target.id}};
+      if(!first)return{...u,order:artillery?{type:"fire",targetUnitId:target.id,manual:true}:support?{type:"resupply",manual:true}:{type:"assault",targetUnitId:target.id,manual:true}};
+      return{...u,order:{type:"move",targetX:first.x,targetY:first.y,waypoints:rest,finalType,finalTargetUnitId:support?undefined:target.id,manual:true,engageOnContact:!support&&!artillery}};
     }));
     setMassTargets([]);setPendingMassAttack(false);
   }
@@ -866,7 +867,7 @@ export default function Home(){
       }
       targets.set(u.id,nearestLandPoint(cx+hx*along+px*lateral,cy+hy*along+py*lateral));
     });
-    commitUnits(prev=>prev.map(u=>{const t=targets.get(u.id);return t?{...u,formationShape:shape,order:{type:"move",targetX:t.x,targetY:t.y}}:u}));
+    commitUnits(prev=>prev.map(u=>{const t=targets.get(u.id);return t?{...u,formationShape:shape,order:{type:"move",targetX:t.x,targetY:t.y,manual:true}}:u}));
   }
 
   function createAttackPlan(tx:number,ty:number){
@@ -885,7 +886,7 @@ export default function Home(){
       if(!chosen.includes(u.id))return u;
       const i=chosen.indexOf(u.id),angle=(i%7)/7*Math.PI*2,r=35+18*Math.floor(i/7);
       const t=nearestLandPoint(plan.targetX+Math.cos(angle)*r,plan.targetY+Math.sin(angle)*r);
-      return{...u,order:{type:DIRECT_COMBAT_KINDS.has(u.kind)?"assault":"move",targetX:t.x,targetY:t.y}};
+      return{...u,order:{type:DIRECT_COMBAT_KINDS.has(u.kind)?"assault":"move",targetX:t.x,targetY:t.y,manual:true,engageOnContact:DIRECT_COMBAT_KINDS.has(u.kind)}};
     }));
     const executing:AttackPlan={...plan,status:"executing"};
     setAttackPlans(prev=>prev.map(p=>p.id===id?executing:p));
@@ -945,7 +946,7 @@ export default function Home(){
     const next=[...projectsRef.current,project];projectsRef.current=next;setConstructionProjects(next);
     if(multiplayerRef.current&&!multiplayerRef.current.isHost)sendNetwork("construction-create",{project});
     const workX=end?(start.x+end.x)*.5:start.x,workY=end?(start.y+end.y)*.5:start.y;
-    commitUnits(prev=>prev.map(u=>project.builderIds.includes(u.id)?{...u,order:{type:"move",targetX:workX,targetY:workY}}:u));
+    commitUnits(prev=>prev.map(u=>project.builderIds.includes(u.id)?{...u,order:{type:"move",targetX:workX,targetY:workY,manual:true}}:u));
     setPendingBuild(null);setConstructionAnchor(null);
   }
 
@@ -986,6 +987,9 @@ export default function Home(){
     if(pendingBuild){createConstruction(tx,ty);return}
     if(pendingPlan){createAttackPlan(tx,ty);return}
     const requested=pendingOrder;
+    const attackingTerritory=territoryOwnerAt(activeScenario,citiesRef.current,unitsRef.current,tx,ty);
+    const attackIntent=attackingTerritory!==null&&attackingTerritory!==playerSide ||
+      unitsRef.current.some(other=>other.side!==playerSide&&other.strength>1&&Math.hypot(other.x-tx,other.y-ty)<175);
     // Selected armies march as a temporary cohesive column, not an army-group reassignment.
     const chosen=units.filter(u=>selected.includes(u.id)&&u.side===playerSide);
     const coordinated=!append&&(requested===null||requested==="move")&&
@@ -997,20 +1001,20 @@ export default function Home(){
         if(!selected.includes(u.id))return u;
         if(append&&u.order?.targetX!==undefined&&u.order?.targetY!==undefined&&!u.order.targetUnitId){
           const tail=u.order.waypoints?.length?u.order.waypoints[u.order.waypoints.length-1]:{x:u.order.targetX,y:u.order.targetY};
-          const leg=movementRoutePlan(activeScenario,cities,u,tail,{x:tx,y:ty},emplacementsRef.current,openWorldRef.current);
-          return{...u,order:{...u.order,waypoints:[...(u.order.waypoints??[]),...leg]}};
+          const leg=movementRoutePlan(activeScenario,cities,u,tail,{x:tx,y:ty},emplacementsRef.current,openWorldRef.current,unitsRef.current,attackIntent);
+          return{...u,order:{...u.order,manual:true,engageOnContact:u.order.engageOnContact||attackIntent,waypoints:[...(u.order.waypoints??[]),...leg]}};
         }
         if(requested==="fire"){
           if(u.kind!=="mortar")return u;
           const range=Math.hypot(tx-u.x,ty-u.y);
           if(range>mortarMaxRange(activeScenario,u))return u;
-          return{...u,order:{type:"fire",targetX:tx,targetY:ty}};
+          return{...u,order:{type:"fire",targetX:tx,targetY:ty,manual:true}};
         }
-        if(requested==="probe"&&DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:"probe",targetX:tx,targetY:ty}};
+        if(requested==="probe"&&DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:"probe",targetX:tx,targetY:ty,manual:true}};
         const slot=slots.get(u.id);
         const candidate=slot?nearestLandPoint(slot.x,slot.y):{x:tx,y:ty};
         const destination=terrainAt(activeScenario,candidate.x,candidate.y).terrain==="water"?{x:tx,y:ty}:candidate;
-        const route=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},destination,emplacementsRef.current,openWorldRef.current);
+        const route=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},destination,emplacementsRef.current,openWorldRef.current,unitsRef.current,attackIntent);
         const [first,...rest]=route;
         const inColumn=Boolean(marchId)&&!AMMO_TYPES.has(u.kind)&&u.kind!=="logistics";
         const marchMeta=inColumn?{
@@ -1018,8 +1022,8 @@ export default function Home(){
           marchInitialDistance:Math.max(1,Math.hypot(destination.x-u.x,destination.y-u.y))
         }:{};
         const order:NonNullable<Formation["order"]>=first
-          ?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest,...marchMeta}
-          :{type:"move",targetX:destination.x,targetY:destination.y,...marchMeta};
+          ?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest,manual:true,engageOnContact:attackIntent&&DIRECT_COMBAT_KINDS.has(u.kind),...marchMeta}
+          :{type:"move",targetX:destination.x,targetY:destination.y,manual:true,engageOnContact:attackIntent&&DIRECT_COMBAT_KINDS.has(u.kind),...marchMeta};
         return{...u,order};
       });
     });
@@ -1044,20 +1048,24 @@ export default function Home(){
 
     if(requested==="relieve"){
       if(!primary||target.side!==primary.side)return;
-      commitUnits(prev=>prev.map(u=>selected.includes(u.id)&&DIRECT_COMBAT_KINDS.has(u.kind)?{...u,order:{type:"relieve",targetUnitId:target.id}}:u));
+      commitUnits(prev=>prev.map(u=>selected.includes(u.id)&&DIRECT_COMBAT_KINDS.has(u.kind)?{...u,order:{type:"relieve",targetUnitId:target.id,manual:true}}:u));
       setPendingOrder(null);return;
     }
 
     if((requested==="assault"||requested==="fire"||requested==="probe")&&primary&&target.side===primary.side)return;
     commitUnits(prev=>prev.map(u=>{
       if(!selected.includes(u.id))return u;
-      if(requested==="fire")return u.kind==="mortar"?{...u,order:{type:"fire",targetX:target.x,targetY:target.y}}:GUN_ARTILLERY_KINDS.has(u.kind)?{...u,order:{type:"fire",targetUnitId:target.id}}:u;
+      if(requested==="fire")return u.kind==="mortar"?{...u,order:{type:"fire",targetX:target.x,targetY:target.y,manual:true}}:GUN_ARTILLERY_KINDS.has(u.kind)?{...u,order:{type:"fire",targetUnitId:target.id,manual:true}}:u;
       if(requested==="assault"||requested==="probe"){
-        if(ARTILLERY_KINDS.has(u.kind))return{...u,order:{type:"fire",targetUnitId:target.id}};
-        if(DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:requested,targetUnitId:target.id}};
+        if(ARTILLERY_KINDS.has(u.kind))return{...u,order:{type:"fire",targetUnitId:target.id,manual:true}};
+        if(DIRECT_COMBAT_KINDS.has(u.kind)){
+          const path=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},{x:target.x,y:target.y},emplacementsRef.current,openWorldRef.current,unitsRef.current,true);
+          const [first,...rest]=path;
+          return{...u,order:first?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest,finalType:requested,finalTargetUnitId:target.id,manual:true,engageOnContact:true}:{type:requested,targetUnitId:target.id,manual:true}};
+        }
         return u;
       }
-      return{...u,order:{type:"move",targetUnitId:target.id}};
+      return{...u,order:{type:"move",targetUnitId:target.id,manual:true}};
     }));
     setPendingOrder(null);
   }
