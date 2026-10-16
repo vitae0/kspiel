@@ -887,7 +887,11 @@ export default function Home(){
       if(!chosen.includes(u.id))return u;
       const i=chosen.indexOf(u.id),angle=(i%7)/7*Math.PI*2,r=35+18*Math.floor(i/7);
       const t=nearestLandPoint(plan.targetX+Math.cos(angle)*r,plan.targetY+Math.sin(angle)*r);
-      return{...u,order:{type:DIRECT_COMBAT_KINDS.has(u.kind)?"assault":"move",targetX:t.x,targetY:t.y,manual:true,engageOnContact:DIRECT_COMBAT_KINDS.has(u.kind)}};
+      const assault=DIRECT_COMBAT_KINDS.has(u.kind);
+       const path=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},t,emplacementsRef.current,openWorldRef.current,unitsRef.current,assault);
+       const [first,...rest]=path;
+       return{...u,order:first?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest,manual:true,engageOnContact:assault}
+         :{type:"move",targetX:t.x,targetY:t.y,manual:true,engageOnContact:assault}};
     }));
     const executing:AttackPlan={...plan,status:"executing"};
     setAttackPlans(prev=>prev.map(p=>p.id===id?executing:p));
@@ -1011,7 +1015,12 @@ export default function Home(){
           if(range>mortarMaxRange(activeScenario,u))return u;
           return{...u,order:{type:"fire",targetX:tx,targetY:ty,manual:true}};
         }
-        if(requested==="probe"&&DIRECT_COMBAT_KINDS.has(u.kind))return{...u,order:{type:"probe",targetX:tx,targetY:ty,manual:true}};
+        if(requested==="probe"&&DIRECT_COMBAT_KINDS.has(u.kind)){
+           const path=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},{x:tx,y:ty},emplacementsRef.current,openWorldRef.current,unitsRef.current,true);
+           const [first,...rest]=path;
+           return{...u,order:first?{type:"probe",targetX:first.x,targetY:first.y,waypoints:rest,manual:true}
+             :{type:"probe",targetX:tx,targetY:ty,manual:true}};
+         }
         const slot=slots.get(u.id);
         const candidate=slot?nearestLandPoint(slot.x,slot.y):{x:tx,y:ty};
         const destination=terrainAt(activeScenario,candidate.x,candidate.y).terrain==="water"?{x:tx,y:ty}:candidate;
@@ -1062,7 +1071,7 @@ export default function Home(){
         if(DIRECT_COMBAT_KINDS.has(u.kind)){
           const path=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},{x:target.x,y:target.y},emplacementsRef.current,openWorldRef.current,unitsRef.current,true);
           const [first,...rest]=path;
-          return{...u,order:first?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest,finalType:requested,finalTargetUnitId:target.id,manual:true,engageOnContact:true}:{type:requested,targetUnitId:target.id,manual:true}};
+          return{...u,order:first?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest,finalType:requested,finalTargetUnitId:target.id,manual:true,engageOnContact:requested==="assault"}:{type:requested,targetUnitId:target.id,manual:true}};
         }
         return u;
       }
