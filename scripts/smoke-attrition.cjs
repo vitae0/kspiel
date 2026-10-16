@@ -74,3 +74,4 @@ console.log("PASS supply-dependent restock");
   console.log("PASS independent formations / pace synchronization");
 }
 console.log("ALL ATTRITION / MARCH SMOKE TESTS PASSED");
+require("./smoke-navigation-orders.cjs");
