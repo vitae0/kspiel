@@ -113,7 +113,7 @@ export function simulate(scenario:Scenario,units:Formation[],hours:number,cities
       if(dist<5&&!n.order.targetUnitId){
         n.x=n.order.targetX;n.y=n.order.targetY;
         const [nextWaypoint,...remaining]=n.order.waypoints??[];
-        n.order=nextWaypoint?{...n.order,type:"move",targetX:nextWaypoint.x,targetY:nextWaypoint.y,waypoints:remaining}
+        n.order=nextWaypoint?{...n.order,type:n.order.type==="probe"?"probe":"move",targetX:nextWaypoint.x,targetY:nextWaypoint.y,waypoints:remaining}
           :n.order.finalType?{type:n.order.finalType,targetUnitId:n.order.finalTargetUnitId,manual:n.order.manual}
           :{type:"defend"};
       }else if(dist>0){
