@@ -58,10 +58,10 @@ export function simulate(scenario:Scenario,units:Formation[],hours:number,cities
       if(tracked)n.order={...n.order,targetX:tracked.x,targetY:tracked.y};
       else n.order={type:"defend"};
     }
-    if(n.order?.finalType==="assault"&&n.order.finalTargetUnitId){
+    if((n.order?.finalType==="assault"||n.order?.finalType==="probe")&&n.order.finalTargetUnitId){
       const target=units.find(v=>v.id===n.order?.finalTargetUnitId&&v.strength>1);
       if(target&&Math.hypot(target.x-u.x,target.y-u.y)<95)
-        n.order={type:"assault",targetUnitId:target.id,targetX:target.x,targetY:target.y};
+        n.order={type:n.order.finalType,targetUnitId:target.id,targetX:target.x,targetY:target.y,manual:n.order.manual};
     }
 
     const inCombat=isInCombat(u,units);
@@ -113,8 +113,8 @@ export function simulate(scenario:Scenario,units:Formation[],hours:number,cities
       if(dist<5&&!n.order.targetUnitId){
         n.x=n.order.targetX;n.y=n.order.targetY;
         const [nextWaypoint,...remaining]=n.order.waypoints??[];
-        n.order=nextWaypoint?{...n.order,type:"move",targetX:nextWaypoint.x,targetY:nextWaypoint.y,waypoints:remaining}
-          :n.order.finalType?{type:n.order.finalType,targetUnitId:n.order.finalTargetUnitId}
+        n.order=nextWaypoint?{...n.order,type:n.order.type==="probe"?"probe":"move",targetX:nextWaypoint.x,targetY:nextWaypoint.y,waypoints:remaining}
+          :n.order.finalType?{type:n.order.finalType,targetUnitId:n.order.finalTargetUnitId,manual:n.order.manual}
           :{type:"defend"};
       }else if(dist>0){
         const posture=n.order.type==="retreat"?1.9:n.order.type==="relieve"?1.12:n.order.type==="assault"?.58:n.order.type==="probe"?.74:1;
@@ -146,7 +146,7 @@ export function simulate(scenario:Scenario,units:Formation[],hours:number,cities
         let nx=clamp(u.x+dx/dist*travel,1,scenario.worldWidth-1),ny=clamp(u.y+dy/dist*travel,1,scenario.worldHeight-1);
 
         if(DIRECT_COMBAT_KINDS.has(u.kind)&&n.order.type!=="retreat"){
-          const contact=units.filter(v=>v.side!==u.side).map(v=>({v,...segmentContact(u.x,u.y,nx,ny,v.x,v.y)})).filter(c=>c.distance<44).sort((a,b)=>a.t-b.t)[0];
+          const contact=units.filter(v=>v.side!==u.side&&v.strength>1).map(v=>({v,...segmentContact(u.x,u.y,nx,ny,v.x,v.y)})).filter(c=>c.distance<44).sort((a,b)=>a.t-b.t)[0];
           if(contact){
             const stopDistance=Math.max(0,travel*contact.t-36);
             nx=clamp(u.x+dx/dist*stopDistance,1,scenario.worldWidth-1);ny=clamp(u.y+dy/dist*stopDistance,1,scenario.worldHeight-1);
@@ -157,7 +157,7 @@ export function simulate(scenario:Scenario,units:Formation[],hours:number,cities
         const blockingBarricade=emplacements.find(e=>e.kind==="barricade"&&e.side!==u.side&&e.strength>0&&e.x2!==undefined&&e.y2!==undefined&&segmentsIntersect(u.x,u.y,nx,ny,e.x,e.y,e.x2,e.y2));
         const obstacle=blockingWall??blockingBarricade;
         if(obstacle){
-          if(n.order.type==="assault"||n.order.type==="probe"){
+          if(n.order.type==="assault"||n.order.type==="probe"||n.order.engageOnContact){
             const breachPower=(n.softAttack*.055+n.hardAttack*.08)*(n.organization/100)*Math.max(.25,n.supply/100);
             obstacle.strength=Math.max(0,obstacle.strength-hours*breachPower);
             n.organization=clamp(n.organization-hours*.42,0,100);
@@ -240,8 +240,8 @@ export function simulate(scenario:Scenario,units:Formation[],hours:number,cities
       const aRetreat=a.order?.type==="retreat",bRetreat=b.order?.type==="retreat";
       const aPower=aCan&&!aRetreat?(a.softAttack*(1-b.hardness)+a.hardAttack*b.hardness)*(a.organization/100)*(a.supply/100)*(1-(a.suppression??0)*.006)*(0.6+(a.morale??82)/205)*irregularAmbush(a,aTerrain,b):0;
       const bPower=bCan&&!bRetreat?(b.softAttack*(1-a.hardness)+b.hardAttack*a.hardness)*(b.organization/100)*(b.supply/100)*(1-(b.suppression??0)*.006)*(0.6+(b.morale??82)/205)*irregularAmbush(b,bTerrain,a):0;
-      const aPosture=a.order?.type==="assault"?1.22:a.order?.type==="probe"?.76:1;
-      const bPosture=b.order?.type==="assault"?1.22:b.order?.type==="probe"?.76:1;
+      const aPosture=a.order?.type==="assault"||a.order?.engageOnContact?1.22:a.order?.type==="probe"?.76:1;
+      const bPosture=b.order?.type==="assault"||b.order?.engageOnContact?1.22:b.order?.type==="probe"?.76:1;
       const aLoss=(bPower*bPosture/Math.max(20,a.defense*aDef+a.entrenchment*(a.kind==="tank"?.45:1.35)))*hours*2.15*(aRetreat?1.2:1);
       const bLoss=(aPower*aPosture/Math.max(20,b.defense*bDef+b.entrenchment*(b.kind==="tank"?.45:1.35)))*hours*2.15*(bRetreat?1.2:1);
       const actualALoss=Math.min(a.strength,aLoss),actualBLoss=Math.min(b.strength,bLoss);
