@@ -3,6 +3,7 @@
 import {useEffect,useMemo,useRef,useState,type MouseEvent as ReactMouseEvent,type PointerEvent as ReactPointerEvent,type WheelEvent as ReactWheelEvent} from "react";
 import {generateScenario,polylinePath,SCENARIO_PRESETS,terrainAt,TERRAIN_RULES,UNIT_LABEL,WORLD_H,WORLD_W} from "@/sim/game";
 import {armyGroupColor,roadVisualPieces} from "@/sim/operations";
+import {canAutoAssignFront} from "@/sim/orders";
 import {AMMO_TYPES,SHELL_INTERVAL,constructionWork,fireBudget,marchPaces,marchSlots,replenish,type GunEvent} from "@/sim/attrition";
 import {advanceDirective,applyEncirclement,decoyVisibleTo,frontAssignments,isDetected,updateContacts,type FrontDirective,type FrontMode,type LastSeenContact,type DecoyContact} from "@/sim/warfare";
 import {frontPathFrame,frontPathLength,frontPathPoints,nearestFrontFraction,simplifyFrontPath,type FrontPoint} from "@/sim/front-path";
@@ -412,7 +413,7 @@ export default function Home(){
           const assignments=frontAssignments(moved,nextUnits,citiesRef.current,scenario);
           for(const assignment of assignments){
             const unit=nextUnits.find(u=>u.id===assignment.unitId);
-            if(!unit||unit.order?.type==="retreat"||unit.order?.manual||unit.order?.marchId||unit.organization<16||unit.strength<10)continue;
+            if(!unit||!canAutoAssignFront(unit))continue;
             const objective={x:assignment.x,y:assignment.y};
             const targetEnemies=nextUnits.filter(u=>u.side!==unit.side&&u.strength>5);
             const range=unit.kind==="heavy_artillery"?820:unit.kind==="artillery"?540:unit.kind==="mortar"?mortarMaxRange(scenario,unit):0;
