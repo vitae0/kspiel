@@ -1,0 +1,31 @@
+name: Verify navigation and manual orders
+
+on:
+  push:
+    branches:
+      - fix/hostile-routes-player-order-priority-20261016
+  pull_request:
+    paths:
+      - 'src/sim/navigation.ts'
+      - 'src/sim/orders.ts'
+      - 'src/sim/simulation.ts'
+      - 'src/app/page.tsx'
+      - 'scripts/smoke-navigation-orders.cjs'
+      - '.github/workflows/navigation-orders.yml'
+
+jobs:
+  navigation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Navigation and priority regression tests
+        run: node scripts/smoke-navigation-orders.cjs
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Production build
+        run: npm run build
