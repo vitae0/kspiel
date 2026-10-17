@@ -21,6 +21,7 @@ const {generateScenario}=require("../src/sim/game.ts");
 const {GameMinimap}=require("../src/app/components/game-minimap.tsx");
 const {MapUnitLayer}=require("../src/app/components/map-unit-layer.tsx");
 const {GameStatusbar}=require("../src/app/components/game-statusbar.tsx");
+const {LeftSidebar}=require("../src/app/components/left-sidebar.tsx");
 const {GameSetup}=require("../src/app/components/game-setup.tsx");
 const scenario=generateScenario(1024,"frontier");
 const units=scenario.formations.slice(0,3);
@@ -56,4 +57,36 @@ const maps=el(GameSetup,{...shared,setupStage:"maps"});
 assert.match(maps,/GAME MODES/);
 assert.match(maps,/MAP SELECTION/);
 assert.match(maps,/DEPLOY TO THEATER/);
+
+// Selecting one unit focuses its army group without selecting the other units.
+const blueRoster=scenario.formations.filter(unit=>unit.side==="blue").slice(0,2);
+assert.equal(blueRoster.length,2);
+const a={...blueRoster[0],name:"Focused unit sentinel",groupId:"blue-army-1",order:{type:"move",manual:true}};
+const b={...blueRoster[1],name:"Other group sentinel",groupId:"blue-army-2",order:{type:"defend"}};
+const armyGroups=[{id:"blue-army-1",name:"1st Army",side:"blue",hotkey:1},
+  {id:"blue-army-2",name:"2nd Army",side:"blue",hotkey:2}];
+const sidebarProps={
+ mobilePanel:"none",setMobilePanel:setter,armyGroups,blue:[a,b],selected:[a.id],selectGroup:setter,
+ unitSymbols:false,setUnitSymbols:setter,pendingMassAttack:false,setPendingMassAttack:setter,
+ setMassTargets:setter,setPendingOrder:setter,setPendingPlan:setter,massTargets:[],launchGroupAttack:setter,
+ frontDirectives:[],playerSide:"blue",units:[a,b],changeFrontMode:setter,
+ attackPlans:[],setSelected:setter,executePlan:setter,cancelPlan:setter,
+ openWorld:null,pendingStrategicBuild:null,setPendingStrategicBuild:setter,setStrategicBuildAnchor:setter,
+ setPendingBuild:setter,setConstructionAnchor:setter,localSides:new Set(["blue"]),
+ constructionProjects:[],isMobile:false,IRREGULAR_TRAITS:{},onRecruit:setter
+};
+const focused=el(LeftSidebar,sidebarProps);
+assert.match(focused,/SELECTED COMMAND/);
+assert.match(focused,/1 DIRECT/);
+assert.match(focused,/Focused unit sentinel/);
+assert(!focused.includes("Other group sentinel"),"other army's units must stay out of focused roster");
+assert.match(focused,/aria-pressed="true"/);
+const second=el(LeftSidebar,{...sidebarProps,selected:[b.id]});
+assert.match(second,/Other group sentinel/);
+assert(!second.includes("Focused unit sentinel"),"focused roster must follow selected unit");
+const unfocused=el(LeftSidebar,{...sidebarProps,selected:[]});
+assert.match(unfocused,/Focused unit sentinel/);
+assert.match(unfocused,/Other group sentinel/);
+console.log("PASS sidebar army focus and manually commanded formation status");
+
 console.log("PASS modular UI SSR: mode selection, maps, minimap, fog-gated unit counters, footer");
