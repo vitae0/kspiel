@@ -1063,7 +1063,7 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 .menu-room-empty{padding:15px 12px;border:1px dashed #b29d70;color:#d3c7aa;line-height:1.55;font-size:10px}
 
 
-/* Continuous horizontal browsing replaces paginated theater cards.
+/* Continuous horizontal browsing: do not snap to map cards when scrolling stops.
  * Only this strip scrolls. The menu itself remains fixed to the viewport. */
 .setup-shell .theater-list{min-width:0;min-height:0;overflow:hidden}
 .setup-shell .theater-picker.theater-carousel{
@@ -1083,7 +1083,7 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
   margin:0;
   overflow-x:auto;
   overflow-y:hidden;
-  scroll-snap-type:x proximity;
+  scroll-snap-type:none;
   scroll-padding-inline:2px;
   overscroll-behavior-x:contain;
   scrollbar-width:thin;
@@ -1105,7 +1105,7 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
   min-width:0;
   height:100%;
   min-height:0;
-  scroll-snap-align:start;
+  scroll-snap-align:none;
   overflow:hidden;
 }
 .setup-shell .theater-picker.theater-carousel.is-dragging .theater-option{
@@ -1126,7 +1126,7 @@ button{font:inherit;color:inherit}button:focus-visible{outline:1px solid var(--a
 @media(max-width:900px){
   .setup-shell .theater-picker.theater-carousel{
     display:flex;grid-template-columns:none;
-    scroll-snap-type:x proximity;
+    scroll-snap-type:none;
     gap:9px;
   }
   .setup-shell .theater-picker.theater-carousel .theater-option{
