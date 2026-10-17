@@ -36,8 +36,11 @@ for(const id of ids){
     }
     for(const unit of scenario.formations){
       assert(isLand(scenario,unit.x,unit.y),id+": unit at sea "+unit.name);
-      const origin=terrainAt(scenario,unit.x,unit.y).objective;
-      assert(origin&&scenario.cities.some(c=>c.name===origin&&c.owner===unit.side),id+": spawn without owned supply "+unit.name);
+      // Deployments are intentionally outside urban cores (objective radius 70).
+      // Validate friendly supply proximity, not whether the unit spawned in a city.
+      const hasFriendlySupplyCity=scenario.cities.some(c=>c.owner===unit.side&&Math.hypot(c.x-unit.x,c.y-unit.y)<=515);
+      assert(hasFriendlySupplyCity,id+": spawn without owned supply "+unit.name);
+      assert(!["water","highmountain","mountain"].includes(terrainAt(scenario,unit.x,unit.y).terrain),id+": impassable spawn "+unit.name);
       assert(unit.softAttack>0&&unit.speed>0&&unit.manpower>0,id+": uninitialized unit "+unit.name);
       assert(Number.isFinite(unit.x+unit.y+unit.softAttack),id+": nonfinite unit");
     }
