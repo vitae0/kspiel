@@ -756,14 +756,15 @@ export default function Home(){
       }
     }
     commitUnits(prev=>prev.map(u=>{
-      const target=targets.get(u.id);if(!target)return u;
+      // Creating a group front must not cancel a player-issued order in progress.
+       const target=targets.get(u.id);if(!target||!canAutoAssignFront(u))return u;
       const route=movementRoutePlan(activeScenario,cities,u,{x:u.x,y:u.y},target,emplacementsRef.current,openWorldRef.current);
       const [first,...rest]=route;
       return{...u,formationShape:"line",order:first
         ?{type:"move",targetX:first.x,targetY:first.y,waypoints:rest}
         :{type:"move",targetX:target.x,targetY:target.y}};
     }));
-    const engineers=chosen.filter(u=>u.kind==="engineer")
+    const engineers=chosen.filter(u=>u.kind==="engineer"&&canAutoAssignFront(u))
       .sort((a,b)=>nearestFrontFraction(points,a)-nearestFrontFraction(points,b));
     const actor=multiplayerRef.current?.playerToken.slice(0,8)??"local",projects:ConstructionProject[]=[];
     engineers.forEach((u,i)=>{
